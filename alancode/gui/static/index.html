@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alan Code</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Top bar -->
+    <div class="topbar">
+        <div class="topbar-title">
+            Alan Code
+            <span id="session-label" style="font-weight:normal; color: var(--text-dim); font-size: 12px; margin-left: 8px;"></span>
+        </div>
+        <div class="panel-toggles">
+            <label><input type="checkbox" id="toggle-chat" checked> Chat</label>
+            <label><input type="checkbox" id="toggle-llm"> LLM Perspective</label>
+            <label><input type="checkbox" id="toggle-git-tree"> Git Tree</label>
+        </div>
+        <div class="topbar-status">
+            <span class="dot dot-disconnected" id="status-dot"></span>
+            <span id="status-text">Connecting... (may take a while)</span>
+        </div>
+    </div>
+
+    <!-- Main panels -->
+    <div class="main" id="main">
+        <!-- Chat panel -->
+        <div class="panel" id="panel-chat" style="flex: 1">
+            <div class="panel-header">Alan Chat</div>
+            <div class="chat-messages" id="chat-messages"></div>
+
+            <!-- Ask overlay (for permission / AskUserQuestion prompts) -->
+            <div class="ask-overlay" id="ask-overlay">
+                <div class="ask-question" id="ask-question"></div>
+                <div class="ask-options" id="ask-options"></div>
+            </div>
+
+            <!-- Input area -->
+            <div class="chat-input-area">
+                <textarea class="chat-input" id="chat-input"
+                    placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+                    rows="1" disabled></textarea>
+                <button class="btn btn-send" id="btn-send" disabled>Send</button>
+                <button class="btn btn-abort" id="btn-abort" style="display:none">Stop</button>
+            </div>
+        </div>
+
+        <!-- LLM Perspective panel (hidden by default) -->
+        <div class="panel" id="panel-llm" style="flex: 1; display: none">
+            <div class="panel-header">LLM Perspective</div>
+            <div class="llm-messages" id="llm-messages">
+                <div style="color: var(--text-dim); padding: 20px; text-align: center;">
+                    Waiting for first API call...
+                </div>
+            </div>
+        </div>
+        <!-- Git Tree panel (hidden by default) -->
+        <div class="panel" id="panel-git-tree" style="flex: 1; display: none">
+            <div class="panel-header">Git Tree</div>
+            <div class="git-tree-container" id="git-tree-container">
+                <div class="git-tree-legend" id="git-tree-legend">
+                    <div class="gt-leg-title">Legend</div>
+                    <div><span class="gt-swatch gt-swatch-blue-fill"></span>Alan commit</div>
+                    <div><span class="gt-swatch gt-swatch-grey-fill"></span>External commit</div>
+                    <div><span class="gt-swatch gt-swatch-white-dashed"></span>Uncommitted</div>
+                    <div><span class="gt-swatch gt-swatch-yellow-ring"></span>Compaction / session root</div>
+                    <div><span class="gt-swatch gt-swatch-white-ring"></span>Agent position</div>
+                    <div><span class="gt-swatch gt-swatch-pink-ring"></span>Selected node</div>
+                    <div><span class="gt-swatch gt-swatch-blue-line"></span>Conversation path</div>
+                    <div><span class="gt-swatch gt-swatch-yellow-line"></span>Post-compaction path</div>
+                    <div class="gt-leg-ctl">
+                        <label for="gt-curvature">Curvature</label>
+                        <input type="range" id="gt-curvature"
+                               min="0.2" max="2.0" step="0.05" value="1.0">
+                    </div>
+                </div>
+                <svg id="git-tree-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+                <div id="git-tree-empty" style="color: var(--text-dim); padding: 20px; text-align: center;">
+                    Waiting for git tree data...
+                </div>
+            </div>
+            <div class="git-tree-actions" id="git-tree-actions">
+                <button class="btn btn-gt" id="btn-move-here" disabled>Move to commit</button>
+                <button class="btn btn-gt" id="btn-revert-to" disabled>Revert repo to</button>
+                <button class="btn btn-gt" id="btn-conv-revert-to" disabled>Revert conv. to</button>
+                <button class="btn btn-gt" id="btn-all-revert-to" disabled>Revert all to</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/git_tree.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
