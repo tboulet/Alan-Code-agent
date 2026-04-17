@@ -82,8 +82,8 @@ Highlights:
 
 | Key | Default | What it does |
 |---|---|---|
-| `provider` | `anthropic` | `anthropic`, `litellm`, or `scripted` |
-| `model` | `claude-sonnet-4-6` | Model identifier |
+| `provider` | `litellm` | `litellm`, `anthropic`, or `scripted` |
+| `model` | `anthropic/claude-sonnet-4-6` | Model identifier (LiteLLM format) |
 | `permission_mode` | `edit` | `yolo`, `edit`, `safe` |
 | `memory` | `off` | `off`, `on`, `intensive` |
 | `max_iterations_per_turn` | `None` | Cap API calls per user message |

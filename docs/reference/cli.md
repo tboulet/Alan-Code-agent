@@ -12,8 +12,8 @@ Run `alancode --help` for a quick version of this table.
 
 | Flag | Description | Default |
 |---|---|---|
-| `--provider` | LLM provider: `anthropic`, `litellm`, or `scripted` (testing). | `anthropic` |
-| `--model` | Model name or LiteLLM-style `provider/model` string. | `claude-sonnet-4-6` |
+| `--provider` | LLM provider: `litellm`, `anthropic`, or `scripted` (testing). | `litellm` |
+| `--model` | Model name (LiteLLM format: `provider/model`). | `anthropic/claude-sonnet-4-6` |
 | `--api-key` | API key. If omitted, read from the provider's usual environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, …). | (env) |
 | `--base-url` | Override the API base URL. Set this for local OpenAI-compatible servers, e.g. `http://localhost:8000/v1`. See [`local-models.md`](local-models.md). | *(provider default)* |
 

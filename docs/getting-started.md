@@ -15,7 +15,7 @@ Requires Python 3.11+. One install gives you the CLI, the browser GUI, the Pytho
 Pick one — whichever matches the provider you want to use.
 
 ```bash
-# Anthropic (default)
+# Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # OpenRouter — access to OpenAI, Google, Mistral, Meta, etc. via one key

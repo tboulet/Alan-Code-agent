@@ -6,8 +6,8 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 
 | Key | Type | Default | Area |
 |---|---|---|---|
-| `provider` | string | `anthropic` | Provider |
-| `model` | string | `claude-sonnet-4-6` | Provider |
+| `provider` | string | `litellm` | Provider |
+| `model` | string | `anthropic/claude-sonnet-4-6` | Provider |
 | `api_key` | string \| null | `null` (from env) | Provider — ephemeral, not persisted |
 | `base_url` | string \| null | `null` | Provider |
 | `tool_call_format` | string \| null | `null` | Provider — `hermes`, `glm`, `alan` |

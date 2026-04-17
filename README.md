@@ -42,14 +42,17 @@ Set your provider's API key in the environment before running. Common ones:
 | Google Gemini | `GEMINI_API_KEY` |
 
 ```bash
-# Default: Anthropic provider with claude-sonnet-4-6
+# Default: LiteLLM provider with anthropic/claude-sonnet-4-6
 alancode
 
+# Direct Anthropic API
+alancode --provider anthropic --model claude-sonnet-4-6
+
 # Any LiteLLM model (OpenRouter, OpenAI, Gemini, Ollama, ...)
-alancode --provider litellm --model openrouter/google/gemini-2.5-pro
+alancode --model openrouter/google/gemini-2.5-pro
 
 # Local model on a vLLM / SGLang server (on port 8000 here)
-alancode --provider litellm --model openai/your-model --base-url http://localhost:8000/v1
+alancode --model openai/your-model --base-url http://localhost:8000/v1
 
 # Browser GUI
 alancode --gui
@@ -93,8 +96,8 @@ Other commands in [`docs/reference/slash-commands.md`](docs/reference/slash-comm
 
 ```bash
 alancode \
-    --provider [litellm/anthropic] \    # anthropic (Anthropic's API, default) or litellm 
-    --model [model_name] \              # e.g. claude-sonnet-4-6
+    --provider [litellm/anthropic] \    # litellm (default) or anthropic (direct Anthropic API)
+    --model [model_name] \              # e.g. anthropic/claude-sonnet-4-6
     --api-key [key] \                   # or set environment variable
     --permission-mode [safe/edit/yolo] \  
     [--gui] \                           # to launch in GUI mode
@@ -198,8 +201,8 @@ Full example: [`examples/example_3_streaming_agent.py`](examples/example_3_strea
 | Async agentic loop | Streaming responses, thinking blocks, concurrent tool use | default |
 | Built-in tools | Bash, File I/O, Grep/Glob, WebFetch, AskUserQuestion, SkillTool, GitCommit | default |
 | Context compaction | Summarizes conversation when context fills up | auto, or `/compact` |
-| Anthropic provider | Direct Anthropic API | `--provider anthropic` (default) |
-| LiteLLM provider | 100+ providers (OpenAI, OpenRouter, Gemini, …) | `--provider litellm --model <name>` |
+| LiteLLM provider | 100+ providers including Anthropic, OpenAI, OpenRouter, Gemini, … | default |
+| Anthropic provider | Direct Anthropic API | `--provider anthropic` |
 | Local models | vLLM / SGLang / Ollama, with text-based tool-call fallback for models without native tool use | [docs](docs/reference/local-models.md) |
 | Hooks | Pre/post-tool shell hooks for guardrails or logging | `.alan/settings.json` |
 | Skills | User-defined prompt + tool filter, discoverable at runtime | `/skill list`, `/skill create` |

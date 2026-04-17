@@ -294,7 +294,7 @@ def _first_run_setup(cwd: str) -> None:
     print("=" * 60)
     print()
     print("  Default provider and model of current project:")
-    print("    anthropic / claude-sonnet-4-6")
+    print("    litellm / anthropic/claude-sonnet-4-6")
     print()
 
     # Detect API keys
@@ -325,9 +325,9 @@ def _detect_api_keys() -> list[dict]:
 
     if os.environ.get("ANTHROPIC_API_KEY"):
         detections.append({
-            "label": "ANTHROPIC_API_KEY detected (recommended)",
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-6",
+            "label": "ANTHROPIC_API_KEY detected",
+            "provider": "litellm",
+            "model": "anthropic/claude-sonnet-4-6",
         })
 
     if os.environ.get("OPENROUTER_API_KEY"):

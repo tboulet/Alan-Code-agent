@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_DEFAULTS: dict[str, Any] = {
     # Provider
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-6",
+    "provider": "litellm",
+    "model": "anthropic/claude-sonnet-4-6",
     "api_key": None,  # None = read from env var
     "base_url": None,  # None = use provider default. Set for local servers (e.g., http://localhost:8000/v1)
     "tool_call_format": None,  # Text-based tool call format: "hermes", "glm", "alan", or None (native)

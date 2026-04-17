@@ -12,7 +12,7 @@ from alancode import AlanCodeAgent
 AlanCodeAgent(
     *,
     cwd: str | None = None,
-    provider: str | LLMProvider = "anthropic",
+    provider: str | LLMProvider = "litellm",  # or "anthropic"
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
