@@ -10,9 +10,6 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `model` | string | `claude-sonnet-4-6` | Provider |
 | `api_key` | string \| null | `null` (from env) | Provider — ephemeral, not persisted |
 | `base_url` | string \| null | `null` | Provider |
-| `force_supports_tools` | bool \| null | `null` | Provider capability override |
-| `force_supports_streaming` | bool \| null | `null` | Provider capability override |
-| `force_supports_vision` | bool \| null | `null` | Provider capability override |
 | `tool_call_format` | string \| null | `null` | Provider — `hermes`, `glm`, `alan` |
 | `permission_mode` | string | `edit` | Session |
 | `max_iterations_per_turn` | int \| null | `null` (unlimited) | Session |
@@ -63,11 +60,8 @@ If `null`, read from the provider's environment variable at init time. **Never p
 ### `base_url`
 Override the API endpoint. Set for local servers (`http://localhost:8000/v1`).
 
-### `force_supports_{tools,streaming,vision}`
-Override LiteLLM's auto-detection. `null` means auto-detect. Use when the registry is wrong (fine-tunes, fresh models). Forcing `true` on a model that doesn't actually support the feature causes API errors.
-
 ### `tool_call_format`
-Text-based tool-call protocol for models without native function calling. Options: `"hermes"`, `"glm"`, `"alan"`. `null` means use native function calling.
+Text-based tool-call protocol for models without native function calling. Options: `"hermes"`, `"glm"`, `"alan"`. When set, tool definitions are injected into the system prompt instead of being passed as API tool schemas, and the model's text output is parsed for tool calls. `null` (default) means use the model's native function calling.
 
 ---
 

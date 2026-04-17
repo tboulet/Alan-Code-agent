@@ -63,7 +63,7 @@ Three ways:
 > /settings permission_mode=yolo
 ```
 
-Updates the session's effective setting AND persists to the session snapshot. Takes effect immediately. Provider-related changes (`provider`, `model`, `api_key`, `base_url`, `force_supports_*`) trigger provider recreation.
+Updates the session's effective setting AND persists to the session snapshot. Takes effect immediately. Provider-related changes (`provider`, `model`, `api_key`, `base_url`) trigger provider recreation.
 
 **Edit the project file**:
 ```

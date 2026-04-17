@@ -393,7 +393,5 @@ class ScriptedProvider(LLMProvider):
         return ModelInfo(
             context_window=200_000,
             max_output_tokens=8_192,
-            supports_tool_use=True,
-            supports_streaming=True,
         )
 

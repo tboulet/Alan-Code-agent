@@ -106,9 +106,6 @@ class ModelInfo:
     context_window: int = 200_000
     max_output_tokens: int = 8_192
     supports_thinking: bool = False
-    supports_tool_use: bool = True
-    supports_streaming: bool = True
-    supports_vision: bool = False
 
 
 @dataclass

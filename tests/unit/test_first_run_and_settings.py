@@ -45,9 +45,6 @@ class TestProviderSettings:
     def test_api_key_triggers_recreation(self):
         assert "api_key" in PROVIDER_SETTINGS
 
-    def test_force_supports_tools_triggers_recreation(self):
-        assert "force_supports_tools" in PROVIDER_SETTINGS
-
     def test_memory_does_not_trigger_recreation(self):
         assert "memory" not in PROVIDER_SETTINGS
 
@@ -81,17 +78,6 @@ class TestUpdateSessionSettingRejectsRestartRequired:
         error = agent.update_session_setting("tool_call_format", "hermes")
         assert error is None
         assert agent._settings["tool_call_format"] == "hermes"
-
-    def test_force_supports_tools_recreates_provider(self):
-        from alancode.agent import AlanCodeAgent
-        from alancode.providers.scripted_provider import ScriptedProvider
-
-        provider = ScriptedProvider()
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test_fst", permission_mode="yolo")
-
-        error = agent.update_session_setting("force_supports_tools", True)
-        assert error is None
-        assert agent._settings["force_supports_tools"] is True
 
     def test_allow_model_change(self):
         from alancode.agent import AlanCodeAgent

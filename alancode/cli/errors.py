@@ -4,32 +4,33 @@ from __future__ import annotations
 
 
 def classify_error(error: Exception) -> tuple[str, str | None]:
-    """Classify an error into a category and return (message, hint).
+    """Return (message, optional_hint) for display.
 
-    Returns:
-        A tuple of (display_message, optional_hint).
+    The message always includes the original error text. The hint is an
+    optional suggestion based on pattern matching — never a replacement
+    for the real error.
     """
     msg = str(error)
     msg_lower = msg.lower()
 
+    hint = None
+
     if "auth" in msg_lower or "api key" in msg_lower or "401" in msg:
-        return "Authentication error: Check your API key and provider settings.", None
+        hint = "Check your API key and provider settings."
 
-    if "rate limit" in msg_lower or "429" in msg:
-        return "Rate limited. Wait a moment and try again.", None
+    elif "rate limit" in msg_lower or "429" in msg:
+        hint = "Wait a moment and try again."
 
-    if "connection" in msg_lower or "timeout" in msg_lower or "network" in msg_lower:
-        return f"Network error: {msg}", "Check your internet connection."
+    elif "connection" in msg_lower or "timeout" in msg_lower or "network" in msg_lower:
+        hint = "Check your internet connection."
 
-    if "tool calling" in msg_lower or "function calling" in msg_lower:
-        return (
-            f"Model error: {msg}",
-            "If you believe this model supports tools, use "
-            "'/settings-project force_supports_tools=true'. "
-            "For text-based tool calling, use '/settings-project tool_call_format=hermes' or another format.",
+    elif "tool calling" in msg_lower or "function calling" in msg_lower:
+        hint = (
+            "For models without native tool calling, use "
+            "'/settings-project tool_call_format=hermes' to enable text-based tool calling."
         )
 
-    if "context" in msg_lower and ("long" in msg_lower or "exceeded" in msg_lower):
-        return "Context too long. Try /compact or /clear.", None
+    elif "context" in msg_lower and ("long" in msg_lower or "exceeded" in msg_lower):
+        hint = "Try /compact or /clear."
 
-    return f"Error: {msg}", None
+    return f"Error: {msg}", hint

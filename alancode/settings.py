@@ -28,10 +28,6 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "model": "claude-sonnet-4-6",
     "api_key": None,  # None = read from env var
     "base_url": None,  # None = use provider default. Set for local servers (e.g., http://localhost:8000/v1)
-    # Provider capability overrides
-    "force_supports_tools": None,
-    "force_supports_streaming": None,
-    "force_supports_vision": None,
     "tool_call_format": None,  # Text-based tool call format: "hermes", "glm", "alan", or None (native)
     # Session
     "permission_mode": "edit",  # 'yolo', 'edit', 'safe'
@@ -184,9 +180,6 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "provider": _one_of("litellm", "anthropic", "scripted"),
     "model": _is_str,
     "base_url": _is_str,
-    "force_supports_tools": _is_bool,
-    "force_supports_streaming": _is_bool,
-    "force_supports_vision": _is_bool,
     "tool_call_format": _one_of("hermes", "glm", "alan"),
     "permission_mode": _one_of("yolo", "edit", "safe"),
     "max_iterations_per_turn": _is_pos_int_or_none,
@@ -240,7 +233,4 @@ PROVIDER_SETTINGS: set[str] = {
     "model",
     "api_key",
     "base_url",
-    "force_supports_tools",
-    "force_supports_streaming",
-    "force_supports_vision",
 }

@@ -115,9 +115,6 @@ def _resolve_provider(
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
-    force_supports_tools: bool | None = None,
-    force_supports_streaming: bool | None = None,
-    force_supports_vision: bool | None = None,
     **kwargs: Any,
 ) -> LLMProvider:
     """Resolve a provider string or instance into an LLMProvider.
@@ -149,9 +146,6 @@ def _resolve_provider(
             model=model,
             api_key=api_key,
             api_base=base_url,
-            force_supports_tools=force_supports_tools,
-            force_supports_streaming=force_supports_streaming,
-            force_supports_vision=force_supports_vision,
             **kwargs,
         )
 
@@ -178,9 +172,6 @@ def _create_provider_from_settings(settings: dict[str, Any], **extra) -> LLMProv
         model=settings.get("model"),
         api_key=settings.get("api_key"),
         base_url=settings.get("base_url"),
-        force_supports_tools=settings.get("force_supports_tools"),
-        force_supports_streaming=settings.get("force_supports_streaming"),
-        force_supports_vision=settings.get("force_supports_vision"),
         **extra,
     )
 
@@ -236,9 +227,6 @@ class AlanCodeAgent:
         max_output_tokens: int | None = None,
         memory: str | None = None,
         tool_call_format: str | None = None,
-        force_supports_tools: bool | None = None,
-        force_supports_streaming: bool | None = None,
-        force_supports_vision: bool | None = None,
         session_id: str | None = None,
         ask_callback: Callable | None = None,
         verbose: bool = False,
@@ -274,9 +262,6 @@ class AlanCodeAgent:
             "max_output_tokens": max_output_tokens,
             "memory": memory,
             "tool_call_format": tool_call_format,
-            "force_supports_tools": force_supports_tools,
-            "force_supports_streaming": force_supports_streaming,
-            "force_supports_vision": force_supports_vision,
         }
         for k, v in constructor_overrides.items():
             if v is not None:
@@ -487,7 +472,7 @@ class AlanCodeAgent:
             # --- text-based tool calling instructions ---
             tool_call_format = self._settings.get("tool_call_format")
             model_info = self._provider.get_model_info(self._model)
-            if tool_call_format and not model_info.supports_tool_use:
+            if tool_call_format:
                 tool_schemas = [
                     {
                         "type": "function",

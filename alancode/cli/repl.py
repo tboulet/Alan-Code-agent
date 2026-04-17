@@ -620,8 +620,8 @@ def _handle_settings(agent: AlanCodeAgent, console, arg: str) -> None:
 
     With no argument, prints the effective settings dict as JSON. With
     ``key=value``, validates and applies the change. Provider-related
-    keys (``provider``, ``model``, ``api_key``, ``base_url``,
-    ``force_supports_*``) trigger provider recreation.
+    keys (``provider``, ``model``, ``api_key``, ``base_url``)
+    trigger provider recreation.
     """
     if not arg:
         formatted = json.dumps(agent._settings, indent=2, default=str)

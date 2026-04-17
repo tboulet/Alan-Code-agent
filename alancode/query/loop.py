@@ -317,7 +317,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # Don't pass tool schemas to the provider when using text-based
         # tool calling — tools are communicated via the system prompt instead.
-        if params.settings.get("tool_call_format") and not model_info.supports_tool_use:
+        if params.settings.get("tool_call_format"):
             tool_schemas = []
         else:
             tool_schemas = [
@@ -479,7 +479,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         tool_call_format = params.settings.get("tool_call_format")
         if (
             tool_call_format
-            and not model_info.supports_tool_use
             and not tool_use_blocks
         ):
             full_text = "".join(

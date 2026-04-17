@@ -30,32 +30,7 @@ logger = logging.getLogger(__name__)
 
 # ── Model capabilities lookup ─────────────────────────────────────────────────
 
-MODEL_INFO: dict[str, ModelInfo] = {
-    "claude-opus-4-6": ModelInfo(
-        context_window=200_000,
-        max_output_tokens=64_000,
-        supports_thinking=True,
-        supports_vision=True,
-    ),
-    "claude-sonnet-4-6": ModelInfo(
-        context_window=200_000,
-        max_output_tokens=32_000,
-        supports_thinking=True,
-        supports_vision=True,
-    ),
-    "claude-sonnet-4-5": ModelInfo(
-        context_window=200_000,
-        max_output_tokens=16_384,
-        supports_thinking=True,
-        supports_vision=True,
-    ),
-    "claude-haiku-4-5": ModelInfo(
-        context_window=200_000,
-        max_output_tokens=8_192,
-        supports_thinking=False,
-        supports_vision=True,
-    ),
-}
+from alancode.providers.anthropic_models import lookup_anthropic_model
 
 
 class AnthropicProvider(LLMProvider):
@@ -92,15 +67,7 @@ class AnthropicProvider(LLMProvider):
     # ── LLMProvider interface ──────────────────────────────────────────────────
 
     def get_model_info(self, model: str | None = None) -> ModelInfo:
-        m = model or self._model
-        # Exact match first
-        if m in MODEL_INFO:
-            return MODEL_INFO[m]
-        # Prefix match (e.g. "claude-sonnet-4-6-20260401")
-        for key, info in MODEL_INFO.items():
-            if m.startswith(key):
-                return info
-        return ModelInfo()  # safe defaults
+        return lookup_anthropic_model(model or self._model)
 
     async def stream(
         self,

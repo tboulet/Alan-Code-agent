@@ -102,36 +102,28 @@ class LiteLLMProvider(LLMProvider):
         api_base: str | None = None,
         context_window: int | None = None,
         max_output_tokens: int | None = None,
-        force_supports_tools: bool | None = None,
-        force_supports_streaming: bool | None = None,
-        force_supports_vision: bool | None = None,
         extra_kwargs: dict[str, Any] | None = None,
+        **kwargs: Any,
     ):
         self._model = model
         self._api_key = api_key
         self._api_base = api_base
         self._context_window_override = context_window
         self._max_output_override = max_output_tokens
-        self._force_supports_tools = force_supports_tools
-        self._force_supports_streaming = force_supports_streaming
-        self._force_supports_vision = force_supports_vision
         self._extra_kwargs = extra_kwargs or {}
 
     def get_model_info(self, model: str | None = None) -> ModelInfo:
         """Get model capabilities.
 
         Resolution order:
-        1. Constructor overrides (force_supports_*, context_window, max_output_tokens)
+        1. Constructor overrides (context_window, max_output_tokens)
         2. litellm model registry
         3. Our fallback known-models table
-        4. Conservative defaults (capabilities = False)
+        4. Safe defaults
         """
         m = model or self._model
         ctx = self._context_window_override
         max_out = self._max_output_override
-        supports_tools: bool | None = self._force_supports_tools
-        supports_streaming: bool | None = self._force_supports_streaming
-        supports_vision: bool | None = self._force_supports_vision
         supports_thinking = False
 
         # Try litellm's registry (covers hundreds of cloud models)
@@ -142,15 +134,7 @@ class LiteLLMProvider(LLMProvider):
                 ctx = info.get("max_input_tokens") or info.get("max_tokens")
             if max_out is None:
                 max_out = info.get("max_output_tokens")
-            if supports_tools is None:
-                supports_tools = info.get("supports_function_calling", False)
-            if supports_streaming is None:
-                supports_streaming = info.get("supports_streaming", True)
-            if supports_vision is None:
-                supports_vision = info.get("supports_vision", False)
-            supports_thinking = info.get("supports_thinking", False) or (
-                "claude" in m.lower() and "haiku" not in m.lower()
-            )
+            supports_thinking = info.get("supports_thinking", False)
         except Exception:
             logger.debug(f"Model '{m}' not found in litellm registry, trying server fallbacks")
 
@@ -169,9 +153,6 @@ class LiteLLMProvider(LLMProvider):
             context_window=ctx or 200_000,
             max_output_tokens=max_out or 8_192,
             supports_thinking=supports_thinking,
-            supports_tool_use=supports_tools if supports_tools is not None else False,
-            supports_streaming=supports_streaming if supports_streaming is not None else True,
-            supports_vision=supports_vision if supports_vision is not None else False,
         )
 
     def _query_server_context_window(self, model: str) -> int | None:
@@ -235,20 +216,6 @@ class LiteLLMProvider(LLMProvider):
         resolved_model = model or self._model
         info = self.get_model_info(resolved_model)
         resolved_max_tokens = max_tokens or info.max_output_tokens
-
-        # Check tool-calling support if tools are requested
-        if tools and not info.supports_tool_use:
-            raise RuntimeError(
-                f"Model '{resolved_model}' does not support tool calling "
-                f"(according to litellm's model registry).\n\n"
-                f"Options:\n"
-                f"  - Use a model that supports tool calling\n"
-                f"  - If you believe this model supports tools, set "
-                f"force_supports_tools=true in your project settings:\n"
-                f"    /settings-project force_supports_tools=true\n"
-                f"  - For models with text-based tool calling (e.g., GLM, Qwen), set:\n"
-                f"    /settings-project tool_call_format=hermes"
-            )
 
         # Build system message (litellm uses the messages array, not a separate system param)
         litellm_messages: list[dict[str, Any]] = []
