@@ -11,6 +11,7 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 
 from alancode.cli.display import (
@@ -56,10 +57,12 @@ class CLIUI(SessionUI):
 
     # ── Input ─────────────────────────────────────────────────────────────
 
+    _INPUT_STYLE = PTStyle.from_dict({"": "ansibrightblack"})
+
     async def get_input(self, prompt: str = "\n> ") -> str:
         loop = asyncio.get_running_loop()
         text = await loop.run_in_executor(
-            None, lambda: self._session.prompt(prompt)
+            None, lambda: self._session.prompt(prompt, style=self._INPUT_STYLE)
         )
         return text.strip()
 
@@ -94,6 +97,10 @@ class CLIUI(SessionUI):
         self._console.print(" ".join(parts) + "[/dim]")
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
+
+    def on_agent_start(self) -> None:
+        # Blank line between user input and assistant response for readability.
+        self._console.print()
 
     def reset_stream_state(self, assume_thinking: bool = False) -> None:
         _reset_stream_state(assume_thinking=assume_thinking)

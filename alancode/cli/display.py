@@ -491,7 +491,7 @@ def display_replay_message(msg: Message, console: Console) -> None:
             content = msg.content
             if content.startswith("<system-reminder>"):
                 return
-            console.print(f"\n[bold]>[/bold] {content}")
+            console.print(f"\n[dim]> {content}[/dim]")
             return
         for block in msg.content:
             if isinstance(block, ToolResultBlock):
