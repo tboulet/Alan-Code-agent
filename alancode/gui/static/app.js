@@ -168,12 +168,18 @@ function renderAssistantDelta(data) {
 }
 
 function renderAssistantFinal(data) {
-    // Final assistant message — render tool calls (text was already streamed)
+    // Final assistant message — render text (if not already streamed) and tool calls.
+    // During live streaming, currentStreamEl is set by renderAssistantDelta and text
+    // is already on screen. On resume/replay or for synthetic messages (errors),
+    // no deltas preceded this event so we must render text blocks here.
+    const wasStreamed = currentStreamEl !== null;
     currentStreamEl = null;
     if (!data.content) return;
 
     for (const block of data.content) {
-        if (block.type === "tool_use") {
+        if (block.type === "text" && block.text && !wasStreamed) {
+            appendMsg("msg-assistant", block.text);
+        } else if (block.type === "tool_use") {
             renderToolCall(block);
         }
     }
