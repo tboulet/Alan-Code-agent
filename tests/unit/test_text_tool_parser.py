@@ -70,7 +70,7 @@ class TestGLMFormat:
         assert result.error is None
 
     def test_real_glm_output(self):
-        """Actual GLM-4.7-FP8 output from our JZ test."""
+        """Actual GLM-4.7-FP8 output sample."""
         text = (
             "The user wants me to list the files in /tmp using the bash tool. "
             "This is a straightforward request.</think>"

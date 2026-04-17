@@ -63,19 +63,6 @@ def _quiet_litellm() -> None:
 
 _quiet_litellm()
 
-_CACHE_MARKER = {"type": "ephemeral"}
-
-
-def _is_anthropic_model(model: str) -> bool:
-    """Check if a model string routes to Anthropic's API via LiteLLM."""
-    m = model.lower()
-    return (
-        m.startswith("anthropic/")
-        or m.startswith("openrouter/anthropic/")
-        or "claude" in m
-    )
-
-
 # Known context windows for common models (litellm handles most, this is fallback)
 _KNOWN_CONTEXT_WINDOWS: dict[str, int] = {
     "claude-sonnet-4": 200_000,
@@ -228,33 +215,14 @@ class LiteLLMProvider(LLMProvider):
         resolved_model = model or self._model
         info = self.get_model_info(resolved_model)
         resolved_max_tokens = max_tokens or info.max_output_tokens
-        static_boundary = kwargs.pop("system_static_boundary", None)
-        use_caching = static_boundary is not None and _is_anthropic_model(resolved_model)
+        kwargs.pop("system_static_boundary", None)  # consumed by Anthropic provider, not needed here
 
         # Build system message (litellm uses the messages array, not a separate system param)
         litellm_messages: list[dict[str, Any]] = []
         if system:
-            if use_caching:
-                # Structured content blocks with cache_control for Anthropic
-                content_blocks: list[dict[str, Any]] = []
-                for i, s in enumerate(system):
-                    if not s:
-                        continue
-                    block: dict[str, Any] = {"type": "text", "text": s}
-                    # BP2: last static section
-                    if i == static_boundary - 1 and static_boundary > 0:
-                        block["cache_control"] = _CACHE_MARKER
-                    content_blocks.append(block)
-                # BP3: last system section (if different from BP2)
-                if content_blocks:
-                    last_idx = len([s for s in system if s]) - 1
-                    if static_boundary <= 0 or last_idx != static_boundary - 1:
-                        content_blocks[-1]["cache_control"] = _CACHE_MARKER
-                litellm_messages.append({"role": "system", "content": content_blocks})
-            else:
-                system_text = "\n\n".join(s for s in system if s)
-                if system_text:
-                    litellm_messages.append({"role": "system", "content": system_text})
+            system_text = "\n\n".join(s for s in system if s)
+            if system_text:
+                litellm_messages.append({"role": "system", "content": system_text})
 
         # Messages arrive in OpenAI format from the query loop — pass through.
         litellm_messages.extend(messages)
@@ -274,17 +242,6 @@ class LiteLLMProvider(LLMProvider):
                 for t in tools
             ]
 
-        # BP1: last tool definition + BP4: last assistant message
-        if use_caching:
-            if litellm_tools:
-                litellm_tools[-1]["cache_control"] = _CACHE_MARKER
-            for msg in reversed(litellm_messages):
-                if msg.get("role") == "assistant":
-                    # For LiteLLM OpenAI format, cache_control on the message dict
-                    # is forwarded to Anthropic by LiteLLM
-                    msg["cache_control"] = _CACHE_MARKER
-                    break
-
         # Build completion kwargs
         completion_kwargs: dict[str, Any] = {
             "model": resolved_model,
@@ -293,6 +250,13 @@ class LiteLLMProvider(LLMProvider):
             "stream": True,
             # Request usage stats in the stream (arrives as a final chunk)
             "stream_options": {"include_usage": True},
+            # Prompt caching — LiteLLM applies cache_control markers for
+            # providers that support it (Anthropic, OpenRouter/Anthropic)
+            # and ignores them for providers that don't.
+            "cache_control_injection_points": [
+                {"location": "message", "role": "system"},
+                {"location": "message", "index": -1},
+            ],
             **self._extra_kwargs,
             **kwargs,
         }

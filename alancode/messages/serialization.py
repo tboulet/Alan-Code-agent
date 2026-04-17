@@ -2,7 +2,7 @@
 
 Two serialization targets:
 - **OpenAI format** (``messages_to_openai_dicts``) — the universal default.
-  Used by LiteLLM, JZ bridge, and any OpenAI-compatible provider.
+  Used by LiteLLM and any OpenAI-compatible provider.
 - **Anthropic format** (``message_to_anthropic_dict``) — used by AnthropicProvider.
 
 The query loop and compaction produce OpenAI-format dicts. Each provider
