@@ -32,6 +32,47 @@ logger = logging.getLogger(__name__)
 
 from alancode.providers.anthropic_models import lookup_anthropic_model
 
+_CACHE_MARKER = {"type": "ephemeral"}
+
+
+def _inject_cache_breakpoints(
+    system_blocks: list[dict[str, Any]],
+    api_tools: list[dict[str, Any]] | None,
+    messages: list[dict[str, Any]],
+    static_boundary: int,
+) -> None:
+    """Add ``cache_control`` markers for Anthropic prompt caching.
+
+    Uses up to 4 breakpoints (Anthropic's maximum):
+    1. Last tool definition — caches all tool schemas
+    2. Last static system section — caches tools + stable prompt
+    3. Last system section — caches tools + full system prompt
+    4. Last assistant message — caches entire conversation prefix
+    """
+    # BP1: last tool definition
+    if api_tools:
+        api_tools[-1]["cache_control"] = _CACHE_MARKER
+
+    # BP2: last static system section
+    if system_blocks and static_boundary > 0:
+        idx = min(static_boundary, len(system_blocks)) - 1
+        system_blocks[idx]["cache_control"] = _CACHE_MARKER
+
+    # BP3: last system section (dynamic end)
+    if system_blocks:
+        last = len(system_blocks) - 1
+        # Only add if different from BP2 (avoid wasting a breakpoint)
+        if static_boundary <= 0 or last != min(static_boundary, len(system_blocks)) - 1:
+            system_blocks[last]["cache_control"] = _CACHE_MARKER
+
+    # BP4: last assistant message's last content block
+    for msg in reversed(messages):
+        if msg.get("role") == "assistant":
+            content = msg.get("content")
+            if isinstance(content, list) and content:
+                content[-1]["cache_control"] = _CACHE_MARKER
+            break
+
 
 class AnthropicProvider(LLMProvider):
     """LLM provider using the official Anthropic Python SDK.
@@ -111,6 +152,13 @@ class AnthropicProvider(LLMProvider):
 
         # Translate OpenAI-format messages to Anthropic format
         anthropic_messages = _openai_to_anthropic_messages(messages)
+
+        # Prompt caching — place cache_control breakpoints.
+        boundary = kwargs.pop("system_static_boundary", None)
+        if boundary is not None:
+            _inject_cache_breakpoints(
+                system_blocks, api_tools, anthropic_messages, boundary
+            )
 
         # Base request params
         params: dict[str, Any] = {

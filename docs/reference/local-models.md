@@ -15,7 +15,7 @@ Alan Code works with any LLM served via an OpenAI-compatible API. This guide cov
 
 | Model | Server | Tool mode | GPU VRAM | Status |
 | --- | --- | --- | --- | --- |
-| Qwen3-4B-Instruct-FP8 | vLLM | Native (`--force-supports-tools true`) | 12 GiB | Working |
+| Qwen3-4B-Instruct-FP8 | vLLM | Native (vLLM `--tool-call-parser hermes`) | 12 GiB | Working |
 | Qwen3-4B-Instruct-FP8 | SGLang | Text-based (`--tool-call-format hermes`) | 12 GiB | Working |
 | qwen3:4b (thinking) | Ollama | Native | 12 GiB | LiteLLM streaming bug with thinking models |
 | qwen2.5-coder:3b | Ollama | Text-based | 12 GiB | Model too small for reliable tool calling |
@@ -62,11 +62,10 @@ Key flags:
 alancode --provider litellm \
   --model openai//home/tboulet/models/Qwen3-4B-Instruct-2507-FP8 \
   --base-url http://localhost:8000/v1 \
-  --force-supports-tools true \
   --max-output-tokens 4096
 ```
 
-Since vLLM's `--tool-call-parser` handles the tool format translation, use `--force-supports-tools true` (native mode). Alan receives structured `tool_calls` in the response — no text parsing needed.
+Since vLLM's `--tool-call-parser` handles the tool format translation, Alan receives structured `tool_calls` in the response — no text parsing needed. Native tool calling is the default.
 
 ### VRAM guidelines
 
@@ -134,7 +133,6 @@ Ollama manages its own model storage and serves automatically as a system servic
 ```bash
 alancode --provider litellm \
   --model ollama/qwen3:4b \
-  --force-supports-tools true \
   --max-output-tokens 4096
 ```
 
@@ -194,11 +192,11 @@ Each LLM call adds ~5-10s SCP overhead on top of model inference time. SSH conne
 
 | Scenario | Flag | How it works |
 | --- | --- | --- |
-| vLLM with `--tool-call-parser` | `--force-supports-tools true` | Native: vLLM translates model text → OpenAI tool_calls |
+| vLLM with `--tool-call-parser` | *(default — native)* | Native: vLLM translates model text → OpenAI tool_calls |
 | SGLang (no tool parser) | `--tool-call-format hermes` | Text-based: Alan parses Hermes `<tool_call>` tags from text |
 | GLM models via SGLang | `--tool-call-format glm` | Text-based: Alan parses GLM's XML `<arg_key>/<arg_value>` tags |
 | Unknown model | `--tool-call-format alan` | Text-based: Alan instructs model via system prompt |
-| Ollama with tool support | `--force-supports-tools true` | Native: Ollama handles tool format |
+| Ollama with tool support | *(default — native)* | Native: Ollama handles tool format |
 
 ## Model Name Format
 
@@ -213,7 +211,7 @@ For local servers (vLLM, SGLang), use `openai/<model_path_or_name>` + `--base-ur
 
 ## Troubleshooting
 
-**"Model does not support tool calling"**: Add `--force-supports-tools true` (native) or `--tool-call-format hermes` (text-based).
+**Tool calling errors**: If the model doesn't support native tool calling, use `--tool-call-format hermes` (or `glm` / `alan`) to enable text-based tool calling.
 
 **Context window exceeded**: Reduce `--max-output-tokens` (e.g., `4096`) or increase `--max-model-len` on the server.
 

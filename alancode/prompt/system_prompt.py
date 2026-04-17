@@ -415,6 +415,12 @@ def get_skills_section(skills: list) -> str:
 # ── Entry point ────────────────────────────────────────────────────────────
 
 
+# Number of static sections in the default prompt (indices 0..STATIC_SECTION_COUNT-1).
+# These are byte-identical across all calls within a session. Used by providers
+# for prompt caching breakpoint placement.
+STATIC_SECTION_COUNT = 7  # intro, system, doing_tasks, actions, using_tools, tone, communication
+
+
 def get_system_prompt(
     *,
     tools: list | None = None,
@@ -425,13 +431,20 @@ def get_system_prompt(
     append_prompt: str | None = None,
     memory_section: str | None = None,
     scratchpad_dir: str | None = None,
-) -> list[str]:
-    """Build the complete system prompt as a list of sections."""
+) -> tuple[list[str], int]:
+    """Build the complete system prompt as a list of sections.
+
+    Returns:
+        A tuple of (sections, static_boundary) where static_boundary is
+        the index where dynamic sections begin. Sections before this index
+        are byte-identical across calls within a session.
+    """
     if custom_prompt is not None:
         sections: list[str] = [custom_prompt]
+        static_boundary = 1
     else:
         sections = [
-            # Static sections
+            # Static sections (indices 0-6)
             get_intro_section(),
             get_system_section(),
             get_doing_tasks_section(),
@@ -439,10 +452,11 @@ def get_system_prompt(
             get_using_tools_section(tools),
             get_tone_section(),
             get_communication_section(),
-            # Dynamic sections
+            # Dynamic sections (indices 7+)
             get_session_guidance_section(),
             get_environment_section(model=model, cwd=cwd),
         ]
+        static_boundary = STATIC_SECTION_COUNT
 
     skills_section = get_skills_section(skills or [])
     if skills_section:
@@ -454,4 +468,5 @@ def get_system_prompt(
     if append_prompt:
         sections.append(append_prompt)
 
-    return [s for s in sections if s]
+    filtered = [s for s in sections if s]
+    return filtered, min(static_boundary, len(filtered))

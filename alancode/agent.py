@@ -459,7 +459,7 @@ class AlanCodeAgent:
             # Combine global + project instructions (project wins on conflicts)
             append_parts = [p for p in (global_instructions, project_instructions) if p]
             append_prompt = "\n\n".join(append_parts) if append_parts else None
-            system_prompt = get_system_prompt(
+            system_prompt, system_static_boundary = get_system_prompt(
                 tools=self._tools,
                 skills=self._skill_registry.list_all(),
                 model=self._model,
@@ -593,6 +593,7 @@ class AlanCodeAgent:
             params = QueryParams(
                 messages=self._messages,
                 system_prompt=system_prompt,
+                system_static_boundary=system_static_boundary,
                 provider=self._provider,
                 tools=effective_tools,
                 context=context,

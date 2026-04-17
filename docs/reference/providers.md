@@ -103,17 +103,17 @@ LiteLLM ships its own pricing registry. Cost display reads from `litellm.model_c
 - **Native tool use**: most modern models (Claude, GPT-4o, Gemini 2.5, Llama 3.3 with function calling) are auto-detected and pass `tools=[...]` natively.
 - **Text-based fallback**: for models without native function calling, set `--tool-call-format hermes|glm|alan`. The schema is rendered as text in the system prompt; output is parsed with regex. See [reference/cli.md](cli.md) for details.
 
-### Capability overrides
+### Text-based tool calling
 
-LiteLLM's auto-detection is sometimes wrong (new models, fine-tunes). Override with:
+For models without native tool calling support, set `--tool-call-format` to enable text-based tool calling. Alan injects tool schemas into the system prompt and parses tool calls from the model's text output:
 
 ```bash
---force-supports-tools true
---force-supports-streaming true
---force-supports-vision true
+--tool-call-format hermes   # Hermes <tool_call> format
+--tool-call-format glm      # GLM XML format
+--tool-call-format alan      # Alan's own format (most portable)
 ```
 
-Only force `true` if you're sure. Forcing past a real lack of support causes API errors.
+When `--tool-call-format` is not set (default), Alan uses native function calling.
 
 ---
 

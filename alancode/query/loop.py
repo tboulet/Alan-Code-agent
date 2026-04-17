@@ -135,6 +135,7 @@ class QueryParams:
     context: ToolUseContext
     cost_tracker: CostTracker
     model: str | None = None
+    system_static_boundary: int = 0
     max_iterations_per_turn: int | None = None
     max_output_tokens: int | None = None
     # Memory mode
@@ -346,6 +347,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 tool_schemas,
                 model=params.model,
                 max_tokens=max_tokens,
+                system_static_boundary=params.system_static_boundary,
             ):
                 # --- StreamMessageStart ---
                 if isinstance(event, StreamMessageStart):

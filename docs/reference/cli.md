@@ -23,8 +23,7 @@ Normally Alan Code auto-detects whether a model supports native tool calling. Us
 
 | Flag | Description | Default |
 |---|---|---|
-| `--force-supports-tools` | `true` / `false` — override native tool-call support detection. | auto-detect |
-| `--tool-call-format` | Text-based tool-call format for models without native tool calling: `hermes`, `glm`, or `alan`. | *(none — uses native if available)* |
+| `--tool-call-format` | Text-based tool-call format for models without native tool calling: `hermes`, `glm`, or `alan`. | *(none — uses native)* |
 
 ## Session behavior
 

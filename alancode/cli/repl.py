@@ -120,7 +120,7 @@ async def run_session(
         project_instr = load_project_instructions(agent._cwd)
         append_parts = [p for p in (global_instr, project_instr) if p]
         append_prompt = "\n\n".join(append_parts) if append_parts else None
-        sp = get_system_prompt(
+        sp, _boundary = get_system_prompt(
             tools=agent._tools,
             skills=agent._skill_registry.list_all(),
             model=agent._model,
