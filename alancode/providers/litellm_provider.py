@@ -215,17 +215,36 @@ class LiteLLMProvider(LLMProvider):
         resolved_model = model or self._model
         info = self.get_model_info(resolved_model)
         resolved_max_tokens = max_tokens or info.max_output_tokens
-        kwargs.pop("system_static_boundary", None)  # consumed by Anthropic provider, not needed here
+        static_boundary = kwargs.pop("system_static_boundary", None) or 0
 
         # Build system message (litellm uses the messages array, not a separate system param)
         litellm_messages: list[dict[str, Any]] = []
         if system:
-            system_text = "\n\n".join(s for s in system if s)
-            if system_text:
-                litellm_messages.append({"role": "system", "content": system_text})
+            # Use structured content blocks so we can place cache_control
+            # markers. LiteLLM passes cache_control through to providers
+            # that support it (Anthropic, OpenRouter/Anthropic) and strips
+            # it for providers that don't.
+            blocks: list[dict[str, Any]] = []
+            for i, s in enumerate(system):
+                if not s:
+                    continue
+                block: dict[str, Any] = {"type": "text", "text": s}
+                if i == static_boundary - 1 and static_boundary > 0:
+                    block["cache_control"] = {"type": "ephemeral"}
+                blocks.append(block)
+            if blocks:
+                blocks[-1]["cache_control"] = {"type": "ephemeral"}
+                litellm_messages.append({"role": "system", "content": blocks})
 
         # Messages arrive in OpenAI format from the query loop — pass through.
         litellm_messages.extend(messages)
+
+        # Prompt caching: mark last assistant message so the conversation
+        # prefix is cached between consecutive API calls.
+        for msg in reversed(litellm_messages):
+            if msg.get("role") == "assistant":
+                msg["cache_control"] = {"type": "ephemeral"}
+                break
 
         # Build tools in OpenAI format (litellm uses OpenAI tool format)
         litellm_tools = None
@@ -241,6 +260,7 @@ class LiteLLMProvider(LLMProvider):
                 }
                 for t in tools
             ]
+            litellm_tools[-1]["cache_control"] = {"type": "ephemeral"}
 
         # Build completion kwargs
         completion_kwargs: dict[str, Any] = {
@@ -250,13 +270,6 @@ class LiteLLMProvider(LLMProvider):
             "stream": True,
             # Request usage stats in the stream (arrives as a final chunk)
             "stream_options": {"include_usage": True},
-            # Prompt caching — LiteLLM applies cache_control markers for
-            # providers that support it (Anthropic, OpenRouter/Anthropic)
-            # and ignores them for providers that don't.
-            "cache_control_injection_points": [
-                {"location": "message", "role": "system"},
-                {"location": "message", "index": -1},
-            ],
             **self._extra_kwargs,
             **kwargs,
         }
@@ -289,6 +302,24 @@ class LiteLLMProvider(LLMProvider):
             mapped_stop_reason: str | None = None
 
             async for chunk in response:
+                # Extract usage from ANY chunk — including the final
+                # usage-only chunk that has no choices (empty list).
+                # Must be checked BEFORE the choices guard below.
+                if hasattr(chunk, "usage") and chunk.usage:
+                    u = chunk.usage
+                    cache_write = getattr(u, "cache_creation_input_tokens", 0) or 0
+                    cache_read = getattr(u, "cache_read_input_tokens", 0) or 0
+                    details = getattr(u, "prompt_tokens_details", None)
+                    if details and (not cache_write and not cache_read):
+                        cache_read = getattr(details, "cached_tokens", 0) or 0
+                        cache_write = getattr(details, "cache_write_tokens", 0) or 0
+                    final_usage = {
+                        "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                        "output_tokens": getattr(u, "completion_tokens", 0) or 0,
+                        "cache_creation_input_tokens": cache_write,
+                        "cache_read_input_tokens": cache_read,
+                    }
+
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta is None:
                     continue
@@ -339,17 +370,6 @@ class LiteLLMProvider(LLMProvider):
                                 id=current_tool_calls[idx]["id"],
                                 partial_json=tc.function.arguments,
                             )
-
-                # Extract usage from ANY chunk that carries it.
-                # With stream_options={"include_usage": True}, most providers
-                # send usage on a final chunk AFTER the finish_reason chunk.
-                # Usage can arrive on the same chunk as finish_reason, or separately.
-                if hasattr(chunk, "usage") and chunk.usage:
-                    u = chunk.usage
-                    final_usage = {
-                        "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
-                        "output_tokens": getattr(u, "completion_tokens", 0) or 0,
-                    }
 
                 # Check for finish — finalize pending tool calls
                 if finish_reason and not stop_emitted:

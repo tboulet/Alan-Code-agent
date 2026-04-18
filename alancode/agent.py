@@ -320,6 +320,7 @@ class AlanCodeAgent:
         self._permission_context = ToolPermissionContext(
             mode=PermissionMode(self._permission_mode),
         )
+        self._load_project_allow_rules()
         self._session_start_fired = False
         self._ask_callback = ask_callback
         # Active skill tool filter (set by /skill command, cleared after turn)
@@ -348,8 +349,10 @@ class AlanCodeAgent:
                 logger.info(
                     "Resumed session %s (%d messages)", session_id, len(messages)
                 )
-            # Restore permission allow rules from session state
-            self._restore_allow_rules()
+            # Trigger legacy allow-rules migration (older sessions stored
+            # rules in state.json; accessing the property migrates them
+            # to the project-level store which was already loaded above).
+            _ = self._session.allow_rules
 
     # ── Query API (2x2 matrix: text/events × sync/async) ───────────────────
     #
@@ -556,16 +559,17 @@ class AlanCodeAgent:
                         tool_name="Bash",
                         rule_content=f"{allow_always_pattern} *",
                         behavior=PermissionBehavior.ALLOW,
-                        source="session",
+                        source="project",
                     )
                     _perm_ctx.allow_rules.append(rule)
-                    # Persist to session state immediately
-                    _session.add_allow_rule({
+                    # Persist to project-level store (survives across sessions)
+                    from alancode.permissions.project_rules import add_project_allow_rule
+                    add_project_allow_rule({
                         "tool_name": rule.tool_name,
                         "rule_content": rule.rule_content,
-                        "source": rule.source,
-                    })
-                    logger.info("Added session allow rule: Bash(%s *)", allow_always_pattern)
+                        "source": "project",
+                    }, cwd=self._cwd)
+                    logger.info("Added project allow rule: Bash(%s *)", allow_always_pattern)
                     return PermissionBehavior.ALLOW
                 # Custom text — store it so the model sees the user's feedback
                 _permission_custom_message[0] = answer
@@ -688,23 +692,22 @@ class AlanCodeAgent:
 
     # ── Allow rules persistence ──────────────────────────────────────────────
 
-    def _restore_allow_rules(self) -> None:
-        """Restore permission allow rules from session state."""
+    def _load_project_allow_rules(self) -> None:
+        """Load project-level allow rules from ``.alan/allow_rules.json``."""
         from alancode.permissions.context import PermissionRule
-        for rule_data in self._session.allow_rules:
+        from alancode.permissions.project_rules import load_project_allow_rules
+        rules = load_project_allow_rules(self._cwd)
+        for rule_data in rules:
             self._permission_context.allow_rules.append(
                 PermissionRule(
                     tool_name=rule_data["tool_name"],
                     rule_content=rule_data.get("rule_content"),
                     behavior=PermissionBehavior.ALLOW,
-                    source=rule_data.get("source", "session"),
+                    source="project",
                 )
             )
-        if self._session.allow_rules:
-            logger.info(
-                "Restored %d allow rules from session state",
-                len(self._session.allow_rules),
-            )
+        if rules:
+            logger.info("Loaded %d project allow rules", len(rules))
 
     def _init_agt_root(self) -> None:
         """Initialize AGT session root SHA (once, on session start).

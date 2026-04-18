@@ -31,7 +31,7 @@ Alan Code computes cost client-side from token counts × registered per-token pr
 
 - Numbers are close but not authoritative. Check your provider's dashboard for exact figures.
 - Cost is unknown for models LiteLLM doesn't price (local models, recent releases, fine-tunes).
-- Cache-pricing math is applied when the provider's cache metadata is returned on the response (Anthropic, some LiteLLM endpoints).
+- Cache-pricing math is applied when the provider's cache metadata is returned on the response. The Anthropic provider reports cache tokens accurately. LiteLLM's streaming mode may not propagate the cache token breakdown from some providers (e.g., OpenRouter) — in that case, `/status` shows zero for cache tokens even though caching is active and savings are applied on the provider's billing side.
 
 ## Tuning the budget
 
