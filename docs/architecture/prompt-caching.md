@@ -40,30 +40,8 @@ Changes that invalidate part of the cache:
 | New user message (normal turn) | BP4 (conversation) | BP1, BP2, BP3 |
 | Model switch (`/model`) | All (different cache space) | None |
 
-## Minimum prefix size
 
-Caching is silently ignored if the prefix is below the model's minimum:
-
-| Model tier | Minimum |
-|---|---|
-| Sonnet / Opus | 1024 tokens |
-| Haiku | 2048 tokens |
-
-Alan's system prompt is ~15-20K tokens, so this minimum is always exceeded.
-
-## Verifying caching works
-
-In `/status`, check `Cache creation tokens` and `Cache read tokens`:
-
-| Turn | Cache creation | Cache read | Interpretation |
-|---|---|---|---|
-| 1 | ~prefix size | 0 | Cache populated. Expected. |
-| 2+ | 0 | ~prefix size | Cache hit. Working. |
-| N (after pause) | ~prefix size | 0 | Cache evicted (TTL expired). |
-
-**Note:** LiteLLM's streaming mode may not propagate cache token details from some providers (e.g., OpenRouter). Cache tokens may show as 0 in `/status` even when caching is active. The cost savings still apply on the provider's billing side. The Anthropic direct provider reports cache tokens accurately.
 
 ## Related
 
 - [reference/cost.md](../reference/cost.md) — what the status line numbers mean.
-- [reference/providers.md](../reference/providers.md) — per-provider caching support.

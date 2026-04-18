@@ -239,6 +239,7 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 | **Plan mode** | planned | Force the agent to write and get approval for a plan before touching code. |
 | **Image input** | planned | Paste or attach images to the conversation; Gives Alan tools for image inference. |
 | **Stop / PreCompact / PostCompact hooks** | partial | Only Pre/PostToolUse hooks are implemented today. |
+| **WebSearch tool** | planned | The WebFetch tool can fetch and summarize pages, but doesn't do active searching yet. |
 
 
 # Further reading

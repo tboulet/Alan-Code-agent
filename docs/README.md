@@ -42,7 +42,7 @@ Welcome. Alan Code is a Python coding agent you can use as a **CLI**, a **browse
 - [Slash commands](reference/slash-commands.md)
 - [Tools](reference/tools.md) — every built-in tool with schemas and examples
 - [Settings](reference/settings.md) — every `.alan/settings.json` key
-- [Providers](reference/providers.md) — Anthropic, LiteLLM, local
+- [Providers](reference/providers.md) — Anthropic or LiteLLM (all the rest)
 - [Local models](reference/local-models.md) — vLLM / SGLang / Ollama / llama.cpp
 - [Cost tracking](reference/cost.md) — what the "Session" line means
 - [Python API](reference/python-api.md) — `AlanCodeAgent` and related

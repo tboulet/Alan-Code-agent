@@ -53,7 +53,6 @@ Typing `/help` in a session prints the currently-registered list.
 |---|---|
 | `/diff` | Show the git diff of all uncommitted changes (staged + unstaged), with syntax highlighting. |
 | `/commit [message]` | Stage all changes and create a commit. Without an argument, an AI-generated message is used. |
-| `/undo` | *(Deprecated — use `/revert`.)* Discard uncommitted changes (`git checkout -- .`). |
 
 ## Agentic Git Tree (AGT)
 

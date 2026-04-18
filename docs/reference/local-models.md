@@ -36,12 +36,3 @@ LiteLLM uses the model name prefix to determine the API protocol:
 | `openrouter/<provider>/<name>` | OpenRouter |
 
 For local servers, use `openai/<model>` + `--base-url`.
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| Tool calling errors | Use `--tool-call-format hermes` for text-based tool calling |
-| Context window exceeded | Reduce `--max-output-tokens` or increase `--max-model-len` on the server |
-| CUDA out of memory | Reduce `--max-model-len` or use a smaller model |
-| Cost shows $0.0000 | Expected for self-hosted models (not in pricing registry) |

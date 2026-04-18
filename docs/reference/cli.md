@@ -17,9 +17,9 @@ Run `alancode --help` for a quick version of this table.
 | `--api-key` | API key. If omitted, read from the provider's usual environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, …). | (env) |
 | `--base-url` | Override the API base URL. Set this for local OpenAI-compatible servers, e.g. `http://localhost:8000/v1`. See [`local-models.md`](local-models.md). | *(provider default)* |
 
-### Tool-call capability overrides
+### Tool calling format
 
-Normally Alan Code auto-detects whether a model supports native tool calling. Use these when the detection is wrong (e.g. a fine-tune that LiteLLM doesn't know about).
+By default, Alan uses provider-native tool calling. If your provider/model doesn't support that, use `--tool-call-format` to specify a text-based format (see [`local-models.md`](local-models.md) for details).
 
 | Flag | Description | Default |
 |---|---|---|
@@ -30,7 +30,7 @@ Normally Alan Code auto-detects whether a model supports native tool calling. Us
 | Flag | Description | Default |
 |---|---|---|
 | `--permission-mode` | `safe` (ask for every tool), `edit` (ask for writes + exec), `yolo` (allow everything). | `edit` |
-| `--max-turns` | Hard cap on agent turns per user message. | unlimited |
+| `--max-iterations-per-turn` | Hard cap on model calls per user message. | unlimited |
 | `--max-output-tokens` | Per-call output token limit. Subject to internal escalation up to `escalated_max_tokens` on recovery. | *(provider default)* |
 | `--memory` | Memory mode: `off` (default), `on`, `intensive`. | `off` |
 | `--verbose` | Enable debug-level logging. | `false` |
@@ -47,8 +47,8 @@ Normally Alan Code auto-detects whether a model supports native tool calling. Us
 | Flag | Description |
 |---|---|
 | *(none — default)* | Interactive CLI mode. |
-| `--gui` | Launch the local browser GUI (Chat + LLM Perspective + Git Tree panels). |
-| `--print PROMPT` | Non-interactive: send one prompt, print the final answer, exit. Useful in pipelines. |
+| `--gui` | Launch the local browser GUI. |
+| `--print PROMPT` | Non-interactive: send one prompt, print the final answer, exit. |
 
 ## Utilities
 

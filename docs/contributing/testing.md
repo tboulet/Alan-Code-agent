@@ -26,7 +26,6 @@ pytest --cov=alancode --cov-report=term-missing
 ```
 tests/
 ├── conftest.py         # shared fixtures (tmp session dirs, scripted providers, etc.)
-├── dummy/              # helper modules used by tests (not themselves tests)
 ├── unit/               # fast, local, no-network
 └── integration/        # full agent turns against the scripted provider
 ```
@@ -59,12 +58,6 @@ Tests that exercise the full agent loop through `AlanCodeAgent.query_events_asyn
 - `test_scripted_ui.py` — the scripted UI fixture.
 - `test_agt_edge_cases.py` — AGT operations against a real git repo fixture.
 - `test_gui_phase2.py` — GUI event flow with a scripted UI.
-
-### `dummy/`
-
-Helpers, not tests themselves:
-- `dummy_provider.py` — programmable provider fixtures.
-- `test_helpers.py` — session setup, git repo factories.
 
 ## Writing new tests
 

@@ -99,7 +99,6 @@ alan-code/
 ├── tests/
 │   ├── unit/              # fast, no-network, no-disk tests
 │   ├── integration/       # full agent runs with scripted provider
-│   ├── dummy/             # helpers used across tests
 │   └── conftest.py
 ├── examples/              # runnable example scripts
 ├── docs/                  # these files

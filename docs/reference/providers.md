@@ -29,7 +29,7 @@ Uses the official `anthropic` SDK. Gets Alan the best of what Anthropic offers:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-alancode --model claude-sonnet-4-6
+alancode --provider anthropic --model claude-sonnet-4-6
 ```
 
 Or in Python:
@@ -70,14 +70,14 @@ LiteLLM expects `provider/model`:
 ```bash
 # OpenRouter
 export OPENROUTER_API_KEY=sk-or-...
-alancode --provider litellm --model openrouter/google/gemini-2.5-pro
+alancode --model openrouter/google/gemini-2.5-pro
 
 # OpenAI
 export OPENAI_API_KEY=sk-...
-alancode --provider litellm --model openai/gpt-4o
+alancode --model openai/gpt-4o
 
 # Local
-alancode --provider litellm --model openai/my-vllm-model --base-url http://localhost:8000/v1
+alancode --model openai/my-vllm-model --base-url http://localhost:8000/v1
 ```
 
 ### Which env var for which provider
@@ -167,9 +167,6 @@ agent = AlanCodeAgent(provider=MyProvider(...))
 
 The `--provider` CLI flag only knows the three built-ins, but the constructor accepts any `LLMProvider` instance.
 
-## Local models
-
-Setting up vLLM / SGLang / Ollama / llama.cpp against Alan deserves a page of its own: [reference/local-models.md](local-models.md).
 
 ## Related
 

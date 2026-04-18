@@ -20,14 +20,14 @@ The `/status` command shows the full accounting:
 |---|---|
 | `Input tokens` | Non-cached input sent to the model. |
 | `Cache creation tokens` | Tokens written to the prompt cache this session. Billed higher than regular input on Anthropic; one-time per cache entry. |
-| `Cache read tokens` | Tokens served from the prompt cache. Billed at ~10% of regular input — this is where prompt caching pays off. |
+| `Cache read tokens` | Tokens served from the prompt cache. Billed at ~10% of regular input — this is where prompt caching pays off. Note : might not display in spite of caching actually occurring |
 | `Total input` | Sum of the three above. This is what the "in" in the one-liner refers to. |
 | `Output tokens` | Model-generated output tokens across the session. |
 | `Estimated cost` | USD estimate. `unknown` if the model's pricing isn't registered. |
 
 ## Why "estimated"
 
-Alan Code computes cost client-side from token counts × registered per-token prices. It does not (yet) consume the provider's billing APIs. So:
+Alan Code computes cost client-side from token counts × registered per-token prices.
 
 - Numbers are close but not authoritative. Check your provider's dashboard for exact figures.
 - Cost is unknown for models LiteLLM doesn't price (local models, recent releases, fine-tunes).
