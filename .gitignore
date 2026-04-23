@@ -2,6 +2,7 @@
 .alan/
 venv/
 perso_dev/
+examples/example_2_auto_fix_loop/code_fixed.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

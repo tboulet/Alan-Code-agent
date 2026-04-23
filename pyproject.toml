@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "alancode"
 dynamic = ["version"]
-description = "Alan Code — an open-source Python inspired by Claude Code"
+description = "Alan Code — an open-source python agent inspired by Claude Code"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
