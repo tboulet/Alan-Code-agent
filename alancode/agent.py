@@ -230,6 +230,8 @@ class AlanCodeAgent:
         session_id: str | None = None,
         ask_callback: Callable | None = None,
         verbose: bool = False,
+        extra_tools: list | None = None,
+        custom_system_prompt: str | None = None,
         **provider_kwargs: Any,
     ) -> None:
         self._cwd = cwd or os.getcwd()
@@ -315,6 +317,12 @@ class AlanCodeAgent:
         # Append the Skill tool (needs registry reference)
         from alancode.tools.builtin.skill_tool import SkillTool
         self._tools.append(SkillTool(self._skill_registry))
+        # Append caller-provided extra tools (for embedding agents in larger frameworks)
+        if extra_tools:
+            self._tools.extend(extra_tools)
+        # Custom system prompt: when set, replaces Alan's default sections entirely.
+        # See alancode.prompt.system_prompt.get_system_prompt's `custom_prompt` arg.
+        self._custom_system_prompt = custom_system_prompt
         self._abort_event = asyncio.Event()
         self._message_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         self._permission_context = ToolPermissionContext(
@@ -467,6 +475,7 @@ class AlanCodeAgent:
                 skills=self._skill_registry.list_all(),
                 model=self._model,
                 cwd=self._cwd,
+                custom_prompt=self._custom_system_prompt,
                 append_prompt=append_prompt,
                 memory_section=memory_section_text,
                 scratchpad_dir=str(self._scratchpad_dir),
