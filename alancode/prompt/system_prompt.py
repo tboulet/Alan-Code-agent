@@ -9,7 +9,7 @@ sit at the end of the cache chain.
 
 from datetime import datetime, timezone
 
-from alancode.utils.env import get_cwd, get_git_status, get_os_version, get_platform, get_shell, is_git_repo
+from alancode.utils.env import get_cwd, get_os_version, get_platform, get_shell, is_git_repo
 
 _session_datetime_cache: str | None = None
 
@@ -349,6 +349,8 @@ def get_environment_section(
     model: str = "",
     cwd: str | None = None,
 ) -> str:
+    """Environment info that's stable for the lifetime of the session.
+    """
     effective_cwd = cwd or get_cwd()
     lines = [
         "# Environment",
@@ -362,11 +364,6 @@ def get_environment_section(
     ]
     if model:
         lines.append(f" - Model: {model}")
-
-    git_status = get_git_status(effective_cwd)
-    if git_status:
-        lines.append("")
-        lines.append(f"gitStatus: {git_status}")
 
     return "\n".join(lines)
 
@@ -415,12 +412,6 @@ def get_skills_section(skills: list) -> str:
 # ── Entry point ────────────────────────────────────────────────────────────
 
 
-# Number of static sections in the default prompt (indices 0..STATIC_SECTION_COUNT-1).
-# These are byte-identical across all calls within a session. Used by providers
-# for prompt caching breakpoint placement.
-STATIC_SECTION_COUNT = 7  # intro, system, doing_tasks, actions, using_tools, tone, communication
-
-
 def get_system_prompt(
     *,
     tools: list | None = None,
@@ -437,34 +428,35 @@ def get_system_prompt(
     Returns:
         A tuple of (sections, static_boundary) where static_boundary is
         the index where dynamic sections begin. Sections before this index
-        are byte-identical across calls within a session.
+        are byte-identical across all calls within a session and form the
+        cacheable prefix.
     """
     if custom_prompt is not None:
         sections: list[str] = [custom_prompt]
-        static_boundary = 1
-    else:
-        sections = [
-            # Static sections (indices 0-6)
-            get_intro_section(),
-            get_system_section(),
-            get_doing_tasks_section(),
-            get_actions_section(),
-            get_using_tools_section(tools),
-            get_tone_section(),
-            get_communication_section(),
-            # Dynamic sections (indices 7+)
-            get_session_guidance_section(),
-            get_environment_section(model=model, cwd=cwd),
-        ]
-        static_boundary = STATIC_SECTION_COUNT
+        return sections, 1
 
+    # ── Static block: byte-identical for the whole session ──────────────
+    sections = [
+        get_intro_section(),
+        get_system_section(),
+        get_doing_tasks_section(),
+        get_actions_section(),
+        get_using_tools_section(tools),
+        get_tone_section(),
+        get_communication_section(),
+        get_session_guidance_section(),
+        get_environment_section(model=model, cwd=cwd),
+    ]
+    if scratchpad_dir:
+        sections.append(get_scratchpad_section(scratchpad_dir))
+    static_boundary = len([s for s in sections if s])
+
+    # ── Dynamic block: may change within or across sessions ─────────────
     skills_section = get_skills_section(skills or [])
     if skills_section:
         sections.append(skills_section)
     if memory_section:
         sections.append(memory_section)
-    if scratchpad_dir:
-        sections.append(get_scratchpad_section(scratchpad_dir))
     if append_prompt:
         sections.append(append_prompt)
 

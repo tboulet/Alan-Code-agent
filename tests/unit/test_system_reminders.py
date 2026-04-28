@@ -31,36 +31,14 @@ class TestTurnReminders:
         assert reminders[0].hide_in_ui is True
 
 
-class TestGitStatusInSystemPrompt:
-    """Tests for git status included in the system prompt (session start)."""
+class TestGitStatusNotInSystemPrompt:
+    """Git status is intentionally excluded from the system prompt — its
+    output changes after every file edit and would invalidate the prompt
+    cache on every turn for coding sessions. The agent runs ``git status``
+    via Bash when it actually needs the current state.
+    """
 
-    def test_git_status_in_git_repo(self):
-        from alancode.utils.env import get_git_status
-        with tempfile.TemporaryDirectory() as tmpdir:
-            subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
-            subprocess.run(
-                ["git", "config", "user.email", "test@test.com"],
-                cwd=tmpdir, capture_output=True,
-            )
-            subprocess.run(
-                ["git", "config", "user.name", "Test"],
-                cwd=tmpdir, capture_output=True,
-            )
-            with open(os.path.join(tmpdir, "test.txt"), "w") as f:
-                f.write("hello")
-
-            status = get_git_status(tmpdir)
-            assert status is not None
-            assert "Current branch:" in status
-            assert "snapshot in time" in status
-
-    def test_no_git_in_non_git_dir(self):
-        from alancode.utils.env import get_git_status
-        with tempfile.TemporaryDirectory() as tmpdir:
-            status = get_git_status(tmpdir)
-            assert status is None
-
-    def test_environment_section_includes_git_status(self):
+    def test_environment_section_excludes_git_status(self):
         from alancode.prompt.system_prompt import get_environment_section
         with tempfile.TemporaryDirectory() as tmpdir:
             subprocess.run(["git", "init"], cwd=tmpdir, capture_output=True)
@@ -72,8 +50,8 @@ class TestGitStatusInSystemPrompt:
                 f.write("hello")
 
             env = get_environment_section(model="test", cwd=tmpdir)
-            assert "gitStatus:" in env
-            assert "snapshot in time" in env
+            assert "gitStatus:" not in env
+            assert "snapshot in time" not in env
 
 
 class TestDrainMessageQueue:
