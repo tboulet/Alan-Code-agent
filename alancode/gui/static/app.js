@@ -370,7 +370,9 @@ function renderCostSummary(data) {
     const outTokens = data.output_tokens.toLocaleString();
     let text = `Session: ${inTokens} in + ${outTokens} out`;
     if (!data.cost_unknown) {
-        text += ` = $${data.cost_usd.toFixed(4)} (estimated)`;
+        const noCache = !data.cache_read_tokens && !data.cache_write_tokens;
+        const label = noCache ? "estimate w/o cache" : "estimated";
+        text += ` = $${data.cost_usd.toFixed(4)} (${label})`;
     }
     if (data.context_window > 0 && data.conversation_tokens > 0) {
         const pct = Math.round(data.conversation_tokens * 100 / data.context_window);

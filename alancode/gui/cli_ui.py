@@ -84,10 +84,17 @@ class CLIUI(SessionUI):
         self, usage: Usage, cost_usd: float, cost_unknown: bool,
         conversation_tokens: int = 0, context_window: int = 0,
     ) -> None:
-        # Session cost
+        # Session cost. If no cache tokens were reported across the whole
+        # session, the figure may overestimate when the provider applies
+        # prompt caching without surfacing the breakdown to us.
         parts = [f"  [dim]Session: {usage.total_input:,} in + {usage.output_tokens:,} out"]
         if not cost_unknown:
-            parts.append(f"= ${cost_usd:.4f} (estimated)")
+            no_cache_reported = (
+                usage.cache_creation_input_tokens == 0
+                and usage.cache_read_input_tokens == 0
+            )
+            label = "estimate w/o cache" if no_cache_reported else "estimated"
+            parts.append(f"= ${cost_usd:.4f} ({label})")
         # Conversation tokens
         if context_window > 0 and conversation_tokens > 0:
             pct = conversation_tokens * 100 // context_window

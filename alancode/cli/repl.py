@@ -603,7 +603,12 @@ def _handle_status(agent: AlanCodeAgent, console) -> None:
     if agent.cost_unknown:
         table.add_row("Estimated cost", "unknown (model not in pricing registry)")
     else:
-        table.add_row("Estimated cost", f"${agent.cost_usd:.4f}")
+        no_cache_reported = (
+            usage.cache_creation_input_tokens == 0
+            and usage.cache_read_input_tokens == 0
+        )
+        suffix = " (estimate w/o cache)" if no_cache_reported else ""
+        table.add_row("Estimated cost", f"${agent.cost_usd:.4f}{suffix}")
     table.add_row("Working directory", cwd)
     table.add_row(
         "ALAN.md", "[green]yes[/green]" if alan_md_exists else "[dim]no[/dim]"
