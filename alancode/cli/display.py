@@ -42,7 +42,29 @@ _stream_state = {
     "in_thinking": False,
     "in_tool_call": False,
     "buffer": "",
+    # True once a "thinking" header has been printed for the current
+    # thinking section. Cleared when the section ends so the header is
+    # printed again on the next entry. Lets thinking be visually distinct
+    # from other dim/italic content without re-printing the label per char.
+    "thinking_active": False,
 }
+
+
+_THINKING_LABEL = "[magenta]▎ Thinking:[/magenta] "
+
+
+def _begin_thinking_section(console: Console) -> None:
+    """Print the thinking header if not already active for this section."""
+    if not _stream_state["thinking_active"]:
+        console.print(_THINKING_LABEL, end="")
+        _stream_state["thinking_active"] = True
+
+
+def _end_thinking_section(console: Console) -> None:
+    """Close an active thinking section with a newline."""
+    if _stream_state["thinking_active"]:
+        console.print()
+        _stream_state["thinking_active"] = False
 
 
 def _reset_stream_state(assume_thinking: bool = False) -> None:
@@ -56,6 +78,7 @@ def _reset_stream_state(assume_thinking: bool = False) -> None:
     _stream_state["in_thinking"] = assume_thinking
     _stream_state["in_tool_call"] = False
     _stream_state["buffer"] = ""
+    _stream_state["thinking_active"] = False
 
 
 def _stream_text_delta(text: str, console) -> None:
@@ -69,6 +92,12 @@ def _stream_text_delta(text: str, console) -> None:
     buf = _stream_state["buffer"] + text
     _stream_state["buffer"] = ""
 
+    # If we entered this turn already in thinking mode (assume_thinking=True
+    # for models that emit reasoning before any opening tag), make sure the
+    # header is printed before the first char.
+    if _stream_state["in_thinking"]:
+        _begin_thinking_section(console)
+
     i = 0
     while i < len(buf):
         # Check for tag openings
@@ -79,11 +108,13 @@ def _stream_text_delta(text: str, console) -> None:
             # <think>
             if remaining.startswith("<think>"):
                 _stream_state["in_thinking"] = True
+                _begin_thinking_section(console)
                 i += len("<think>")
                 continue
             # </think>
             if remaining.startswith("</think>"):
                 _stream_state["in_thinking"] = False
+                _end_thinking_section(console)
                 i += len("</think>")
                 continue
             # <tool_call>
@@ -184,8 +215,13 @@ def _display_assistant_message(msg: AssistantMessage, console: Console) -> None:
         # Streaming delta — print inline without trailing newline.
         for block in msg.content:
             if isinstance(block, TextBlock):
+                # If thinking was active (e.g. native ThinkingBlock streaming
+                # before any text), close the section so text starts on its
+                # own line.
+                _end_thinking_section(console)
                 _stream_text_delta(block.text, console)
             elif isinstance(block, ThinkingBlock) and block.thinking.strip():
+                _begin_thinking_section(console)
                 console.print(f"[dim italic]{block.thinking}[/dim italic]", end="")
         return
 
@@ -198,6 +234,7 @@ def _display_assistant_message(msg: AssistantMessage, console: Console) -> None:
 
     # Close the streaming line if there was streamed content
     if has_text or has_thinking:
+        _end_thinking_section(console)
         console.print()
 
     # Show thinking first (if not already streamed — i.e., extracted post-stream)
@@ -206,7 +243,9 @@ def _display_assistant_message(msg: AssistantMessage, console: Console) -> None:
             # Only show if this is a non-streaming context (text tool parser extracted it)
             if not has_text:
                 # Thinking IS the response — show full
-                console.print(f"[dim italic]{block.thinking.strip()}[/dim italic]")
+                console.print(
+                    f"{_THINKING_LABEL}[dim italic]{block.thinking.strip()}[/dim italic]"
+                )
             # If has_text, thinking was already streamed or will be shown as preview
             # via the streaming path — don't duplicate
 
@@ -474,7 +513,9 @@ def display_replay_message(msg: Message, console: Console) -> None:
             return
         for block in msg.content:
             if isinstance(block, ThinkingBlock) and block.thinking.strip():
-                console.print(f"[dim italic]{block.thinking.strip()}[/dim italic]")
+                console.print(
+                    f"{_THINKING_LABEL}[dim italic]{block.thinking.strip()}[/dim italic]"
+                )
         for block in msg.content:
             if isinstance(block, TextBlock) and block.text.strip():
                 console.print(Markdown(block.text))
