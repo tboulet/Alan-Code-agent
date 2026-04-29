@@ -51,6 +51,12 @@ class TestGLMFormat:
         tag yet — if we accepted these, mid-stream fragments would
         execute tools with truncated arguments. The parser must wait
         for the closing tag.
+
+        Malformed detection also requires both opening AND closing tags;
+        a bare <tool_call> in prose (e.g. when the model quotes the tag
+        in an apology) must not trigger a retry — that caused a
+        self-perpetuating loop where the error message itself, containing
+        <tool_call>, kept getting echoed back.
         """
         text = (
             "<tool_call>Bash<arg_key>command</arg_key>"
@@ -58,9 +64,7 @@ class TestGLMFormat:
         )
         result = extract_tool_calls_from_text(text, format="glm")
         assert len(result.tool_calls) == 0
-        # The loose detector still flags it as malformed so the model
-        # gets feedback to retry with the correct format.
-        assert result.error is not None
+        assert result.error is None
 
     def test_no_tool_call(self):
         text = "Just a regular response with no tool calls."
@@ -83,10 +87,10 @@ class TestGLMFormat:
         assert result.error is None
 
     def test_malformed_glm_output(self):
-        """GLM outputs a wrong XML variant — should be detected as malformed."""
+        """GLM outputs a wrong XML variant with both <tool_call> and </tool_call>."""
         text = (
             "I'll check the files.</think>"
-            "<tool_call>Bash>\n<command>ls -la</command>\n</Bash>"
+            "<tool_call>Bash command='ls -la'</tool_call>"
         )
         result = extract_tool_calls_from_text(text, format="glm")
         assert len(result.tool_calls) == 0
@@ -140,7 +144,7 @@ class TestHermesFormat:
         result = extract_tool_calls_from_text(text, format="hermes")
         assert len(result.tool_calls) == 0
         assert result.error is not None
-        assert "not valid JSON" in result.error
+        assert "not valid" in result.error
 
 
 class TestAlanFormat:
@@ -204,6 +208,34 @@ class TestMalformedDetection:
         result = extract_tool_calls_from_text(text, format="glm")
         assert result.error is not None
         assert "<arg_key>" in result.error
+
+    def test_bare_tool_call_tag_in_prose_not_flagged(self):
+        """A lone <tool_call> mentioned in prose must not trigger an error.
+
+        Regression: when the model apologized and quoted the tag literally
+        (e.g. "I will use <tool_call> tags correctly"), the loose detector
+        fired, and the resulting error message — which itself contains
+        <tool_call> — got quoted again next turn, causing a retry loop.
+        """
+        text = "Sorry, I should have used <tool_call> tags. I'll retry."
+        for fmt in ("hermes", "glm", "alan"):
+            tag = "<tool_use>" if fmt == "alan" else "<tool_call>"
+            sample = f"Sorry, I should have used {tag} tags. I'll retry."
+            result = extract_tool_calls_from_text(sample, format=fmt)
+            assert result.error is None, f"{fmt} flagged a bare {tag} mention"
+
+    def test_error_message_does_not_echo_model_output(self):
+        """The error message must not include the model's own text.
+
+        Echoing it back confused the model about where its message ended
+        and the tool feedback began.
+        """
+        garbage = "this is the model's bogus tool call attempt"
+        text = f"<tool_call>{garbage}</tool_call>"
+        result = extract_tool_calls_from_text(text, format="hermes")
+        assert result.error is not None
+        assert garbage not in result.error
+        assert "Example:" in result.error
 
 
 class TestSystemPrompt:

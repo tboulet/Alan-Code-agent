@@ -12,7 +12,7 @@ Supported formats:
 Each format is implemented as a ToolCallFormat class with:
 - ``parse(text)`` → extract well-formed tool calls
 - ``detect_malformed(text)`` → detect attempted but incorrectly formatted tool calls
-- ``format_error(text)`` → return error feedback for the model
+- ``format_error()`` → return error feedback for the model
 - ``system_prompt(tool_schemas)`` → return format instructions for the system prompt
 """
 
@@ -67,19 +67,21 @@ class ToolCallFormat(ABC):
         ...
 
     @abstractmethod
-    def detect_malformed(self, text: str) -> str | None:
+    def detect_malformed(self, text: str) -> bool:
         """Detect attempted but malformed tool calls.
 
-        Returns a description of what went wrong, or None if no
-        malformed attempt was detected.
+        Returns True if the text contains a tool-call-like block that did
+        not parse cleanly, False otherwise.
         """
         ...
 
     @abstractmethod
-    def format_error(self, malformed_description: str) -> str:
+    def format_error(self) -> str:
         """Return an error message to feed back to the model.
 
-        Includes the expected format and what was wrong.
+        Includes the expected format and an example. The model's own
+        output is intentionally NOT echoed back — doing so confuses the
+        model about what is its message and what is the tool feedback.
         """
         ...
 
@@ -97,9 +99,12 @@ _HERMES_PATTERN = re.compile(
     re.DOTALL,
 )
 
-# Loose patterns to detect attempted but malformed tool calls
+# Loose pattern: requires BOTH opening and closing tags. A bare <tool_call>
+# mentioned in prose (e.g. when the model apologizes for a previous error and
+# quotes the tag) must NOT trigger malformed detection — that caused a
+# self-perpetuating retry loop where each error message got quoted back.
 _HERMES_LOOSE_PATTERN = re.compile(
-    r"<tool_call>.*?</tool_call>|<tool_call>[^<]{10,}",
+    r"<tool_call>.*?</tool_call>",
     re.DOTALL,
 )
 
@@ -122,22 +127,24 @@ class HermesFormat(ToolCallFormat):
                 pass  # Detected as malformed below
         return results
 
-    def detect_malformed(self, text: str) -> str | None:
-        # Check for <tool_call> tags that didn't parse as valid JSON
+    def detect_malformed(self, text: str) -> bool:
         for match in _HERMES_LOOSE_PATTERN.finditer(text):
-            snippet = match.group(0)
-            if not _HERMES_PATTERN.match(snippet):
-                return f"Found <tool_call> block but content is not valid JSON: {snippet[:150]}"
-        return None
+            if not _HERMES_PATTERN.match(match.group(0)):
+                return True
+        return False
 
-    def format_error(self, malformed_description: str) -> str:
+    def format_error(self) -> str:
         return (
-            f"Tool call format error: {malformed_description}\n\n"
-            f"Expected format:\n"
-            f"<tool_call>\n"
-            f'{{"name": "tool_name", "arguments": {{"param": "value"}}}}\n'
-            f"</tool_call>\n\n"
-            f"Please retry with the correct format."
+            "Found <tool_call> block but content is not valid.\n\n"
+            "Expected format:\n"
+            "<tool_call>\n"
+            '{"name": "tool_name", "arguments": {"param": "value"}}\n'
+            "</tool_call>\n\n"
+            "Example:\n"
+            "<tool_call>\n"
+            '{"name": "Read", "arguments": {"file_path": "/path/to/file.py"}}\n'
+            "</tool_call>\n\n"
+            "Please retry with the correct format."
         )
 
     def system_prompt(self, tool_schemas: list[dict]) -> str:
@@ -171,9 +178,10 @@ _GLM_ARG_PATTERN = re.compile(
     re.DOTALL,
 )
 
-# Loose patterns: any <tool_call> that didn't match the strict pattern
+# Loose pattern: requires BOTH opening and closing tags so that a bare
+# <tool_call> mentioned in prose does not trigger malformed detection.
 _GLM_LOOSE_PATTERN = re.compile(
-    r"<tool_call>.*?(?:</tool_call>|$)",
+    r"<tool_call>.*?</tool_call>",
     re.DOTALL,
 )
 
@@ -197,29 +205,27 @@ class GLMFormat(ToolCallFormat):
                 ))
         return results
 
-    def detect_malformed(self, text: str) -> str | None:
-        # Find any <tool_call> that the strict parser didn't match
+    def detect_malformed(self, text: str) -> bool:
         strict_matches = {m.group(0) for m in _GLM_PATTERN.finditer(text)}
         for match in _GLM_LOOSE_PATTERN.finditer(text):
-            snippet = match.group(0)
-            if snippet not in strict_matches:
-                return f"Found <tool_call> block but format is incorrect: {snippet[:150]}"
-        return None
+            if match.group(0) not in strict_matches:
+                return True
+        return False
 
-    def format_error(self, malformed_description: str) -> str:
+    def format_error(self) -> str:
         return (
-            f"Tool call format error: {malformed_description}\n\n"
-            f"Expected format:\n"
-            f"<tool_call>ToolName"
-            f"<arg_key>parameter_name</arg_key>"
-            f"<arg_value>parameter_value</arg_value>"
-            f"</tool_call>\n\n"
-            f"Example:\n"
-            f"<tool_call>Bash"
-            f"<arg_key>command</arg_key>"
-            f"<arg_value>ls -la</arg_value>"
-            f"</tool_call>\n\n"
-            f"Please retry with the correct format."
+            "Found <tool_call> block but format is incorrect.\n\n"
+            "Expected format:\n"
+            "<tool_call>ToolName"
+            "<arg_key>parameter_name</arg_key>"
+            "<arg_value>parameter_value</arg_value>"
+            "</tool_call>\n\n"
+            "Example:\n"
+            "<tool_call>Bash"
+            "<arg_key>command</arg_key>"
+            "<arg_value>ls -la</arg_value>"
+            "</tool_call>\n\n"
+            "Please retry with the correct format."
         )
 
     def system_prompt(self, tool_schemas: list[dict]) -> str:
@@ -246,8 +252,10 @@ _ALAN_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# Loose pattern: requires BOTH opening and closing tags so that a bare
+# <tool_use> mentioned in prose does not trigger malformed detection.
 _ALAN_LOOSE_PATTERN = re.compile(
-    r"<tool_use>.*?</tool_use>|<tool_use>[^<]{10,}",
+    r"<tool_use>.*?</tool_use>",
     re.DOTALL,
 )
 
@@ -270,21 +278,24 @@ class AlanFormat(ToolCallFormat):
                 pass
         return results
 
-    def detect_malformed(self, text: str) -> str | None:
+    def detect_malformed(self, text: str) -> bool:
         for match in _ALAN_LOOSE_PATTERN.finditer(text):
-            snippet = match.group(0)
-            if not _ALAN_PATTERN.match(snippet):
-                return f"Found <tool_use> block but content is not valid JSON: {snippet[:150]}"
-        return None
+            if not _ALAN_PATTERN.match(match.group(0)):
+                return True
+        return False
 
-    def format_error(self, malformed_description: str) -> str:
+    def format_error(self) -> str:
         return (
-            f"Tool call format error: {malformed_description}\n\n"
-            f"Expected format:\n"
-            f"<tool_use>\n"
-            f'{{"name": "tool_name", "input": {{"param": "value"}}}}\n'
-            f"</tool_use>\n\n"
-            f"Please retry with the correct format."
+            "Found <tool_use> block but content is not valid.\n\n"
+            "Expected format:\n"
+            "<tool_use>\n"
+            '{"name": "tool_name", "input": {"param": "value"}}\n'
+            "</tool_use>\n\n"
+            "Example:\n"
+            "<tool_use>\n"
+            '{"name": "Read", "input": {"file_path": "/path/to/file.py"}}\n'
+            "</tool_use>\n\n"
+            "Please retry with the correct format."
         )
 
     def system_prompt(self, tool_schemas: list[dict]) -> str:
@@ -377,11 +388,9 @@ def extract_tool_calls_from_text(
         return ParseResult(tool_calls=tool_calls, cleaned_text=cleaned, thinking=thinking)
 
     # No valid tool calls — check for malformed attempts
-    malformed = fmt.detect_malformed(text)
-    if malformed:
-        error_msg = fmt.format_error(malformed)
+    if fmt.detect_malformed(text):
         thinking, cleaned = _extract_thinking(text)
-        return ParseResult(tool_calls=[], cleaned_text=cleaned, thinking=thinking, error=error_msg)
+        return ParseResult(tool_calls=[], cleaned_text=cleaned, thinking=thinking, error=fmt.format_error())
 
     # No tool call attempt at all — normal text response
     thinking, cleaned = _extract_thinking(text)
