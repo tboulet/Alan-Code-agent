@@ -19,6 +19,13 @@ Works with any LiteLLM compatible API key or provider, and several local model p
 - **Python library** — drive the agent from your own code with sync, async, or streaming APIs. Build auto-fix loops, orchestrators, or custom UIs in a few lines.
 
 
+## What's new
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
+
+- **Prompt caching** — Alan now places `cache_control` breakpoints on tool definitions, system prompt, and conversation history, for both providers. System prompt was optimized to avoid cache-killing dynamic content. Reduce the cost of Alan Code.
+
+
 # Installation
 
 Clone the repo and install in editable mode. Requires **Python 3.11+**.
