@@ -11,6 +11,7 @@ let ws = null;
 let isAgentRunning = false;
 let pendingInputRequest = null;
 let currentStreamEl = null; // Element for the current streaming text
+let currentThinkingEl = null; // Element for the current streaming thinking block
 let inputHistory = [];       // Past user inputs
 let historyIndex = -1;       // Current position in history (-1 = new input)
 
@@ -98,12 +99,14 @@ function handleEvent(event) {
                 chatMessages.removeChild(chatMessages.firstChild);
             }
             currentStreamEl = null;
+            currentThinkingEl = null;
             break;
 
         case "request_start":
             // New API call starting — show agent is working
             setAgentRunning(true);
             currentStreamEl = null;
+            currentThinkingEl = null;
             break;
 
         case "assistant_delta":
@@ -161,7 +164,10 @@ function renderAssistantDelta(data) {
             currentStreamEl.textContent += block.text;
             scrollToBottom();
         } else if (block.type === "thinking" && block.thinking) {
-            const el = appendMsg("msg-thinking", block.thinking);
+            if (!currentThinkingEl) {
+                currentThinkingEl = appendMsg("msg-thinking", "");
+            }
+            currentThinkingEl.textContent += block.thinking;
             scrollToBottom();
         }
     }
@@ -174,11 +180,20 @@ function renderAssistantFinal(data) {
     // no deltas preceded this event so we must render text blocks here.
     const wasStreamed = currentStreamEl !== null;
     currentStreamEl = null;
+    // Drop the streamed thinking element if it ended up empty (whitespace-only).
+    // Some providers emit a thinking block per turn even when the model produced
+    // no actual reasoning content.
+    if (currentThinkingEl && !currentThinkingEl.textContent.trim()) {
+        currentThinkingEl.remove();
+    }
+    currentThinkingEl = null;
     if (!data.content) return;
 
     for (const block of data.content) {
         if (block.type === "text" && block.text && !wasStreamed) {
             appendMsg("msg-assistant", block.text);
+        } else if (block.type === "thinking" && block.thinking && block.thinking.trim() && !wasStreamed) {
+            appendMsg("msg-thinking", block.thinking);
         } else if (block.type === "tool_use") {
             renderToolCall(block);
         }
@@ -227,7 +242,7 @@ function renderUserMessage(data) {
                 } else {
                     const el = document.createElement("div");
                     el.className = "msg-tool-result" + (block.is_error ? " error" : "");
-                    el.textContent = truncate(text, 1000);
+                    el.textContent = text;
                     chatMessages.appendChild(el);
                 }
             }
@@ -444,6 +459,11 @@ function sendInputResponse(value) {
 
 // ── LLM Perspective rendering ──────────────────────────────────
 
+// Known limitation: panel always gets OpenAI-shaped dicts (loop.py uses
+// messages_to_openai_dicts), and that conversion drops thinking blocks. On
+// Anthropic-direct + extended thinking, Claude does attend to those blocks,
+// so the panel underrepresents what the model sees. Fix: feed provider-native
+// payloads and handle typed-block arrays (text/thinking/tool_use/tool_result).
 function renderLlmPerspective(messages, systemPrompt) {
     llmMessages.innerHTML = "";
 
@@ -476,27 +496,27 @@ function renderLlmPerspective(messages, systemPrompt) {
 
         const roleEl = document.createElement("div");
         roleEl.className = `llm-role llm-role-${role}`;
-        roleEl.textContent = role;
+        roleEl.textContent = role === "tool" ? "tool result" : role;
         el.appendChild(roleEl);
 
         const contentEl = document.createElement("div");
         contentEl.className = "llm-content";
 
         if (typeof msg.content === "string") {
-            contentEl.textContent = truncate(msg.content, 2000);
+            contentEl.textContent = msg.content;
         } else if (msg.tool_calls) {
             // Assistant with tool calls
             const text = msg.content || "";
-            if (text) contentEl.textContent = truncate(text, 1000) + "\n\n";
+            if (text) contentEl.textContent = text + "\n\n";
             for (const tc of msg.tool_calls) {
                 const fn = tc.function || {};
-                contentEl.textContent += `[tool_call] ${fn.name}(${truncate(fn.arguments || "", 200)})\n`;
+                contentEl.textContent += `[tool_call] ${fn.name}(${fn.arguments || ""})\n`;
             }
         } else if (msg.tool_call_id) {
             // Tool result
-            contentEl.textContent = truncate(msg.content || "", 1000);
+            contentEl.textContent = msg.content || "";
         } else {
-            contentEl.textContent = truncate(JSON.stringify(msg.content), 1000);
+            contentEl.textContent = JSON.stringify(msg.content);
         }
 
         el.appendChild(contentEl);
