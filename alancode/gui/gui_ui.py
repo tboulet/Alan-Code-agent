@@ -46,9 +46,19 @@ class GUIUI(SessionUI):
     # The chat panel renders the full conversation itself on resume.
     renders_conversation = True
 
-    def __init__(self, agent: AlanCodeAgent, cwd: str = "") -> None:
+    def __init__(
+        self,
+        agent: AlanCodeAgent,
+        cwd: str = "",
+        *,
+        gui_label: str | None = None,
+    ) -> None:
         self._agent = agent
         self._cwd = cwd
+        # Optional override for the URL path segment. When None, the agent's
+        # gui_label (if any) is used; if that is also None, the server falls
+        # back to ``Path(cwd).name``.
+        self._gui_label = gui_label or getattr(agent, "_gui_label", None)
         self._connections: Set[WebSocket] = set()
         self._pending_input: asyncio.Future[str] | None = None
         self._event_history: list[dict] = []  # For replay on reconnect
@@ -64,7 +74,7 @@ class GUIUI(SessionUI):
         from alancode.gui.server import start_gui_server
 
         url, self._server, self._server_task = await start_gui_server(
-            gui_ui=self, cwd=self._cwd, port=port,
+            gui_ui=self, cwd=self._cwd, port=port, label=self._gui_label,
         )
         return url
 

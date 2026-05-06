@@ -232,8 +232,12 @@ class AlanCodeAgent:
         verbose: bool = False,
         extra_tools: list | None = None,
         custom_system_prompt: str | None = None,
+        gui_label: str | None = None,
         **provider_kwargs: Any,
     ) -> None:
+        # Optional URL segment for the GUI bridge; falls back to cwd basename.
+        self._gui_label = gui_label
+        # self._gui_label = "iss/eussou"
         self._cwd = cwd or os.getcwd()
 
         # Resolve session ID

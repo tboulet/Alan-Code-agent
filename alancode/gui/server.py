@@ -51,10 +51,19 @@ def _cwd_url_segment(cwd: str) -> str:
     return Path(cwd).name or "alan"
 
 
-def create_gui_app(gui_ui: GUIUI, cwd: str = "") -> FastAPI:
-    """Create the FastAPI application for the GUI."""
+def create_gui_app(
+    gui_ui: GUIUI, cwd: str = "", *, label: str | None = None
+) -> FastAPI:
+    """Create the FastAPI application for the GUI.
+
+    Args:
+        gui_ui: The GUIUI instance backing the server.
+        cwd: Working directory; echoed in /api/session.
+        label: Optional URL path segment override. Falls back to
+            ``Path(cwd).name`` when None.
+    """
     app = FastAPI(title="Alan Code GUI", docs_url=None, redoc_url=None)
-    project_name = _cwd_url_segment(cwd)
+    project_name = label or _cwd_url_segment(cwd)
 
     # ── Session info endpoint ─────────────────────────────────────────
 
@@ -118,18 +127,27 @@ async def start_gui_server(
     gui_ui: GUIUI,
     cwd: str = "",
     port: int | None = None,
+    *,
+    label: str | None = None,
 ) -> tuple[str, "uvicorn.Server", asyncio.Task]:
     """Start the GUI server as a background asyncio task.
 
     Returns ``(url, server, task)`` so the caller can shut it down cleanly.
+
+    Args:
+        gui_ui: The GUIUI instance backing the server.
+        cwd: Working directory.
+        port: Port to bind to; auto-selected when None.
+        label: Optional URL path segment override. Falls back to the
+            basename of ``cwd`` when None.
     """
     import uvicorn
 
     if port is None:
         port = _find_available_port()
 
-    app = create_gui_app(gui_ui, cwd=cwd)
-    project_name = _cwd_url_segment(cwd)
+    app = create_gui_app(gui_ui, cwd=cwd, label=label)
+    project_name = label or _cwd_url_segment(cwd)
     url = f"http://localhost:{port}/{project_name}/"
 
     config = uvicorn.Config(
