@@ -4,8 +4,10 @@ import pytest
 
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
 from alancode.tools.registry import (
+    PROGRAMMATIC_EXCLUDED_TOOL_NAMES,
     get_all_builtin_tools,
     get_enabled_tools,
+    get_programmatic_tool_set,
     find_tool_by_name,
     tools_to_schemas,
 )
@@ -80,6 +82,16 @@ class TestToolRegistry:
         schema = echo.to_schema()
         assert schema["name"] == "Echo"
         assert "input_schema" in schema
+
+    def test_programmatic_tool_set_excludes_external_tools(self):
+        names = {t.name for t in get_programmatic_tool_set()}
+        for excluded in PROGRAMMATIC_EXCLUDED_TOOL_NAMES:
+            assert excluded not in names
+
+    def test_programmatic_tool_set_keeps_filesystem_tools(self):
+        names = {t.name for t in get_programmatic_tool_set()}
+        for kept in {"Bash", "Read", "Write", "Edit", "Glob", "Grep"}:
+            assert kept in names
 
 
 # ---------------------------------------------------------------------------

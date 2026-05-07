@@ -215,6 +215,7 @@ class TestCostTracker:
         tracker, session = _make_tracker(tmp_path)
         usage = Usage(input_tokens=500, output_tokens=200)
         tracker.add_usage(usage, "claude-sonnet-4-6")
+        session.close()
 
         # Create a new SessionState pointing to the same path — should see the data
         session2 = SessionState(session_id="test-session", cwd=str(tmp_path))

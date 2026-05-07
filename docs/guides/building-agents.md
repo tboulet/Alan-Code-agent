@@ -206,6 +206,29 @@ finally:
 
 `agent.close()` is async. The CLI calls it for you on `/exit`. Library users should either call it themselves or use a context manager (not yet provided; TODO).
 
+## Programmatic mode
+
+When Alan is embedded in another program — a benchmark harness, a parent agent, an unattended pipeline — pass `programmatic=True`:
+
+```python
+agent = AlanCodeAgent(
+    provider="litellm",
+    model="anthropic/claude-sonnet-4-6",
+    cwd="/path/to/experiment",
+    permission_mode="yolo",
+    programmatic=True,
+    extra_tools=[MyDomainTool()],   # optional
+)
+```
+
+This detaches Alan from project- and host-level state that's normally helpful for an interactive assistant but would contaminate a controlled run: `~/.alan/ALAN.md`, `<cwd>/ALAN.md`, `~/.alan/memory/MEMORY.md`, AGT bootstrap, and the network/git/ask-user tools (`WebFetch`, `GitCommit`, `AskUserQuestion`, `Skill`).
+
+Refine the tool set with `tools=` (full replacement) or `disabled_tools=` (subtractive). See [reference/python-api.md](../reference/python-api.md#programmatic-mode) for the full list of behaviors.
+
+## Running multiple agents in the same `cwd`
+
+`SessionState` takes an exclusive lock on `<cwd>/.alan/sessions/<session_id>/session.lock`. Two processes loading the same `session_id` would otherwise stomp each other's writes; the second one now raises `alancode.session.SessionLockedError`. Two processes with **distinct** session IDs in the same `cwd` work fine — sessions are namespaced under `.alan/sessions/<id>/`.
+
 ## Related
 
 - [reference/python-api.md](../reference/python-api.md) — full class + method signatures.

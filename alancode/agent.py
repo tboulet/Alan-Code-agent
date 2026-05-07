@@ -233,11 +233,14 @@ class AlanCodeAgent:
         extra_tools: list | None = None,
         custom_system_prompt: str | None = None,
         gui_label: str | None = None,
+        programmatic: bool = False,
+        tools: list | None = None,
+        disabled_tools: list[str] | None = None,
         **provider_kwargs: Any,
     ) -> None:
-        # Optional URL segment for the GUI bridge; falls back to cwd basename.
         self._gui_label = gui_label
-        # self._gui_label = "iss/eussou"
+        self._programmatic = programmatic
+
         self._cwd = cwd or os.getcwd()
 
         # Resolve session ID
@@ -317,15 +320,22 @@ class AlanCodeAgent:
         # Tools, abort, message queue
         self._state = AgentState.WAITING
         self._messages: list[Message] = []
-        self._tools = get_enabled_tools()
-        # Append the Skill tool (needs registry reference)
         from alancode.tools.builtin.skill_tool import SkillTool
-        self._tools.append(SkillTool(self._skill_registry))
-        # Append caller-provided extra tools (for embedding agents in larger frameworks)
+        from alancode.tools.registry import get_programmatic_tool_set
+
+        if tools is not None:
+            base = list(tools)
+        elif programmatic:
+            base = get_programmatic_tool_set()
+        else:
+            base = get_enabled_tools()
+            base.append(SkillTool(self._skill_registry))
+        if disabled_tools:
+            blocked = set(disabled_tools)
+            base = [t for t in base if t.name not in blocked]
         if extra_tools:
-            self._tools.extend(extra_tools)
-        # Custom system prompt: when set, replaces Alan's default sections entirely.
-        # See alancode.prompt.system_prompt.get_system_prompt's `custom_prompt` arg.
+            base.extend(extra_tools)
+        self._tools = base
         self._custom_system_prompt = custom_system_prompt
         self._abort_event = asyncio.Event()
         self._message_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
@@ -450,7 +460,8 @@ class AlanCodeAgent:
                 logger.debug("SessionStart hook error (ignored)", exc_info=True)
 
             # Initialize AGT session root (once, on first turn)
-            self._init_agt_root()
+            if not self._programmatic:
+                self._init_agt_root()
 
         try:
             # --- user message ---
@@ -461,7 +472,9 @@ class AlanCodeAgent:
             mem_dir = get_memory_dir(self._cwd)
             global_mem_dir = get_global_memory_dir()
             memory_index = load_memory_index(cwd=self._cwd)
-            global_memory_index = load_global_memory_index()
+            global_memory_index = (
+                None if self._programmatic else load_global_memory_index()
+            )
             memory_section_text = build_memory_section(
                 self._memory_mode,
                 str(mem_dir),
@@ -469,8 +482,12 @@ class AlanCodeAgent:
                 global_memory_dir=str(global_mem_dir),
                 global_memory_index=global_memory_index,
             )
-            global_instructions = load_global_project_instructions()
-            project_instructions = load_project_instructions(self._cwd)
+            if self._programmatic:
+                global_instructions = None
+                project_instructions = None
+            else:
+                global_instructions = load_global_project_instructions()
+                project_instructions = load_project_instructions(self._cwd)
             # Combine global + project instructions (project wins on conflicts)
             append_parts = [p for p in (global_instructions, project_instructions) if p]
             append_prompt = "\n\n".join(append_parts) if append_parts else None
@@ -702,6 +719,7 @@ class AlanCodeAgent:
             )
         except Exception:
             logger.debug("SessionEnd hook error (ignored)", exc_info=True)
+        self._session.close()
 
     # ── Allow rules persistence ──────────────────────────────────────────────
 

@@ -14,9 +14,13 @@ Use :meth:`batch` to group multiple updates into a single disk write::
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import logging
+import os
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +32,55 @@ logger = logging.getLogger(__name__)
 def _get_session_state_path(cwd: str, session_id: str) -> Path:
     """Return ``.alan/sessions/<session_id>/state.json``."""
     return Path(cwd) / ".alan" / "sessions" / session_id / "state.json"
+
+
+class SessionLockedError(RuntimeError):
+    """Raised when a session is already in use by another process.
+
+    Two processes loading the same ``session_id`` would otherwise stomp
+    each other's writes to ``state.json`` and ``transcript.jsonl``.
+    """
+
+    def __init__(self, session_id: str, lock_path: Path, holder_info: str) -> None:
+        super().__init__(
+            f"Session {session_id[:8]} is already in use by another process. "
+            f"Holder: {holder_info}. Lock file: {lock_path}"
+        )
+        self.session_id = session_id
+        self.lock_path = lock_path
+        self.holder_info = holder_info
+
+
+def _acquire_session_lock(session_dir: Path, session_id: str) -> int:
+    """Acquire an exclusive flock on ``<session_dir>/session.lock``.
+
+    Returns the open file descriptor; the kernel releases the lock when
+    this fd is closed (or the process exits). Raises
+    :class:`SessionLockedError` if another live process holds it.
+    """
+    lock_path = session_dir / "session.lock"
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError) as e:
+        if getattr(e, "errno", None) not in (errno.EWOULDBLOCK, errno.EAGAIN):
+            os.close(fd)
+            raise
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                holder_info = f.read().strip() or "<unknown>"
+        except OSError:
+            holder_info = "<unknown>"
+        os.close(fd)
+        raise SessionLockedError(session_id, lock_path, holder_info)
+
+    os.ftruncate(fd, 0)
+    info = (
+        f"pid={os.getpid()} "
+        f"acquired_at={datetime.now(timezone.utc).isoformat()}\n"
+    )
+    os.write(fd, info.encode("utf-8"))
+    return fd
 
 
 class SessionState:
@@ -53,8 +106,31 @@ class SessionState:
         self.cwd = cwd
         self._state_path = _get_session_state_path(cwd, session_id)
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock_fd: int | None = _acquire_session_lock(
+            self._state_path.parent, session_id,
+        )
         self._cache: dict[str, Any] = self._load_from_disk()
         self._batch_depth: int = 0
+
+    def close(self) -> None:
+        """Release the session lock. Idempotent."""
+        if self._lock_fd is None:
+            return
+        try:
+            fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(self._lock_fd)
+        except OSError:
+            pass
+        self._lock_fd = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     # ── Disk I/O ──────────────────────────────────────────────────────────
 

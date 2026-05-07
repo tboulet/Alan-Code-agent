@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-05-07** — Added `programmatic=True` mode to `AlanCodeAgent` for embedding Alan as a library in benchmark harnesses, parent agents, and unattended pipelines. Skips `~/.alan/ALAN.md`, `<cwd>/ALAN.md`, `~/.alan/memory/MEMORY.md`, AGT bootstrap, and the `WebFetch`/`GitCommit`/`AskUserQuestion`/`Skill` tools. New `tools=` and `disabled_tools=` constructor params for fine-grained tool control.
+- **2026-05-07** — `SessionState` now takes an exclusive `flock` on `<session_dir>/session.lock`. Two processes loading the same `session_id` would otherwise stomp each other's writes; the second now raises `alancode.session.SessionLockedError`. Released by `agent.close()` and on process exit.
+- **2026-05-07** — Added `gui_label` parameter to `AlanCodeAgent`, overriding the URL path segment for the GUI bridge.
 - **2026-04-28** — Restructured system prompt for caching. `session_guidance`, `scratchpad`, and `environment` are now in the cacheable static block. Removed `git status` from the system prompt (it changed every turn and killed the cache).
 - **2026-04-28** — Added `(estimate w/o cache)` indicator on the cost line when no cache tokens were reported by the provider, signalling possible cost overestimation.
 - **2026-04-27** — Added `extra_tools` and `custom_system_prompt` parameters in the `AlanCodeAgent` constructor.

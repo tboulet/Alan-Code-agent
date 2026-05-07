@@ -196,5 +196,6 @@ class TestSessionName:
         from alancode.session.state import SessionState
         s = SessionState(session_id="test", cwd=str(tmp_path))
         s.session_name = "my-refactor"
+        s.close()
         s2 = SessionState(session_id="test", cwd=str(tmp_path))
         assert s2.session_name == "my-refactor"

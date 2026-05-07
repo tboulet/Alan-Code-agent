@@ -23,7 +23,8 @@ Works with any LiteLLM compatible API key or provider, and several local model p
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
-- **Prompt caching** — Alan now places `cache_control` breakpoints on tool definitions, system prompt, and conversation history, for both providers. System prompt was optimized to avoid cache-killing dynamic content. Reduce the cost of Alan Code.
+- **2026-05-07 — Programmatic mode** — `AlanCodeAgent(programmatic=True, ...)` runs Alan as a library component for benchmark harnesses, parent agents, and unattended pipelines. Skips host-level state (`~/.alan/ALAN.md`, `~/.alan/memory/`, project `ALAN.md`, AGT bootstrap) and the network/git/ask-user tools. New `tools=` and `disabled_tools=` constructor params for fine-grained tool control.
+- **2026-04-28 — Prompt caching** — Alan now places `cache_control` breakpoints on tool definitions, system prompt, and conversation history, for both providers. System prompt was optimized to avoid cache-killing dynamic content. Reduce the cost of Alan Code.
 
 
 # Installation
@@ -198,6 +199,25 @@ asyncio.run(main())
 ```
 
 Full example: [`examples/example_3_streaming_agent.py`](examples/example_3_streaming_agent.py).
+
+### Programmatic mode — Alan as an embedded library
+
+When Alan runs inside another program (a benchmark harness, a parent agent, an unattended pipeline) rather than as a developer assistant, pass `programmatic=True`:
+
+```python
+agent = AlanCodeAgent(
+    provider="litellm",
+    model="anthropic/claude-sonnet-4-6",
+    cwd="/path/to/experiment",
+    permission_mode="yolo",
+    programmatic=True,
+    extra_tools=[MyDomainTool()],   # optional
+)
+```
+
+This detaches Alan from project- and host-level state that would otherwise contaminate a controlled run: `~/.alan/ALAN.md`, project `ALAN.md`, `~/.alan/memory/MEMORY.md`, AGT bootstrap, and the network/git/ask-user tools (`WebFetch`, `GitCommit`, `AskUserQuestion`, `Skill`). Refine the tool set further with `tools=[...]` (full replacement) or `disabled_tools=[...]` (subtractive).
+
+See [docs/reference/python-api.md#programmatic-mode](docs/reference/python-api.md#programmatic-mode) for details.
 
 # Features
 

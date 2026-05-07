@@ -78,6 +78,7 @@ class TestSessionStateAGT:
         state1 = SessionState(session_id="agt-persist", cwd=str(tmp_path))
         state1.alan_commits = ["sha1", "sha2"]
         state1.session_root_sha = "root_sha"
+        state1.close()
 
         # Reload from disk
         state2 = SessionState(session_id="agt-persist", cwd=str(tmp_path))

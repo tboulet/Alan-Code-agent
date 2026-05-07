@@ -24,6 +24,12 @@ AlanCodeAgent(
     session_id: str | None = None,
     ask_callback: Callable | None = None,
     verbose: bool = False,
+    extra_tools: list[Tool] | None = None,
+    custom_system_prompt: str | None = None,
+    gui_label: str | None = None,
+    programmatic: bool = False,
+    tools: list[Tool] | None = None,
+    disabled_tools: list[str] | None = None,
     **provider_kwargs: Any,
 )
 ```
@@ -36,6 +42,12 @@ Key arguments:
 - **`provider`** — either a string (`"anthropic"`, `"litellm"`, `"scripted"`) or a concrete `LLMProvider` instance (lets you inject a custom provider).
 - **`session_id`** — if set, resume an existing session; otherwise a new session ID is generated.
 - **`ask_callback`** — `async def callback(question: str, options: list[str]) -> str`. Called when a tool needs user approval. Return the chosen option text (or any string to use as a free-text answer).
+- **`extra_tools`** — additional tools appended to the agent's tool list. See [guides/building-agents.md](../guides/building-agents.md) for embedding patterns.
+- **`custom_system_prompt`** — when set, replaces Alan's default system prompt sections entirely.
+- **`gui_label`** — URL path segment for the GUI bridge. Defaults to the cwd basename.
+- **`programmatic`** — when `True`, runs Alan as a library component rather than a developer assistant. See [Programmatic mode](#programmatic-mode) below.
+- **`tools`** — explicit base tool list, replacing the default builtins. Composes with `disabled_tools` and `extra_tools`. See [Tool selection](#tool-selection) below.
+- **`disabled_tools`** — list of tool names to remove from the base set (e.g. `["WebFetch", "GitCommit"]`).
 
 ## Query methods
 
@@ -144,6 +156,58 @@ await agent.close()
 ```
 
 Fires `session_end` hooks. Call once when done. The CLI does this on `/exit`.
+
+## Programmatic mode
+
+Use `programmatic=True` when Alan is being driven by another program (a benchmark harness, a parent agent, an automated pipeline) rather than a developer at a terminal. It detaches Alan from project- and host-level state that's normally helpful for an interactive assistant but contaminates a controlled run.
+
+```python
+agent = AlanCodeAgent(
+    provider="litellm",
+    model="anthropic/claude-sonnet-4-6",
+    cwd="/path/to/experiment",
+    permission_mode="yolo",
+    programmatic=True,
+)
+```
+
+When `programmatic=True`:
+
+- `~/.alan/ALAN.md` (global instructions) is **not** loaded.
+- `<cwd>/ALAN.md` (project instructions) is **not** loaded.
+- `~/.alan/memory/MEMORY.md` (global memory index) is **not** loaded.
+- AGT (Agentic Git Tree) bootstrap is skipped — no HEAD snapshot, no `.gitignore` mutation.
+- The default tool set excludes `WebFetch`, `GitCommit`, and `AskUserQuestion`. `SkillTool` is also not appended.
+
+Project-scoped state in `<cwd>/.alan/sessions/<id>/` (transcript, state, scratchpad) is unchanged — that's the agent's own working memory and is needed for resume.
+
+You can override the curated tool set with `tools=` or refine it with `disabled_tools=` (see below).
+
+## Tool selection
+
+Three knobs control the agent's tool list, applied in order:
+
+1. **Base set.** Resolved from the first of:
+   - `tools=[...]` if passed (explicit replacement),
+   - the curated programmatic set if `programmatic=True`,
+   - all enabled built-in tools otherwise (the `SkillTool` is appended in this case).
+2. **Subtract** any names listed in `disabled_tools`.
+3. **Append** anything in `extra_tools`.
+
+```python
+# Read-only assistant: drop write/exec tools entirely
+agent = AlanCodeAgent(disabled_tools=["Bash", "Edit", "Write", "GitCommit"])
+
+# Custom tool list (e.g. for a domain-specific agent)
+agent = AlanCodeAgent(tools=[MyDomainTool(), MyOtherTool()])
+
+# Programmatic mode plus an extra custom tool
+agent = AlanCodeAgent(programmatic=True, extra_tools=[MyTool()])
+```
+
+## Session locking
+
+`SessionState` takes an exclusive `flock` on `<cwd>/.alan/sessions/<session_id>/session.lock` at construction. A second process attempting to open the same session raises `alancode.session.SessionLockedError`. The lock is released by `agent.close()` and on process exit.
 
 ## Custom permission callbacks
 

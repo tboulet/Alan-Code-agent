@@ -224,6 +224,16 @@ schemas = tools_to_schemas(ALL_BUILTIN_TOOLS)
 - **Native tool-use models** (Anthropic, OpenAI, Gemini, most mainstream): schemas passed as the `tools=[...]` API parameter.
 - **Text-based tool-use models** (GLM, Hermes fine-tunes): the schema list is rendered into the system prompt. Format depends on `tool_call_format` setting (`hermes`, `glm`, `alan`). See `alancode/tools/text_tool_parser.py`.
 
+## Controlling the tool set from Python
+
+The `AlanCodeAgent` constructor exposes three knobs, applied in this order:
+
+1. **Base set.** `tools=[...]` (explicit replacement) → curated programmatic set if `programmatic=True` → all enabled built-in tools (with `SkillTool` appended).
+2. **Subtract** any names in `disabled_tools=[...]`.
+3. **Append** anything in `extra_tools=[...]`.
+
+The curated programmatic set excludes `WebFetch`, `GitCommit`, `AskUserQuestion`, and `SkillTool` — appropriate when no human is at the prompt and no network/git side effects are wanted. See [reference/python-api.md#programmatic-mode](python-api.md#programmatic-mode).
+
 ## Related
 
 - [concepts/tools-and-permissions.md](../concepts/tools-and-permissions.md) — mental model.

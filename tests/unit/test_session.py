@@ -16,7 +16,7 @@ from alancode.session.session import (
     load_session_settings,
     save_session_settings,
 )
-from alancode.session.state import SessionState
+from alancode.session.state import SessionLockedError, SessionState
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +246,7 @@ class TestSessionState:
         s = SessionState(session_id="test-2", cwd=str(tmp_path))
         s.turn_count = 5
         s.total_cost_usd = 1.23
+        s.close()
 
         # Load fresh from same path — should see the data
         s2 = SessionState(session_id="test-2", cwd=str(tmp_path))
@@ -258,6 +259,7 @@ class TestSessionState:
         s.total_input_tokens = 100
         s.total_input_tokens += 50
         assert s.total_input_tokens == 150
+        s.close()
 
         # Verify on disk
         s2 = SessionState(session_id="test-3", cwd=str(tmp_path))
@@ -270,6 +272,7 @@ class TestSessionState:
             s.total_input_tokens = 500
             s.total_output_tokens = 200
             s.total_cost_usd = 0.05
+        s.close()
 
         s2 = SessionState(session_id="test-4", cwd=str(tmp_path))
         assert s2.total_input_tokens == 500
@@ -289,6 +292,7 @@ class TestSessionState:
             s.turn_count = 3
 
         assert s.turn_count == 3
+        s.close()
         s2 = SessionState(session_id="test-5", cwd=str(tmp_path))
         assert s2.turn_count == 3
 
@@ -297,6 +301,7 @@ class TestSessionState:
         s = SessionState(session_id="test-6", cwd=str(tmp_path))
         s.add_allow_rule({"tool_name": "Bash", "rule_content": "ls *", "source": "session"})
         s.add_allow_rule({"tool_name": "Bash", "rule_content": "cat *", "source": "session"})
+        s.close()
 
         s2 = SessionState(session_id="test-6", cwd=str(tmp_path))
         assert len(s2.allow_rules) == 2
@@ -317,7 +322,35 @@ class TestSessionState:
         s = SessionState(session_id="test-9", cwd=str(tmp_path))
         # Write garbage to state file
         s._state_path.write_text("not valid json{{{")
+        s.close()
 
         s2 = SessionState(session_id="test-9", cwd=str(tmp_path))
         assert s2.turn_count == 0
         assert s2.total_cost_usd == 0.0
+
+    def test_lock_refuses_concurrent_open(self, tmp_path):
+        """Opening the same session twice without releasing raises."""
+        s = SessionState(session_id="test-lock", cwd=str(tmp_path))
+        try:
+            with pytest.raises(SessionLockedError) as exc:
+                SessionState(session_id="test-lock", cwd=str(tmp_path))
+            assert exc.value.session_id == "test-lock"
+            assert str(os.getpid()) in exc.value.holder_info
+        finally:
+            s.close()
+
+    def test_lock_released_on_close(self, tmp_path):
+        """After close(), the same session can be reopened."""
+        s = SessionState(session_id="test-lock-2", cwd=str(tmp_path))
+        s.turn_count = 7
+        s.close()
+
+        s2 = SessionState(session_id="test-lock-2", cwd=str(tmp_path))
+        assert s2.turn_count == 7
+        s2.close()
+
+    def test_close_is_idempotent(self, tmp_path):
+        """close() can be called multiple times."""
+        s = SessionState(session_id="test-lock-3", cwd=str(tmp_path))
+        s.close()
+        s.close()
