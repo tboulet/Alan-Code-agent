@@ -19,8 +19,8 @@ A setting set at level 1 overrides everything below. A setting absent at level 1
 
 ```json
 {
-  "provider": "litellm",
-  "model": "openrouter/google/gemini-2.5-pro",
+  "backend": "anthropic-native",
+  "model": "claude-sonnet-4-6",
   "permission_mode": "edit",
   "memory": "off",
   "compaction_threshold_percent": 75
@@ -28,6 +28,8 @@ A setting set at level 1 overrides everything below. A setting absent at level 1
 ```
 
 Auto-created on first run with sensible defaults. Commit it if you want teammates to pick up the same config, gitignore it if you don't.
+
+Old files using the `provider` key (`"litellm"` / `"anthropic"` / `"scripted"`) are auto-migrated to `backend` on first read.
 
 ### `.alan/sessions/<id>/settings.json` (per-session snapshot)
 
@@ -38,21 +40,20 @@ You don't edit these manually — they're managed by the session system.
 ### CLI flags and constructor args
 
 ```bash
-alancode --provider litellm --model openai/gpt-4o --permission-mode yolo
+alancode --model gpt-4o --permission-mode yolo
 ```
 
 Or in Python:
 
 ```python
 AlanCodeAgent(
-    provider="litellm",
-    model="openai/gpt-4o",
+    model="gpt-4o",
     permission_mode="yolo",
     max_iterations_per_turn=15,
 )
 ```
 
-Pass only what you want to override — omitted args fall through to the chain.
+Pass only what you want to override — omitted args fall through to the chain. The transport backend is inferred from `model`; pass `backend=` explicitly only if you need to override the inference.
 
 ## Changing a setting mid-session
 
@@ -63,7 +64,7 @@ Three ways:
 > /settings permission_mode=yolo
 ```
 
-Updates the session's effective setting AND persists to the session snapshot. Takes effect immediately. Provider-related changes (`provider`, `model`, `api_key`, `base_url`) trigger provider recreation.
+Updates the session's effective setting AND persists to the session snapshot. Takes effect immediately. Backend-related changes (`backend`, `model`, `api_key`, `base_url`) recreate the underlying `LLMProvider`. Changing `model` also re-infers the backend (bare `claude-*` → `anthropic-native`, anything else → `auto`).
 
 **Edit the project file**:
 ```

@@ -2,7 +2,7 @@
 
 Query API (2x2 matrix)::
 
-    agent = AlanCodeAgent(provider="litellm", model="openrouter/google/gemini-2.5-flash")
+    agent = AlanCodeAgent(model="openrouter/google/gemini-2.5-flash")
 
     answer = agent.query("Fix the bug")                  # sync, text
     events = agent.query_events("Fix the bug")            # sync, events list
@@ -62,6 +62,7 @@ from alancode.hooks.handlers import on_session_start, on_session_end
 from alancode.query.loop import QueryParams, query_loop
 from alancode.settings import (
     SETTINGS_DEFAULTS,
+    infer_backend,
     load_projects_settings_and_maybe_init,
     validate_setting,
     load_settings,
@@ -106,28 +107,30 @@ def _ensure_alan_gitignored(cwd: str) -> None:
         gitignore.write_text(".alan/\n")
 
 
-# ── Provider resolution ──────────────────────────────────────────────────────
+# ── Backend resolution ──────────────────────────────────────────────────────
 
 
-def _resolve_provider(
-    provider: str | LLMProvider,
+def _resolve_backend(
+    backend: str | LLMProvider,
     *,
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
     **kwargs: Any,
 ) -> LLMProvider:
-    """Resolve a provider string or instance into an LLMProvider.
+    """Resolve a backend string (or pre-built ``LLMProvider``) into an
+    ``LLMProvider`` instance the agent can stream against.
 
-    If *provider* is already an ``LLMProvider`` instance, returns it as-is.
-    If it's a string, creates the corresponding provider:
+    If *backend* is already an ``LLMProvider``, return it unchanged — this
+    is the escape hatch for users who want to wire their own transport.
+    Otherwise, look up the backend name in the registry:
 
-    - ``"litellm"`` → ``LiteLLMProvider``
-    - ``"anthropic"`` → ``AnthropicProvider``
-    - ``"scripted"`` → ``ScriptedProvider`` (for testing)
+    - ``"auto"``             → ``LiteLLMProvider`` (universal, prefix-routed).
+    - ``"anthropic-native"`` → ``AnthropicProvider`` (direct SDK).
+    - ``"scripted"``         → ``ScriptedProvider`` (tests).
     """
-    if isinstance(provider, LLMProvider):
-        return provider
+    if isinstance(backend, LLMProvider):
+        return backend
 
     if model is None:
         raise ValueError(
@@ -137,9 +140,9 @@ def _resolve_provider(
             "  - Constructor: AlanCodeAgent(model='<model_name>')"
         )
 
-    name = provider.lower()
+    name = backend.lower() if isinstance(backend, str) else backend
 
-    if name == "litellm":
+    if name == "auto":
         from alancode.providers.litellm_provider import LiteLLMProvider
 
         return LiteLLMProvider(
@@ -149,26 +152,38 @@ def _resolve_provider(
             **kwargs,
         )
 
-    if name == "anthropic":
+    if name == "anthropic-native":
         from alancode.providers.anthropic_provider import AnthropicProvider
 
         return AnthropicProvider(api_key=api_key, model=model, base_url=base_url, **kwargs)
 
     if name == "scripted":
+        # ``model="remote"`` selects the HTTP-driven impersonation backend;
+        # any other model name (or None) uses the in-memory ScriptedProvider.
+        if isinstance(model, str) and model.lower() == "remote":
+            from alancode.providers.remote_scripted_provider import (
+                RemoteScriptedProvider,
+            )
+            return RemoteScriptedProvider(**kwargs)
         from alancode.providers.scripted_provider import ScriptedProvider
 
         return ScriptedProvider(**kwargs)
 
     raise ValueError(
-        f"Unknown provider '{provider}'. "
-        f"Supported: 'litellm', 'anthropic', 'scripted', or pass an LLMProvider instance."
+        f"Unknown backend '{backend}'. "
+        f"Supported: 'auto', 'anthropic-native', 'scripted', "
+        f"or pass an LLMProvider instance."
     )
 
 
 def _create_provider_from_settings(settings: dict[str, Any], **extra) -> LLMProvider:
-    """Create a provider from a settings dict. Used by __init__ and update_session_setting."""
-    return _resolve_provider(
-        settings.get("provider", "litellm"),
+    """Create the ``LLMProvider`` instance described by *settings*.
+
+    Used by ``__init__`` and by ``update_session_setting`` when a
+    backend-related key changes mid-session.
+    """
+    return _resolve_backend(
+        settings.get("backend", "auto"),
         model=settings.get("model"),
         api_key=settings.get("api_key"),
         base_url=settings.get("base_url"),
@@ -186,11 +201,19 @@ class AlanCodeAgent:
 
     Parameters
     ----------
-    provider : str or LLMProvider
-        LLM provider. Pass a string (``"litellm"``, ``"anthropic"``,
-        ``"scripted"``) or an ``LLMProvider`` instance.
+    backend : str or LLMProvider, optional
+        Transport backend (advanced). Either a string
+        (``"auto"`` — universal LiteLLM transport;
+        ``"anthropic-native"`` — direct Anthropic SDK with cache_control,
+        thinking, and native tool_use; ``"scripted"`` — internal/tests)
+        or a pre-built ``LLMProvider`` instance. When not set, the
+        backend is inferred from *model* (bare ``claude-*`` →
+        ``"anthropic-native"``, anything else → ``"auto"``).
     model : str, optional
-        Model to use. If None, uses the provider's default.
+        Model to use. Accepts bare names (``"gpt-4o"``,
+        ``"claude-sonnet-4-6"``) or LiteLLM-style ``provider/model``
+        prefixes (``"ollama/llama3.1"``,
+        ``"openrouter/google/gemini-2.5-pro"``).
     api_key : str, optional
         API key. If None, read from environment variables.
     cwd : str, optional
@@ -209,14 +232,19 @@ class AlanCodeAgent:
         If None, permission prompts default to DENY.
     verbose : bool
         Enable debug logging.
+    provider : str or LLMProvider, optional
+        Deprecated alias for *backend*. Old values are translated:
+        ``"litellm"`` → ``"auto"``, ``"anthropic"`` →
+        ``"anthropic-native"``, ``"scripted"`` → ``"scripted"``.
+        Emits ``DeprecationWarning``; will be removed in a future release.
     **provider_kwargs
-        Extra keyword arguments passed to the provider constructor
-        (only when *provider* is a string).
+        Extra keyword arguments passed to the backend constructor
+        (only when *backend* is a string).
     """
 
     def __init__(
         self,
-        provider: str | LLMProvider | None = None,
+        backend: str | LLMProvider | None = None,
         *,
         model: str | None = None,
         api_key: str | None = None,
@@ -236,8 +264,32 @@ class AlanCodeAgent:
         programmatic: bool = False,
         tools: list | None = None,
         disabled_tools: list[str] | None = None,
+        provider: str | LLMProvider | None = None,  # deprecated alias for ``backend``
         **provider_kwargs: Any,
     ) -> None:
+        # Honor the deprecated ``provider=`` kwarg.
+        if provider is not None:
+            import warnings
+
+            if backend is not None:
+                raise TypeError(
+                    "Pass either 'backend=' or the deprecated 'provider='; "
+                    "not both."
+                )
+            warnings.warn(
+                "AlanCodeAgent(provider=...) is deprecated; "
+                "use backend=... instead. Values map as: "
+                "'litellm' -> 'auto', 'anthropic' -> 'anthropic-native', "
+                "'scripted' -> 'scripted'.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            if isinstance(provider, str):
+                from alancode.settings import _LEGACY_PROVIDER_MAP
+
+                backend = _LEGACY_PROVIDER_MAP.get(provider.lower(), provider)
+            else:
+                backend = provider
         self._gui_label = gui_label
         self._programmatic = programmatic
 
@@ -261,8 +313,18 @@ class AlanCodeAgent:
         self._settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self._settings.update({k: v for k, v in settings_base.items()})
 
+        # The constructor accepts an ``LLMProvider`` instance under ``backend``.
+        # That instance can't be JSON-serialized into settings, so we
+        # keep it aside and pass it directly to ``_resolve_backend`` later.
+        backend_instance: LLMProvider | None = None
+        backend_setting: str | None = None
+        if isinstance(backend, LLMProvider):
+            backend_instance = backend
+        elif backend is not None:
+            backend_setting = backend
+
         constructor_overrides: dict[str, Any] = {
-            "provider": provider,
+            "backend": backend_setting,
             "model": model,
             "api_key": api_key,
             "base_url": base_url,
@@ -272,15 +334,26 @@ class AlanCodeAgent:
             "memory": memory,
             "tool_call_format": tool_call_format,
         }
+        backend_explicit = backend_setting is not None or backend_instance is not None
         for k, v in constructor_overrides.items():
             if v is not None:
                 self._settings[k] = v
+
+        # Inference: if the caller set ``model`` but not ``backend``, pick
+        # the right backend for that model (bare claude-* → native; else auto).
+        # Skip when an LLMProvider instance was passed — the user already
+        # decided what transport to use.
+        if backend_instance is None and not backend_explicit and model is not None:
+            self._settings["backend"] = infer_backend(model)
 
         if verbose: # verbose=True should override; verbose=False (the default) should not
             self._settings["verbose"] = True
 
         # Resolve key fields
-        self._provider = _create_provider_from_settings(self._settings, **provider_kwargs)
+        if backend_instance is not None:
+            self._provider = backend_instance
+        else:
+            self._provider = _create_provider_from_settings(self._settings, **provider_kwargs)
         self._model = self._settings.get("model")
         self._permission_mode = self._settings.get("permission_mode", "edit")
         self._max_iterations_per_turn = self._settings.get("max_iterations_per_turn")
@@ -293,6 +366,15 @@ class AlanCodeAgent:
             session_id=self._session_id,
             cwd=self._cwd,
         )
+
+        # Optional opt-in hook: providers that want to know the session id
+        # and cwd (e.g. the remote-scripted backend, which mirrors its
+        # pending payload to the session directory) can implement
+        # ``set_session_context(session_id, cwd)``.
+        if hasattr(self._provider, "set_session_context"):
+            self._provider.set_session_context(
+                session_id=self._session_id, cwd=self._cwd,
+            )
 
         # Cost tracker (pricing logic, delegates totals to SessionState)
         self._cost_tracker = CostTracker(session=self._session)
@@ -392,7 +474,7 @@ class AlanCodeAgent:
 
         Example::
 
-            agent = AlanCodeAgent(provider="litellm", model="gemini-2.5-flash")
+            agent = AlanCodeAgent(model="gemini/gemini-2.5-flash")
             answer = agent.query("What files are in this project?")
             print(answer)
         """
@@ -895,12 +977,29 @@ class AlanCodeAgent:
     def update_session_setting(self, key: str, value: Any) -> str | None:
         """Validate, update a setting for this session in-memory + on disk.
 
-        All settings can be changed mid-session. Provider-related settings
-        trigger provider recreation. All others take effect on the next turn.
+        All settings can be changed mid-session. Backend-related settings
+        (``backend``, ``model``, ``api_key``, ``base_url``) trigger a
+        fresh ``LLMProvider`` instance. All others take effect on the
+        next turn.
+
+        Updating ``model`` alone also re-infers ``backend`` (a bare Claude
+        name flips the backend to ``anthropic-native``; anything else flips
+        to ``auto``). Pass ``backend`` explicitly to override the
+        inference.
 
         Returns an error message string if validation fails, or None on success.
         """
-        from alancode.settings import PROVIDER_SETTINGS
+        from alancode.settings import BACKEND_SETTINGS
+
+        # Accept the legacy ``provider`` key as an alias for ``backend``,
+        # translating its old values. The /provider slash command and any
+        # external callers depending on the old name keep working.
+        if key == "provider":
+            key = "backend"
+            if isinstance(value, str):
+                from alancode.settings import _LEGACY_PROVIDER_MAP
+
+                value = _LEGACY_PROVIDER_MAP.get(value.lower(), value)
 
         if key not in SETTINGS_DEFAULTS:
             return f"Unknown setting '{key}'."
@@ -924,14 +1023,23 @@ class AlanCodeAgent:
         if attr:
             setattr(self, attr, value)
 
-        # Recreate provider if a provider-related setting changed
-        if key in PROVIDER_SETTINGS:
+        # Re-infer the backend when only the model changed. The new
+        # backend may be the same as the old one (in which case this is
+        # a no-op), or it may flip — e.g. switching from gpt-4o to
+        # claude-sonnet-4-6 promotes auto → anthropic-native.
+        if key == "model":
+            inferred = infer_backend(value)
+            if inferred != self._settings.get("backend"):
+                self._settings["backend"] = inferred
+
+        # Recreate the underlying LLMProvider if a backend-related setting changed
+        if key in BACKEND_SETTINGS:
             try:
                 self._provider = _create_provider_from_settings(self._settings)
-                logger.info("Provider recreated: %s / %s",
-                           self._settings.get("provider"), self._settings.get("model"))
+                logger.info("Backend recreated: %s / %s",
+                           self._settings.get("backend"), self._settings.get("model"))
             except Exception as e:
-                return f"Failed to create provider: {e}"
+                return f"Failed to create backend: {e}"
 
         save_session_settings(self._cwd, self._session_id, self._settings)
         return None
@@ -943,6 +1051,14 @@ class AlanCodeAgent:
 
         Returns an error message string if validation fails, or None on success.
         """
+        # Translate the legacy ``provider`` key into ``backend``.
+        if key == "provider":
+            key = "backend"
+            if isinstance(value, str):
+                from alancode.settings import _LEGACY_PROVIDER_MAP
+
+                value = _LEGACY_PROVIDER_MAP.get(value.lower(), value)
+
         if key not in SETTINGS_DEFAULTS:
             return f"Unknown setting '{key}'."
 

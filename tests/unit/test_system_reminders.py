@@ -100,7 +100,7 @@ class TestInjectMessageIntegration:
             rule(turn=1, respond=text("I see your injected message.")),
         ])
 
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test", permission_mode="yolo")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test", permission_mode="yolo")
         agent.inject_message("Extra context from the user")
 
         events = agent.query_events("Do something")

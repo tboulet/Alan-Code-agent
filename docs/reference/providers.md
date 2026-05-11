@@ -1,41 +1,66 @@
-# Providers
+# Backends and providers
 
-Alan Code supports three providers. Pick one based on which model you want to use.
+Alan Code splits "how it talks to a model" (the **backend**) from "which service runs the model" (the **provider**, encoded as a prefix in the model string).
 
 ## At a glance
 
-| Provider | Setting | Best for | Notes |
+There are three backends:
+
+| Backend | Setting | Best for | Notes |
 |---|---|---|---|
-| Anthropic | `--provider anthropic` | Claude models | Direct SDK, native prompt caching, extended thinking. |
-| LiteLLM | `--provider litellm` | Everything else | One abstraction over 50+ backends. |
-| Scripted | `--provider scripted` | Tests, CI, demos | No network, no cost, deterministic. |
+| `auto` *(default for non-Claude models)* | `--backend auto` | Everything except Claude direct: OpenAI, OpenRouter, Gemini, Ollama, vLLM, Bedrock, … | Universal transport — LiteLLM under the hood, supports 50+ providers via the model-string prefix. |
+| `anthropic-native` *(default for bare `claude-*`)* | `--backend anthropic-native` | Claude models | Direct Anthropic SDK with `cache_control`, native thinking, native `tool_use`. |
+| `scripted` | `--backend scripted` | Tests, CI, demos | No network, no cost, deterministic. |
+
+The provider — OpenAI, Ollama, OpenRouter, etc. — is **not** a backend. It lives inside the model string as a prefix (LiteLLM convention).
+
+You usually don't pass `--backend` at all — it's inferred from `--model`. Pass `--model` only.
 
 ---
 
-## Anthropic
+## Backend inference
+
+When `--backend` isn't set, it's chosen from the model string:
+
+- Bare Claude name (`claude-sonnet-4-6`, `claude-opus-4-7`, …) → `anthropic-native`.
+- Anything else → `auto` (LiteLLM transport).
+
+The `anthropic/...` prefix is the explicit escape hatch for using Claude through LiteLLM (e.g. routing via a LiteLLM Proxy for centralized logging).
+
+| Model string | Inferred backend | API key used |
+|---|---|---|
+| `claude-sonnet-4-6` | `anthropic-native` | `ANTHROPIC_API_KEY` |
+| `anthropic/claude-sonnet-4-6` | `auto` (LiteLLM → Anthropic) | `ANTHROPIC_API_KEY` |
+| `gpt-4o`, `gpt-4.1` | `auto` (LiteLLM → OpenAI) | `OPENAI_API_KEY` |
+| `openrouter/...`, `ollama/...`, `gemini/...`, … | `auto` | provider's env var |
+
+---
+
+## `anthropic-native` backend
 
 **Class**: `alancode.providers.anthropic_provider.AnthropicProvider`
 
 Uses the official `anthropic` SDK. Gets Alan the best of what Anthropic offers:
+
 - **Prompt caching** — system prompt is split into 4 cache blocks, slashing cost on multi-turn conversations.
 - **Extended thinking** — Claude Sonnet 4's `thinking` mode is supported (budget controlled by `thinking_budget_default` setting).
 - **Native tool use** — structured `tool_use` blocks, clean tool_use → tool_result linking.
 
 ### Models
 
-`claude-sonnet-4-6` (default), `claude-opus-4-6`, `claude-haiku-4-5`, older Sonnet/Opus/Haiku versions. Use the exact `model` string from Anthropic's API docs.
+`claude-sonnet-4-6` (default), `claude-opus-4-7`, `claude-haiku-4-5`, older Sonnet/Opus/Haiku versions. Use the exact model string from Anthropic's API docs.
 
 ### Configuration
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-alancode --provider anthropic --model claude-sonnet-4-6
+alancode --model claude-sonnet-4-6      # backend inferred
+# or, explicit:
+alancode --backend anthropic-native --model claude-sonnet-4-6
 ```
 
-Or in Python:
-
 ```python
-AlanCodeAgent(provider="anthropic", model="claude-sonnet-4-6")
+AlanCodeAgent(model="claude-sonnet-4-6")  # backend inferred
 ```
 
 ### Pricing
@@ -44,7 +69,7 @@ Alan has per-model Anthropic pricing hardcoded in `alancode/api/cost_tracker.py:
 
 ---
 
-## LiteLLM
+## `auto` backend (LiteLLM transport)
 
 **Class**: `alancode.providers.litellm_provider.LiteLLMProvider`
 
@@ -56,7 +81,7 @@ LiteLLM expects `provider/model`:
 
 | Provider | Example model string |
 |---|---|
-| OpenAI | `openai/gpt-4o`, `openai/gpt-4o-mini`, `openai/o1-preview` |
+| OpenAI | `gpt-4o`, `gpt-4.1`, `openai/gpt-4o` (explicit form) |
 | Anthropic (via LiteLLM) | `anthropic/claude-sonnet-4-6` |
 | OpenRouter | `openrouter/google/gemini-2.5-pro`, `openrouter/meta-llama/llama-3.3-70b-instruct` |
 | Google Gemini (direct) | `gemini/gemini-2.5-pro` |
@@ -74,7 +99,7 @@ alancode --model openrouter/google/gemini-2.5-pro
 
 # OpenAI
 export OPENAI_API_KEY=sk-...
-alancode --model openai/gpt-4o
+alancode --model gpt-4o
 
 # Local
 alancode --model openai/my-vllm-model --base-url http://localhost:8000/v1
@@ -82,9 +107,9 @@ alancode --model openai/my-vllm-model --base-url http://localhost:8000/v1
 
 ### Which env var for which provider
 
-LiteLLM reads the standard env var for each backend:
+LiteLLM reads the standard env var for each upstream provider:
 
-| Backend | Env var |
+| Provider | Env var |
 |---|---|
 | OpenAI | `OPENAI_API_KEY` |
 | Anthropic (via LiteLLM) | `ANTHROPIC_API_KEY` |
@@ -110,18 +135,18 @@ For models without native tool calling support, set `--tool-call-format` to enab
 ```bash
 --tool-call-format hermes   # Hermes <tool_call> format
 --tool-call-format glm      # GLM XML format
---tool-call-format alan      # Alan's own format (most portable)
+--tool-call-format alan     # Alan's own format (most portable)
 ```
 
 When `--tool-call-format` is not set (default), Alan uses native function calling.
 
 ---
 
-## Scripted
+## `scripted` backend
 
 **Class**: `alancode.providers.scripted_provider.ScriptedProvider`
 
-A testing-oriented provider that returns pre-canned responses. No network, no cost, fully deterministic. Used in Alan's own test suite and the `--scripted` mode of the auto-fix-loop example.
+A testing-oriented backend that returns pre-canned responses. No network, no cost, fully deterministic. Used in Alan's own test suite and the `--scripted` mode of the auto-fix-loop example.
 
 ### Usage
 
@@ -136,7 +161,7 @@ provider = ScriptedProvider.from_responses([
     text("Done."),
 ])
 
-agent = AlanCodeAgent(provider=provider, permission_mode="yolo")
+agent = AlanCodeAgent(backend=provider, permission_mode="yolo")
 ```
 
 Each list entry is the response on the Nth iteration. `text(...)` returns a text-only response; `tool_call(...)` emits a tool_use; `multi_tool_call(...)` emits several tool_use blocks in one response.
@@ -145,14 +170,14 @@ See `alancode/providers/scripted_provider.py` for the full helper API (rules, tu
 
 ---
 
-## Adding a custom provider
+## Adding a custom backend
 
-All providers implement the `LLMProvider` ABC in `alancode/providers/base.py`:
+All backends implement the `LLMProvider` ABC in `alancode/providers/base.py`:
 
 ```python
 from alancode.providers.base import LLMProvider, StreamEvent
 
-class MyProvider(LLMProvider):
+class MyBackend(LLMProvider):
     async def stream(self, messages, system, tools, *, model, max_tokens, thinking, **kwargs) -> AsyncGenerator[StreamEvent]:
         ...
     def get_model_info(self, model) -> ModelInfo:
@@ -162,15 +187,31 @@ class MyProvider(LLMProvider):
 Then inject it into the agent directly:
 
 ```python
-agent = AlanCodeAgent(provider=MyProvider(...))
+agent = AlanCodeAgent(backend=MyBackend(...))
 ```
 
-The `--provider` CLI flag only knows the three built-ins, but the constructor accepts any `LLMProvider` instance.
+The `--backend` CLI flag only knows the three built-ins (`auto`, `anthropic-native`, `scripted`), but the constructor accepts any `LLMProvider` instance.
 
+---
+
+## Migration from older versions
+
+Older versions exposed `--provider {litellm,anthropic,scripted}`. The flag, the `provider` settings key, and the `/provider` slash command are all kept as deprecated aliases for one release:
+
+| Old | New |
+|---|---|
+| `--provider litellm` | drop the flag (or `--backend auto`) |
+| `--provider anthropic` | `--backend anthropic-native` (or just `--model claude-sonnet-4-6`) |
+| `--provider scripted` | `--backend scripted` |
+| `--provider <other>` | error suggesting `--model <other>/<name>` (the prefix form) |
+
+Old `.alan/settings.json` files with `"provider": "..."` are auto-migrated on first read.
+
+---
 
 ## Related
 
-- [reference/cli.md](cli.md) — provider-related CLI flags.
-- [reference/settings.md](settings.md) — persistent provider configuration.
+- [reference/cli.md](cli.md) — backend-related CLI flags.
+- [reference/settings.md](settings.md) — persistent backend configuration.
 - [reference/local-models.md](local-models.md) — detailed local-model setup.
-- [reference/python-api.md](python-api.md) — using providers programmatically.
+- [reference/python-api.md](python-api.md) — using backends programmatically.

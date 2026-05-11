@@ -53,7 +53,7 @@ class TestFileEditScenario:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             events = []
             async for event in agent.query_events_async("Change hello.py to print 'hello world'"):
@@ -104,7 +104,7 @@ class TestErrorRecoveryScenario:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             events = []
             async for event in agent.query_events_async("Read my python file"):
@@ -141,7 +141,7 @@ class TestMultiToolConcurrency:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             events = []
             async for event in agent.query_events_async("Read both files"):
@@ -172,7 +172,7 @@ class TestBashExecution:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             result = agent.query("Run echo hello")
             assert "hello from bash" in result
@@ -203,7 +203,7 @@ class TestWriteAndVerify:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             events = []
             async for event in agent.query_events_async("Create a python file"):
@@ -243,7 +243,7 @@ class TestGrepSearch:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             result = agent.query("Find all TODOs")
             # Either the final text mentions TODO, or at least grep + read happened
@@ -267,7 +267,7 @@ class TestMaxTurnsWithReactive:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
                 max_iterations_per_turn=3,
             )
             events = []
@@ -302,7 +302,7 @@ class TestAskSync:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             result = agent.query("What is the answer?")
             assert "42" in result
@@ -317,7 +317,7 @@ class TestAskSync:
             ])
 
             agent = AlanCodeAgent(
-                provider=provider, cwd=tmpdir, permission_mode="yolo",
+                backend=provider, cwd=tmpdir, permission_mode="yolo",
             )
             result = agent.query("Do it")
             assert "All done" in result

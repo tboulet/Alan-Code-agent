@@ -14,7 +14,7 @@ def scripted_provider():
 @pytest.fixture
 def agent(scripted_provider):
     from alancode.agent import AlanCodeAgent
-    return AlanCodeAgent(provider=scripted_provider, cwd="/tmp/test")
+    return AlanCodeAgent(backend=scripted_provider, cwd="/tmp/test")
 
 
 # ── Git test repo fixture ───────────────────────────────────────────────────

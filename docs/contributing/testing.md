@@ -91,7 +91,7 @@ from alancode.providers.scripted_provider import ScriptedProvider, text
 @pytest.mark.asyncio
 async def test_simple_turn():
     provider = ScriptedProvider.from_responses([text("Hello!")])
-    agent = AlanCodeAgent(provider=provider, permission_mode="yolo")
+    agent = AlanCodeAgent(backend=provider, permission_mode="yolo")
     answer = await agent.query_async("ping")
     assert answer == "Hello!"
 ```

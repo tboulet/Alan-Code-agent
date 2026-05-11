@@ -16,7 +16,7 @@ from alancode.providers.scripted_provider import (
 def _make_agent(*responses, **kwargs):
     """Create an agent with scripted responses."""
     provider = ScriptedProvider.from_responses(list(responses))
-    return AlanCodeAgent(provider=provider, cwd="/tmp/test", permission_mode="yolo", **kwargs)
+    return AlanCodeAgent(backend=provider, cwd="/tmp/test", permission_mode="yolo", **kwargs)
 
 
 # ── query() — sync, returns str ──────────────────────────────────────────────
@@ -195,7 +195,7 @@ class TestCrossCutting:
         provider = ScriptedProvider(rules=[
             rule(respond=tool_call("Bash", {"command": "echo loop"})),
         ])
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test", permission_mode="yolo", max_iterations_per_turn=2)
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test", permission_mode="yolo", max_iterations_per_turn=2)
         events = agent.query_events("Loop forever")
         # Should not run forever
         assert provider._call_count <= 4

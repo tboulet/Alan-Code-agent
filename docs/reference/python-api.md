@@ -163,8 +163,7 @@ Use `programmatic=True` when Alan is being driven by another program (a benchmar
 
 ```python
 agent = AlanCodeAgent(
-    provider="litellm",
-    model="anthropic/claude-sonnet-4-6",
+    model="claude-sonnet-4-6",
     cwd="/path/to/experiment",
     permission_mode="yolo",
     programmatic=True,
@@ -234,7 +233,6 @@ Ctrl+C from within the callback should raise `KeyboardInterrupt` → Alan conver
 from alancode import AlanCodeAgent
 
 agent = AlanCodeAgent(
-    provider="litellm",
     model="openrouter/google/gemini-2.5-flash",
     permission_mode="yolo",  # auto-approve for automation
 )
@@ -267,20 +265,20 @@ async def main():
 asyncio.run(main())
 ```
 
-## Example: injecting a custom provider
+## Example: injecting a custom backend
 
 ```python
 from alancode import AlanCodeAgent
 from alancode.providers.base import LLMProvider
 
-class MyProvider(LLMProvider):
+class MyBackend(LLMProvider):
     async def stream(self, messages, system, tools, *, model, max_tokens, thinking, **kwargs):
         # yield StreamEvent objects
         ...
     def get_model_info(self, model):
         ...
 
-agent = AlanCodeAgent(provider=MyProvider(...))
+agent = AlanCodeAgent(backend=MyBackend(...))
 ```
 
 ## Related

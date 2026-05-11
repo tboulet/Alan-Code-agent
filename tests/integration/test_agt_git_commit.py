@@ -251,7 +251,7 @@ class TestAGTInitialization:
     @pytest.mark.asyncio
     async def test_agt_root_initialized_in_git_repo(self, git_repo: GitTestRepo):
         provider = ScriptedProvider.from_responses([text("Hello")])
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
 
         # Before first turn: no root
         assert agent._session.session_root_sha == ""
@@ -269,7 +269,7 @@ class TestAGTInitialization:
     @pytest.mark.asyncio
     async def test_agt_root_not_set_outside_git(self, tmp_path):
         provider = ScriptedProvider.from_responses([text("Hello")])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         async for _ in agent.query_events_async("Hi"):
             pass
@@ -282,7 +282,7 @@ class TestAGTInitialization:
         provider = ScriptedProvider.from_responses([
             text("First"), text("Second"),
         ])
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
 
         # First turn
         async for _ in agent.query_events_async("Turn 1"):
@@ -317,7 +317,7 @@ class TestGitCommitViaAgent:
             text("Committed successfully."),
         ])
         ui = ScriptedUI.from_inputs(["Commit the feature", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
 
         await run_session(agent, ui)
 

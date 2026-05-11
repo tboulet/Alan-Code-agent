@@ -119,16 +119,20 @@ alancode --continue
 
 ## 8. Try a different model
 
+The provider is part of the model string. The transport backend is inferred — you almost never need `--backend`.
+
 ```bash
 # Google Gemini via OpenRouter
-alancode --provider litellm --model openrouter/google/gemini-2.5-pro
+alancode --model openrouter/google/gemini-2.5-pro
 
 # OpenAI directly
-alancode --provider litellm --model openai/gpt-4o
+alancode --model gpt-4o
 
 # Local Ollama
-alancode --provider litellm --model ollama/qwen2.5-coder:7b --base-url http://localhost:11434
+alancode --model ollama/qwen2.5-coder:7b --base-url http://localhost:11434
 ```
+
+See [reference/providers.md](reference/providers.md) for the full provider/model matrix.
 
 ## 9. Launch the GUI (optional)
 

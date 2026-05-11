@@ -18,7 +18,7 @@ def provider():
 
 class TestToolSelection:
     def test_default_includes_all_builtins(self, provider, tmp_path):
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
         names = {t.name for t in agent._tools}
         assert "Bash" in names
         assert "WebFetch" in names
@@ -27,7 +27,7 @@ class TestToolSelection:
 
     def test_programmatic_excludes_external_tools(self, provider, tmp_path):
         agent = AlanCodeAgent(
-            provider=provider, cwd=str(tmp_path), programmatic=True,
+            backend=provider, cwd=str(tmp_path), programmatic=True,
         )
         names = {t.name for t in agent._tools}
         assert "WebFetch" not in names
@@ -39,7 +39,7 @@ class TestToolSelection:
 
     def test_disabled_tools_filters(self, provider, tmp_path):
         agent = AlanCodeAgent(
-            provider=provider, cwd=str(tmp_path),
+            backend=provider, cwd=str(tmp_path),
             disabled_tools=["Bash", "WebFetch"],
         )
         names = {t.name for t in agent._tools}
@@ -50,7 +50,7 @@ class TestToolSelection:
     def test_explicit_tools_replaces_default(self, provider, tmp_path):
         from tests.conftest import EchoTool
         agent = AlanCodeAgent(
-            provider=provider, cwd=str(tmp_path),
+            backend=provider, cwd=str(tmp_path),
             tools=[EchoTool()],
         )
         names = [t.name for t in agent._tools]
@@ -59,7 +59,7 @@ class TestToolSelection:
     def test_extra_tools_still_appended(self, provider, tmp_path):
         from tests.conftest import EchoTool
         agent = AlanCodeAgent(
-            provider=provider, cwd=str(tmp_path),
+            backend=provider, cwd=str(tmp_path),
             programmatic=True,
             extra_tools=[EchoTool()],
         )
@@ -70,7 +70,7 @@ class TestToolSelection:
     def test_disabled_tools_composes_with_extra(self, provider, tmp_path):
         from tests.conftest import EchoTool
         agent = AlanCodeAgent(
-            provider=provider, cwd=str(tmp_path),
+            backend=provider, cwd=str(tmp_path),
             disabled_tools=["Echo"],
             extra_tools=[EchoTool()],
         )
@@ -87,7 +87,7 @@ class TestInstructionGating:
         self, provider, tmp_path,
     ):
         agent = AlanCodeAgent(
-            provider=provider, cwd=str(tmp_path), programmatic=True,
+            backend=provider, cwd=str(tmp_path), programmatic=True,
         )
         with patch(
             "alancode.agent.load_global_project_instructions",
@@ -109,7 +109,7 @@ class TestInstructionGating:
     async def test_default_calls_global_and_project_instructions(
         self, provider, tmp_path,
     ):
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
         with patch(
             "alancode.agent.load_global_project_instructions",
             return_value=None,
@@ -134,7 +134,7 @@ class TestAgtGating:
     @pytest.mark.asyncio
     async def test_programmatic_skips_init_agt_root(self, provider, tmp_path):
         agent = AlanCodeAgent(
-            provider=provider, cwd=str(tmp_path), programmatic=True,
+            backend=provider, cwd=str(tmp_path), programmatic=True,
         )
         with patch.object(agent, "_init_agt_root") as mock_init:
             async for _ in agent.query_events_async("hi"):
@@ -143,7 +143,7 @@ class TestAgtGating:
 
     @pytest.mark.asyncio
     async def test_default_calls_init_agt_root(self, provider, tmp_path):
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
         with patch.object(agent, "_init_agt_root") as mock_init:
             async for _ in agent.query_events_async("hi"):
                 pass

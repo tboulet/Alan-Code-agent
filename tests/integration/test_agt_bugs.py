@@ -45,7 +45,7 @@ def _make_session(git_repo, responses, inputs, **kwargs):
     provider = ScriptedProvider.from_responses(responses, fallback=text("Done."))
     ui = ScriptedUI.from_inputs(inputs)
     agent = AlanCodeAgent(
-        provider=provider, cwd=str(git_repo.path),
+        backend=provider, cwd=str(git_repo.path),
         ask_callback=ui.ask_user, **kwargs,
     )
     return provider, ui, agent
@@ -503,7 +503,7 @@ class TestBug08AlanGitignored:
 
         provider = ScriptedProvider.from_responses([text("Hi")])
         ui = ScriptedUI.from_inputs(["Hello", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(repo.path))
         await run_session(agent, ui)
 
         gitignore = repo.path / ".gitignore"
@@ -520,7 +520,7 @@ class TestBug08AlanGitignored:
 
         provider = ScriptedProvider.from_responses([text("Hi")])
         ui = ScriptedUI.from_inputs(["Hello", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(repo.path))
         await run_session(agent, ui)
 
         content = (repo.path / ".gitignore").read_text()
@@ -663,7 +663,7 @@ class TestTreeUpdates:
     async def test_no_tree_for_non_git(self, tmp_path):
         provider = ScriptedProvider.from_responses([text("OK")])
         ui = ScriptedUI.from_inputs(["Hi", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 

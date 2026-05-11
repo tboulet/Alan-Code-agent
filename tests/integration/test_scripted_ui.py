@@ -180,7 +180,7 @@ class TestScriptedUIWithAgent:
     async def test_single_turn(self, tmp_path):
         provider = ScriptedProvider.from_responses([text("Hello!")])
         ui = ScriptedUI.from_inputs(["Hi there", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         # Simulate one turn
         user_input = await ui.get_input()
@@ -209,7 +209,7 @@ class TestScriptedUIWithAgent:
             text("Second response."),
         ])
         ui = ScriptedUI.from_inputs(["Turn 1", "Turn 2", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         for _ in range(2):
             user_input = await ui.get_input()
@@ -231,7 +231,7 @@ class TestScriptedUIWithAgent:
         # Create the file so Read tool works
         (tmp_path / "test.txt").write_text("hello")
 
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
         user_input = await ui.get_input()
         async for event in agent.query_events_async(user_input):
             await ui.on_agent_event(event)
@@ -251,7 +251,7 @@ class TestScriptedUIWithAgent:
 
         provider = ScriptedProvider.from_responses([text("Done.")])
         agent = AlanCodeAgent(
-            provider=provider,
+            backend=provider,
             cwd=str(tmp_path),
             ask_callback=ui.ask_user,
         )
@@ -279,7 +279,7 @@ class TestRunSessionWithScriptedUI:
             "Fix the bug",
             EOFError,
         ])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -302,7 +302,7 @@ class TestRunSessionWithScriptedUI:
     async def test_slash_exit(self, tmp_path):
         provider = ScriptedProvider.from_responses([])
         ui = ScriptedUI.from_inputs(["/exit"])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -314,7 +314,7 @@ class TestRunSessionWithScriptedUI:
     async def test_slash_help(self, tmp_path):
         provider = ScriptedProvider.from_responses([])
         ui = ScriptedUI.from_inputs(["/help", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -327,7 +327,7 @@ class TestRunSessionWithScriptedUI:
     async def test_empty_input_skipped(self, tmp_path):
         provider = ScriptedProvider.from_responses([text("Response.")])
         ui = ScriptedUI.from_inputs(["", "", "actual prompt", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -341,7 +341,7 @@ class TestRunSessionWithScriptedUI:
             text("Second answer."),
         ])
         ui = ScriptedUI.from_inputs(["Question 1", "Question 2", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -460,7 +460,7 @@ class TestScriptedUIWithGitRepo:
         ])
         ui = ScriptedUI.from_inputs(["What does main.py do?", EOFError])
 
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
         assert provider._call_count == 2
@@ -479,7 +479,7 @@ class TestScriptedUIWithGitRepo:
         ])
         ui = ScriptedUI.from_inputs(["Create output.txt", EOFError])
 
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
         # Verify the file was created
@@ -501,7 +501,7 @@ class TestScriptedUIWithGitRepo:
         ])
         ui = ScriptedUI.from_inputs(["Show git history", EOFError])
 
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
         assert provider._call_count == 2
@@ -516,7 +516,7 @@ class TestScriptedUIWithGitRepo:
         ])
         ui = ScriptedUI.from_inputs(["Describe the repo", EOFError])
 
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
         # Session completes cleanly in a branched repo

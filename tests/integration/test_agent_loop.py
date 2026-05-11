@@ -25,7 +25,7 @@ class TestTextOnlyResponse:
     @pytest.mark.asyncio
     async def test_simple_text_response(self):
         provider = ScriptedProvider.from_responses([ScriptedResponse(text="Hello, I can help!")])
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Hello"):
@@ -43,7 +43,7 @@ class TestTextOnlyResponse:
     @pytest.mark.asyncio
     async def test_provider_called_once_for_text(self):
         provider = ScriptedProvider.from_responses([ScriptedResponse(text="Done")])
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         async for _ in agent.query_events_async("Hi"):
             pass
@@ -53,7 +53,7 @@ class TestTextOnlyResponse:
     @pytest.mark.asyncio
     async def test_events_include_request_start(self):
         provider = ScriptedProvider.from_responses([ScriptedResponse(text="ok")])
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Test"):
@@ -91,7 +91,7 @@ class TestToolUseResponse:
                 ScriptedResponse(text="I read the file. Here's what I found..."),
             ]
         )
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Read test.txt"):
@@ -117,7 +117,7 @@ class TestToolUseResponse:
                 ScriptedResponse(text="Command output was: hello"),
             ]
         )
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Run echo hello"):
@@ -150,7 +150,7 @@ class TestMultiTurn:
                 ScriptedResponse(text="Second response, I remember the first"),
             ]
         )
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         async for _ in agent.query_events_async("First message"):
             pass
@@ -169,7 +169,7 @@ class TestMultiTurn:
         from alancode.agent import AgentState
 
         provider = ScriptedProvider.from_responses([ScriptedResponse(text="done")])
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         assert agent.state == AgentState.WAITING
         async for _ in agent.query_events_async("Hello"):
@@ -203,7 +203,7 @@ class TestMaxTurns:
                 for i in range(20)
             ]
         )
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test", max_iterations_per_turn=3)
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test", max_iterations_per_turn=3)
 
         events = []
         async for event in agent.query_events_async("Loop forever"):
@@ -236,7 +236,7 @@ class TestErrorHandling:
         provider = ScriptedProvider.from_responses(
             [ScriptedResponse(error="Service unavailable")]
         )
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("This will fail"):
@@ -262,7 +262,7 @@ class TestConversationHistory:
     @pytest.mark.asyncio
     async def test_messages_list_grows(self):
         provider = ScriptedProvider.from_responses([ScriptedResponse(text="response")])
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
 
         assert len(agent.messages) == 0
 
@@ -275,6 +275,6 @@ class TestConversationHistory:
     @pytest.mark.asyncio
     async def test_session_id_is_set(self):
         provider = ScriptedProvider.from_responses([ScriptedResponse(text="ok")])
-        agent = AlanCodeAgent(provider=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
         assert agent.session_id is not None
         assert len(agent.session_id) > 0

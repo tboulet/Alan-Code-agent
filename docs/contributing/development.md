@@ -121,7 +121,7 @@ provider = ScriptedProvider.from_responses([
     text("Found 3 files"),
 ])
 
-agent = AlanCodeAgent(provider=provider, permission_mode="yolo")
+agent = AlanCodeAgent(backend=provider, permission_mode="yolo")
 ```
 
 See `tests/integration/test_agent_loop.py` for examples.
@@ -142,7 +142,7 @@ Edits to `alancode/gui/server.py` or `gui_ui.py` require restarting `alancode` (
 2. Make the change. Keep commits small and focused.
 3. Run tests: `pytest -x -q`. Fix regressions.
 4. Run lint: `ruff check .`.
-5. If you changed the agent behaviour: run a real-model smoke test with `alancode --provider litellm --model openrouter/google/gemini-2.5-flash --permission-mode yolo` in a scratch directory.
+5. If you changed the agent behaviour: run a real-model smoke test with `alancode --model openrouter/google/gemini-2.5-flash --permission-mode yolo` in a scratch directory.
 6. If you changed prompt behaviour: use `--gui` and inspect the LLM Perspective panel to verify the model sees what you expect.
 7. Push and open a PR.
 

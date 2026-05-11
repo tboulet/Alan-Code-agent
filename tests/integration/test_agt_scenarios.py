@@ -33,7 +33,7 @@ def _make_session(git_repo, responses, inputs, **agent_kwargs):
     provider = ScriptedProvider.from_responses(responses, fallback=text("Done."))
     ui = ScriptedUI.from_inputs(inputs)
     agent = AlanCodeAgent(
-        provider=provider,
+        backend=provider,
         cwd=str(git_repo.path),
         ask_callback=ui.ask_user,
         **agent_kwargs,
@@ -147,7 +147,7 @@ class TestRevertCommand:
     async def test_revert_not_git_repo(self, tmp_path):
         provider = ScriptedProvider.from_responses([])
         ui = ScriptedUI.from_inputs(["/revert 1", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -425,7 +425,7 @@ class TestEdgeCases:
         """Non-git repos should produce zero tree updates."""
         provider = ScriptedProvider.from_responses([text("Hello")])
         ui = ScriptedUI.from_inputs(["Hi", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -435,7 +435,7 @@ class TestEdgeCases:
     async def test_non_git_repo_revert_shows_error(self, tmp_path):
         provider = ScriptedProvider.from_responses([])
         ui = ScriptedUI.from_inputs(["/revert", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 

@@ -91,7 +91,6 @@ Pass anything you'd set in `settings.json` as a constructor kwarg:
 
 ```python
 agent = AlanCodeAgent(
-    provider="litellm",
     model="openrouter/google/gemini-2.5-flash",
     permission_mode="yolo",
     max_iterations_per_turn=15,
@@ -104,6 +103,8 @@ agent = AlanCodeAgent(
     ask_callback=None,   # Custom permission prompt; see below
 )
 ```
+
+The transport backend is inferred from `model` — pass `backend="anthropic-native" | "auto" | "scripted"` (or an `LLMProvider` instance) only when you need to override the inference.
 
 Omitted kwargs fall through the priority chain (session → project settings.json → defaults). See [guides/configuration.md](configuration.md).
 
@@ -169,11 +170,11 @@ provider = ScriptedProvider.from_responses([
     text("Done. The system is ..."),
 ])
 
-agent = AlanCodeAgent(provider=provider, permission_mode="yolo")
+agent = AlanCodeAgent(backend=provider, permission_mode="yolo")
 answer = agent.query("check the system")
 ```
 
-Each entry in the list is what the "provider" returns on the Nth iteration. Zero network, zero cost, fully deterministic.
+Each entry in the list is what the backend returns on the Nth iteration. Zero network, zero cost, fully deterministic.
 
 ## Inject messages mid-run
 
@@ -212,8 +213,7 @@ When Alan is embedded in another program — a benchmark harness, a parent agent
 
 ```python
 agent = AlanCodeAgent(
-    provider="litellm",
-    model="anthropic/claude-sonnet-4-6",
+    model="claude-sonnet-4-6",
     cwd="/path/to/experiment",
     permission_mode="yolo",
     programmatic=True,

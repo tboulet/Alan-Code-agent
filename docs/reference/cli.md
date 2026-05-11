@@ -8,14 +8,24 @@ So anything you can pass on the command line can also be put in `.alan/settings.
 
 Run `alancode --help` for a quick version of this table.
 
-## Provider & model
+## Model & backend
 
 | Flag | Description | Default |
 |---|---|---|
-| `--provider` | LLM provider: `litellm`, `anthropic`, or `scripted` (testing). | `litellm` |
-| `--model` | Model name (LiteLLM format: `provider/model`). | `anthropic/claude-sonnet-4-6` |
+| `--model` | Model name. Bare names (`claude-sonnet-4-6`, `gpt-4o`) or LiteLLM-style `provider/model` prefixes (`ollama/llama3.1`, `openrouter/google/gemini-2.5-pro`, `gemini/gemini-2.5-flash`, `anthropic/claude-sonnet-4-6`). | `claude-sonnet-4-6` |
+| `--backend` | Transport (advanced — inferred from `--model` when not set). One of `auto` (universal LiteLLM transport), `anthropic-native` (direct Anthropic SDK with `cache_control`, native thinking, native `tool_use`), or `scripted` (tests). | inferred |
 | `--api-key` | API key. If omitted, read from the provider's usual environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, …). | (env) |
 | `--base-url` | Override the API base URL. Set this for local OpenAI-compatible servers, e.g. `http://localhost:8000/v1`. See [`local-models.md`](local-models.md). | *(provider default)* |
+| `--provider` | **Deprecated** alias for `--backend`. Accepts the old values `litellm` (→ `auto`), `anthropic` (→ `anthropic-native`), `scripted` (→ `scripted`); other values produce a friendly error suggesting the right `--model` form (e.g. `--provider ollama` → use `--model ollama/<name>`). | *(unset)* |
+
+### Backend inference
+
+When `--backend` isn't set, it's chosen from the model string:
+
+- Bare Claude name (e.g. `claude-sonnet-4-6`, `claude-opus-4-7`) → `anthropic-native`. Unlocks `cache_control`, native thinking, and native `tool_use`.
+- Anything else (`gpt-4o`, `ollama/llama3.1`, `openrouter/...`, `gemini/...`, `anthropic/claude-...`) → `auto` (LiteLLM transport).
+
+The `anthropic/...` prefix is the explicit escape hatch for using Claude through LiteLLM (e.g. routing via a LiteLLM Proxy for centralized logging).
 
 ### Tool calling format
 
@@ -67,14 +77,15 @@ Example:
 
 ```json
 {
-  "provider": "litellm",
-  "model": "openrouter/google/gemini-2.5-pro",
+  "backend": "anthropic-native",
+  "model": "claude-sonnet-4-6",
   "permission_mode": "edit",
-  "memory": "off",
-  "max_turns": 30
+  "memory": "off"
 }
 ```
 
+Old files with `"provider": "litellm"` / `"provider": "anthropic"` / `"provider": "scripted"` are auto-migrated to `"backend"` on first read (a one-line info notice is logged).
+
 ## Modifying at runtime
 
-Use the `/settings <key> <value>` slash command (see [`slash-commands.md`](slash-commands.md)) to change a setting mid-session. Provider-related changes trigger provider recreation; other settings take effect on the next turn.
+Use the `/settings <key> <value>` slash command (see [`slash-commands.md`](slash-commands.md)) to change a setting mid-session. Backend-related changes (`backend`, `model`, `api_key`, `base_url`) trigger a fresh `LLMProvider`; other settings take effect on the next turn. Changing `model` also re-infers the backend per the rule above.

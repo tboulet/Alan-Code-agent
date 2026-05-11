@@ -6,11 +6,11 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 
 | Key | Type | Default | Area |
 |---|---|---|---|
-| `provider` | string | `litellm` | Provider |
-| `model` | string | `anthropic/claude-sonnet-4-6` | Provider |
-| `api_key` | string \| null | `null` (from env) | Provider — ephemeral, not persisted |
-| `base_url` | string \| null | `null` | Provider |
-| `tool_call_format` | string \| null | `null` | Provider — `hermes`, `glm`, `alan` |
+| `backend` | string | `anthropic-native` | Backend |
+| `model` | string | `claude-sonnet-4-6` | Backend |
+| `api_key` | string \| null | `null` (from env) | Backend — ephemeral, not persisted |
+| `base_url` | string \| null | `null` | Backend |
+| `tool_call_format` | string \| null | `null` | Backend — `hermes`, `glm`, `alan` |
 | `permission_mode` | string | `edit` | Session |
 | `max_iterations_per_turn` | int \| null | `null` (unlimited) | Session |
 | `max_output_tokens` | int \| null | `null` | Session |
@@ -43,16 +43,20 @@ Source of truth: `alancode/settings.py::SETTINGS_DEFAULTS`.
 
 ---
 
-## Provider
+## Backend
 
-### `provider`
-Which LLM backend to use.
-- `"anthropic"` — Anthropic's API directly (supports prompt caching, extended thinking, native tool use).
-- `"litellm"` — Everything else (OpenAI, OpenRouter, Gemini, Vertex, Bedrock, Ollama, vLLM, SGLang, local servers).
-- `"scripted"` — Deterministic test provider. See [reference/python-api.md](python-api.md).
+### `backend`
+Transport (advanced — inferred from `model` when not set explicitly).
+- `"anthropic-native"` — direct Anthropic SDK (`cache_control`, native thinking, native `tool_use`). Default for bare `claude-*` model names.
+- `"auto"` — universal LiteLLM transport (OpenAI, OpenRouter, Gemini, Vertex, Bedrock, Ollama, vLLM, SGLang, local servers). Default for everything else.
+- `"scripted"` — deterministic test backend. See [reference/python-api.md](python-api.md).
+
+The legacy `provider` key (`"litellm"` / `"anthropic"` / `"scripted"`) is auto-migrated to `backend` on first read.
 
 ### `model`
-Model identifier. For LiteLLM, use `provider/model` form (`openai/gpt-4o`, `openrouter/google/gemini-2.5-pro`).
+Model identifier. Bare names (`claude-sonnet-4-6`, `gpt-4o`) or LiteLLM-style `provider/model` prefixes (`openrouter/google/gemini-2.5-pro`, `ollama/llama3.1`, `anthropic/claude-sonnet-4-6`).
+
+Changing `model` mid-session also re-infers `backend` (bare `claude-*` → `anthropic-native`, anything else → `auto`).
 
 ### `api_key`
 If `null`, read from the provider's environment variable at init time. **Never persisted to disk** (flagged ephemeral).

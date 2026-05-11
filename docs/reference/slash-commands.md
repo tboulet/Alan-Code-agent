@@ -17,24 +17,25 @@ Typing `/help` in a session prints the currently-registered list.
 | Command | Description |
 |---|---|
 | `/help` | List all available commands. |
-| `/status` | Full session summary: provider, model, session ID, turns, messages, detailed token breakdown (regular / cache-creation / cache-read / output), estimated $ cost, `cwd`, presence of `ALAN.md` and `.alan/settings.json`. |
+| `/status` | Full session summary: backend, model, session ID, turns, messages, detailed token breakdown (regular / cache-creation / cache-read / output), estimated $ cost, `cwd`, presence of `ALAN.md` and `.alan/settings.json`. |
 | `/name <text>` | Set a human-readable name for this session (shown in listings and the GUI). |
 
-## Model & provider
+## Model & backend
 
 | Command | Description |
 |---|---|
 | `/model` | Show the current model. |
-| `/model <name>` | Switch the active model mid-session. A reminder is injected so the agent knows a switch happened. |
-| `/provider` | Show the current provider. |
-| `/provider <name>` | Switch provider (`anthropic`, `litellm`). Both commands remind you to update the other if needed. |
+| `/model <name>` | Switch the active model mid-session. A reminder is injected so the agent knows a switch happened. Changing the model also re-infers the backend (bare `claude-*` → `anthropic-native`; anything else → `auto`). |
+| `/backend` | Show the current transport backend. |
+| `/backend <name>` | Switch the backend (`auto`, `anthropic-native`, `scripted`). Rarely needed — the backend is inferred from the model string. |
+| `/provider` | **Deprecated** alias for `/backend`. Accepts the old values `litellm`, `anthropic`, `scripted` and translates them. Prints a one-line deprecation notice. |
 
 ## Settings
 
 | Command | Description |
 |---|---|
 | `/settings` | Show current session settings. |
-| `/settings <key> <value>` | Update a session setting (e.g. `/settings permission_mode yolo`). Takes effect immediately; provider-related changes recreate the provider. |
+| `/settings <key> <value>` | Update a session setting (e.g. `/settings permission_mode yolo`). Takes effect immediately; backend-related changes (`backend`, `model`, `api_key`, `base_url`) recreate the underlying `LLMProvider`. |
 | `/settings-project` | Show project settings from `.alan/settings.json`. |
 | `/settings-project <key> <value>` | Update a project-level default. |
 

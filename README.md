@@ -19,14 +19,6 @@ Works with any LiteLLM compatible API key or provider, and several local model p
 - **Python library** — drive the agent from your own code with sync, async, or streaming APIs. Build auto-fix loops, orchestrators, or custom UIs in a few lines.
 
 
-## What's new
-
-See [CHANGELOG.md](CHANGELOG.md) for the full history.
-
-- **2026-05-07 — Programmatic mode** — `AlanCodeAgent(programmatic=True, ...)` runs Alan as a library component for benchmark harnesses, parent agents, and unattended pipelines. Skips host-level state (`~/.alan/ALAN.md`, `~/.alan/memory/`, project `ALAN.md`, AGT bootstrap) and the network/git/ask-user tools. New `tools=` and `disabled_tools=` constructor params for fine-grained tool control.
-- **2026-04-28 — Prompt caching** — Alan now places `cache_control` breakpoints on tool definitions, system prompt, and conversation history, for both providers. System prompt was optimized to avoid cache-killing dynamic content. Reduce the cost of Alan Code.
-
-
 # Installation
 
 Clone the repo and install in editable mode. Requires **Python 3.11+**.
@@ -40,34 +32,18 @@ pip install -e .
 
 # Quickstart
 
-Set your provider's API key in the environment before running. Common ones:
-
-| Provider | Environment variable |
-|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` |
-| OpenAI | `OPENAI_API_KEY` |
-| OpenRouter | `OPENROUTER_API_KEY` |
-| Google Gemini | `GEMINI_API_KEY` |
+Set your provider's API key in the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, …).
 
 ```bash
-# Default: LiteLLM provider with anthropic/claude-sonnet-4-6
-alancode
-
-# Direct Anthropic API
-alancode --provider anthropic --model claude-sonnet-4-6
-
-# Any LiteLLM model (OpenRouter, OpenAI, Gemini, Ollama, ...)
-alancode --model openrouter/google/gemini-2.5-pro
-
-# Local model on a vLLM / SGLang server (on port 8000 here)
-alancode --model openai/your-model --base-url http://localhost:8000/v1
-
-# Browser GUI
-alancode --gui
-
-# Resume the last session in this directory
-alancode --resume
+alancode                                              # default: claude-sonnet-4-6
+alancode --model openrouter/google/gemini-2.5-pro     # any provider/model
+alancode --model ollama/llama3.1                      # local Ollama
+alancode --model openai/my-model --base-url http://localhost:8000/v1   # vLLM / SGLang
+alancode --gui                                        # browser GUI
+alancode --resume                                     # last session
 ```
+
+The provider goes inside the model string (`ollama/...`, `openrouter/...`, `gemini/...`). A bare Claude name (`claude-sonnet-4-6`) automatically uses the native Anthropic SDK; everything else routes through LiteLLM. See [CLI flags](docs/reference/cli.md) for the full list.
 
 # Usage
 
@@ -89,6 +65,7 @@ A terminal-based chat interface. Type a prompt and press Enter; Alan will stream
 | `/status` | Show session info (model, tokens, cost) |
 | `/cost` | Token usage and estimated $ |
 | `/model` | Show or switch the current model |
+| `/backend` | Show or switch the transport backend (`auto` / `anthropic-native` / `scripted`) |
 | `/save` | Ask the agent to persist key info to memory |
 | `/commit` | Stage + commit changes with an AI-generated message |
 | `/diff` | Show git diff of uncommitted changes |
@@ -104,10 +81,12 @@ Other commands in [`docs/reference/slash-commands.md`](docs/reference/slash-comm
 
 ```bash
 alancode \
-    --provider [litellm/anthropic] \    # litellm (default) or anthropic (direct Anthropic API)
-    --model [model_name] \              # e.g. anthropic/claude-sonnet-4-6
+    --model [model_name] \              # bare (gpt-4o, claude-sonnet-4-6) or
+                                        # provider/model (ollama/llama3.1, ...)
+    --backend [auto/anthropic-native/scripted] \  # advanced; inferred from --model
     --api-key [key] \                   # or set environment variable
-    --permission-mode [safe/edit/yolo] \  
+    --base-url [url] \                  # for local servers (http://localhost:8000/v1)
+    --permission-mode [safe/edit/yolo] \
     [--gui] \                           # to launch in GUI mode
     [--resume]                          # to resume last session
 ```
@@ -206,8 +185,7 @@ When Alan runs inside another program (a benchmark harness, a parent agent, an u
 
 ```python
 agent = AlanCodeAgent(
-    provider="litellm",
-    model="anthropic/claude-sonnet-4-6",
+    model="claude-sonnet-4-6",
     cwd="/path/to/experiment",
     permission_mode="yolo",
     programmatic=True,
@@ -228,8 +206,8 @@ See [docs/reference/python-api.md#programmatic-mode](docs/reference/python-api.m
 | Async agentic loop | Streaming responses, thinking blocks, concurrent tool use | default |
 | Built-in tools | Bash, File I/O, Grep/Glob, WebFetch, AskUserQuestion, SkillTool, GitCommit | default |
 | Context compaction | Summarizes conversation when context fills up | auto, or `/compact` |
-| LiteLLM provider | 100+ providers including Anthropic, OpenAI, OpenRouter, Gemini, … | default |
-| Anthropic provider | Direct Anthropic API | `--provider anthropic` |
+| Universal backend (`auto`) | LiteLLM transport — 100+ providers including OpenAI, OpenRouter, Gemini, Ollama, vLLM, … | default for non-Claude models |
+| Native Anthropic backend | Direct Anthropic SDK with `cache_control`, native thinking, native `tool_use` | default for bare `claude-*` names; force with `--backend anthropic-native` |
 | Local models | vLLM / SGLang / Ollama, with text-based tool-call fallback for models without native tool use | [docs](docs/reference/local-models.md) |
 | Hooks | Pre/post-tool shell hooks for guardrails or logging | `.alan/settings.json` |
 | Skills | User-defined prompt + tool filter, discoverable at runtime | `/skill list`, `/skill create` |
@@ -268,6 +246,13 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 | **Stop / PreCompact / PostCompact hooks** | partial | Only Pre/PostToolUse hooks are implemented today. |
 | **WebSearch tool** | planned | The WebFetch tool can fetch and summarize pages, but doesn't do active searching yet. |
 
+# What's new
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
+
+- **2026-05-11 — Provider / model UX redesign** — `--provider` is replaced by `--backend` (`auto` / `anthropic-native` / `scripted`); the upstream provider lives inside the model string as a prefix (`ollama/llama3`, `openrouter/...`, `gemini/...`). `--backend` is inferred from `--model` — bare Claude names use the native Anthropic SDK, everything else uses LiteLLM. Old `--provider` flag, settings key, and `/provider` command keep working as deprecated aliases for one release.
+- **2026-05-07 — Programmatic mode** — `AlanCodeAgent(programmatic=True, ...)` runs Alan as a library component for benchmark harnesses, parent agents, and unattended pipelines. Skips host-level state (`~/.alan/ALAN.md`, `~/.alan/memory/`, project `ALAN.md`, AGT bootstrap) and the network/git/ask-user tools. New `tools=` and `disabled_tools=` constructor params for fine-grained tool control.
+- **2026-04-28 — Prompt caching** — Alan now places `cache_control` breakpoints on tool definitions, system prompt, and conversation history, for both providers. System prompt was optimized to avoid cache-killing dynamic content. Reduce the cost of Alan Code.
 
 # Further reading
 

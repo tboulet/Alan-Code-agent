@@ -34,7 +34,7 @@ def _make_session(git_repo, responses, inputs, **kwargs):
     provider = ScriptedProvider.from_responses(responses, fallback=text("Done."))
     ui = ScriptedUI.from_inputs(inputs)
     agent = AlanCodeAgent(
-        provider=provider, cwd=str(git_repo.path),
+        backend=provider, cwd=str(git_repo.path),
         ask_callback=ui.ask_user, **kwargs,
     )
     return provider, ui, agent
@@ -284,7 +284,7 @@ class TestEC05ResumeSession:
         ], fallback=text("Done"))
         ui1 = ScriptedUI.from_inputs(["Commit", EOFError])
         agent1 = AlanCodeAgent(
-            provider=provider1, cwd=str(git_repo.path),
+            backend=provider1, cwd=str(git_repo.path),
             session_id="resume-test",
         )
         await run_session(agent1, ui1)
@@ -298,7 +298,7 @@ class TestEC05ResumeSession:
         provider2 = ScriptedProvider.from_responses([text("Resumed OK")])
         ui2 = ScriptedUI.from_inputs(["Hello", EOFError])
         agent2 = AlanCodeAgent(
-            provider=provider2, cwd=str(git_repo.path),
+            backend=provider2, cwd=str(git_repo.path),
             session_id="resume-test",
         )
         await run_session(agent2, ui2, resumed_session_id="resume-test")
@@ -320,7 +320,7 @@ class TestEC05ResumeSession:
         ], fallback=text("Done"))
         ui1 = ScriptedUI.from_inputs(["Commit", EOFError])
         agent1 = AlanCodeAgent(
-            provider=provider1, cwd=str(git_repo.path),
+            backend=provider1, cwd=str(git_repo.path),
             session_id="resume-tree",
         )
         await run_session(agent1, ui1)
@@ -329,7 +329,7 @@ class TestEC05ResumeSession:
         provider2 = ScriptedProvider.from_responses([text("OK")])
         ui2 = ScriptedUI.from_inputs(["Hello", EOFError])
         agent2 = AlanCodeAgent(
-            provider=provider2, cwd=str(git_repo.path),
+            backend=provider2, cwd=str(git_repo.path),
             session_id="resume-tree",
         )
         await run_session(agent2, ui2, resumed_session_id="resume-tree")
@@ -360,7 +360,7 @@ class TestEC06ExternalCommitBetweenTurns:
             text("Turn 2 done"),
         ])
         ui = ScriptedUI.from_inputs(["Turn 1", "Turn 2", EOFError])
-        agent = AlanCodeAgent(provider=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
 
         # Run turn 1
         user_input = await ui.get_input()

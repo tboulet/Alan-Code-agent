@@ -60,7 +60,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "/clear": "Clear conversation and start fresh",
     "/compact": "Manually trigger conversation compaction",
     "/model": "Show or change the current model",
-    "/provider": "Show or change the current provider",
+    "/backend": "Show or change the transport backend (auto, anthropic-native)",
     "/exit": "Exit Alan Code",
     "/init": "Create ALAN.md in the project root with a starter template",
     "/diff": "Show git diff of all uncommitted changes",
@@ -324,8 +324,8 @@ async def _handle_slash_command(
         _handle_model(agent, console, arg)
         return False
 
-    if cmd == "/provider":
-        _handle_provider(agent, console, arg)
+    if cmd == "/backend" or cmd == "/provider":
+        _handle_backend(agent, console, arg, legacy_name=(cmd == "/provider"))
         return False
 
     if cmd == "/init":
@@ -478,9 +478,10 @@ def _handle_model(agent: AlanCodeAgent, console, arg: str) -> None:
             console.print(f"[red]{error}[/red]")
         else:
             console.print(f"[green]Model changed to: {arg}[/green]")
+            new_backend = agent._settings.get("backend")
             console.print(
-                "[dim]Note: You might want to change provider too "
-                "with '/provider <name>'.[/dim]"
+                f"[dim]Backend is now '{new_backend}' "
+                "(use /backend <name> to override).[/dim]"
             )
 
             agent._messages.append(
@@ -494,25 +495,30 @@ def _handle_model(agent: AlanCodeAgent, console, arg: str) -> None:
         console.print(f"Current model: [bold]{agent._model}[/bold]")
 
 
-def _handle_provider(agent: AlanCodeAgent, console, arg: str) -> None:
-    """Show or change the current provider.
+def _handle_backend(
+    agent: AlanCodeAgent, console, arg: str, *, legacy_name: bool = False,
+) -> None:
+    """Show or change the current transport backend.
 
-    Unlike ``/model``, no ``<system-reminder>`` is injected — the provider
-    is backend routing and doesn't affect what the model sees.
+    Unlike ``/model``, no ``<system-reminder>`` is injected — the backend
+    is transport routing and doesn't affect what the model sees.
+
+    ``/provider`` is accepted as a deprecated alias; a one-line notice
+    is printed when it's used.
     """
-    current = agent._settings.get("provider")
+    if legacy_name:
+        console.print(
+            "[yellow]/provider is deprecated; use /backend.[/yellow]"
+        )
+    current = agent._settings.get("backend")
     if arg:
-        error = agent.update_session_setting("provider", arg)
+        error = agent.update_session_setting("backend", arg)
         if error:
             console.print(f"[red]{error}[/red]")
         else:
-            console.print(f"[green]Provider changed to: {arg}[/green]")
-            console.print(
-                "[dim]Note: You might want to change model too "
-                "with '/model <name>'.[/dim]"
-            )
+            console.print(f"[green]Backend changed to: {arg}[/green]")
     else:
-        console.print(f"Current provider: [bold]{current}[/bold]")
+        console.print(f"Current backend: [bold]{current}[/bold]")
 
 
 def _handle_init(agent: AlanCodeAgent, console) -> None:
@@ -567,7 +573,7 @@ def _handle_diff(agent: AlanCodeAgent, console) -> None:
 def _handle_status(agent: AlanCodeAgent, console) -> None:
     """Print a full session-status table.
 
-    Includes provider, model, session ID, turn + message counts, the
+    Includes backend, model, session ID, turn + message counts, the
     token breakdown (input / cache-creation / cache-read / output),
     estimated cost, cwd, and whether ``ALAN.md`` /
     ``.alan/settings.json`` exist.
@@ -583,12 +589,12 @@ def _handle_status(agent: AlanCodeAgent, console) -> None:
     alan_md_exists = (Path(cwd) / ALAN_MD).exists()
     settings_exists = get_settings_path(cwd).exists()
 
-    provider = agent._settings.get("provider")
+    backend = agent._settings.get("backend")
 
     table = Table(title="Session Status", show_header=False)
     table.add_column("Key", style="cyan")
     table.add_column("Value", justify="right")
-    table.add_row("Provider", str(provider))
+    table.add_row("Backend", str(backend))
     table.add_row("Model", str(model))
     table.add_row("Session ID", session_id_short)
     if session_name:
@@ -624,9 +630,9 @@ def _handle_settings(agent: AlanCodeAgent, console, arg: str) -> None:
     """Show or update session settings.
 
     With no argument, prints the effective settings dict as JSON. With
-    ``key=value``, validates and applies the change. Provider-related
-    keys (``provider``, ``model``, ``api_key``, ``base_url``)
-    trigger provider recreation.
+    ``key=value``, validates and applies the change. Backend-related
+    keys (``backend``, ``model``, ``api_key``, ``base_url``) trigger a
+    fresh ``LLMProvider`` instance for the rest of the session.
     """
     if not arg:
         formatted = json.dumps(agent._settings, indent=2, default=str)

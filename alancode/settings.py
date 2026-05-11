@@ -23,9 +23,18 @@ logger = logging.getLogger(__name__)
 # initialize .alan/settings.json and to fill in missing fields on update.
 
 SETTINGS_DEFAULTS: dict[str, Any] = {
-    # Provider
-    "provider": "litellm",
-    "model": "anthropic/claude-sonnet-4-6",
+    # Backend (transport) + model
+    # "backend": which Alan transport speaks to the model.
+    #   - "auto" : universal — LiteLLM, supports any provider via the
+    #     model-string prefix (e.g. ``ollama/llama3``, ``openrouter/...``).
+    #   - "anthropic-native" : direct Anthropic SDK. Unlocks cache_control
+    #     breakpoints, native thinking, and native tool_use. The right
+    #     choice for bare Claude model names.
+    #   - "scripted" : deterministic provider used by tests.
+    # When the user sets ``model`` without an explicit ``backend``, the
+    # backend is inferred from the model string (see ``infer_backend``).
+    "backend": "anthropic-native",
+    "model": "claude-sonnet-4-6",
     "api_key": None,  # None = read from env var
     "base_url": None,  # None = use provider default. Set for local servers (e.g., http://localhost:8000/v1)
     "tool_call_format": None,  # Text-based tool call format: "hermes", "glm", "alan", or None (native)
@@ -104,6 +113,15 @@ def load_settings(cwd: str | None = None) -> dict[str, Any]:
         logger.warning(f"Invalid settings format in {path}. Using defaults.")
         return {}
 
+    # Translate any legacy ``provider`` key into the new ``backend`` key
+    # so older .alan/settings.json files keep loading without manual edits.
+    if migrate_legacy_provider_key(settings):
+        logger.info(
+            "%s used the legacy 'provider' key — auto-migrated to 'backend'. "
+            "Re-save settings to silence this notice (/settings backend=<value>).",
+            path,
+        )
+
     return settings
 
 
@@ -177,7 +195,7 @@ _is_pos_int = (lambda v: isinstance(v, int) and v > 0, "Must be a positive integ
 _is_pos_int_or_none = (lambda v: v is None or (isinstance(v, int) and v > 0), "Must be a positive integer or null")
 
 SETTING_VALIDATORS: dict[str, tuple] = {
-    "provider": _one_of("litellm", "anthropic", "scripted"),
+    "backend": _one_of("auto", "anthropic-native", "scripted"),
     "model": _is_str,
     "base_url": _is_str,
     "tool_call_format": _one_of("hermes", "glm", "alan"),
@@ -227,10 +245,77 @@ def validate_setting(key: str, value: Any) -> str | None:
     return None
 
 
-# Settings that trigger provider recreation when changed mid-session.
-PROVIDER_SETTINGS: set[str] = {
-    "provider",
+# Settings that trigger backend (LLMProvider) recreation when changed mid-session.
+BACKEND_SETTINGS: set[str] = {
+    "backend",
     "model",
     "api_key",
     "base_url",
 }
+
+# Backwards-compatible alias — old name kept for one release for any
+# external code (e.g. tests, downstream tools) that imported it.
+PROVIDER_SETTINGS = BACKEND_SETTINGS
+
+
+# ── Backend inference and legacy-key migration ──────────────────────────────
+
+
+# Legacy --provider values → new backend names.
+_LEGACY_PROVIDER_MAP: dict[str, str] = {
+    "litellm": "auto",
+    "anthropic": "anthropic-native",
+    "scripted": "scripted",
+}
+
+
+def infer_backend(model: str | None) -> str:
+    """Infer the backend from a model string.
+
+    Rule: a bare Claude name (e.g. ``claude-sonnet-4-6``) routes through
+    the native Anthropic SDK; everything else goes through the universal
+    LiteLLM transport. The ``anthropic/claude-...`` prefix is the explicit
+    escape hatch — it keeps the backend on ``auto`` so the user can route
+    Claude through LiteLLM (e.g. for a LiteLLM Proxy).
+
+    Returns ``"auto"`` when ``model`` is ``None`` or empty (used as a
+    safe fallback during partial configuration).
+    """
+    if not model:
+        return "auto"
+    if "/" not in model and model.startswith("claude-"):
+        return "anthropic-native"
+    return "auto"
+
+
+def migrate_legacy_provider_key(settings: dict[str, Any]) -> bool:
+    """Translate the old ``provider`` key into the new ``backend`` key.
+
+    Mutates *settings* in place. Returns ``True`` if anything changed
+    (caller may want to log a deprecation notice).
+
+    Mapping:
+        ``provider="litellm"``   → ``backend="auto"``
+        ``provider="anthropic"`` → ``backend="anthropic-native"``
+        ``provider="scripted"``  → ``backend="scripted"``
+
+    Any other legacy value is dropped silently; the caller is expected
+    to surface a friendly error elsewhere.
+    """
+    if "provider" not in settings:
+        return False
+
+    old = settings.pop("provider")
+    if "backend" in settings:
+        # User already specified the new key; legacy value is stale.
+        return True
+
+    if isinstance(old, str):
+        mapped = _LEGACY_PROVIDER_MAP.get(old.lower())
+        if mapped is not None:
+            settings["backend"] = mapped
+            return True
+
+    # Unknown legacy value — leave backend unset (caller will fall back
+    # to the default or to inference).
+    return True

@@ -40,8 +40,21 @@ def main() -> None:
     )
 
     # Settings args — all default to None so we can detect "not passed"
-    parser.add_argument("--provider", default=None, help="LLM provider (litellm, anthropic, scripted)")
-    parser.add_argument("--model", default=None, help="Model to use")
+    parser.add_argument(
+        "--backend", default=None,
+        help=("Transport backend (advanced). One of: auto, anthropic-native, "
+              "scripted. Inferred from --model when not set."),
+    )
+    parser.add_argument(
+        "--provider", default=None,
+        help="Deprecated alias for --backend. Will be removed in a future release.",
+    )
+    parser.add_argument(
+        "--model", default=None,
+        help=("Model to use. Bare names (gpt-4o, claude-sonnet-4-6) or "
+              "LiteLLM-style provider/model prefixes "
+              "(ollama/llama3, openrouter/google/gemini-2.5-pro, ...)."),
+    )
     parser.add_argument("--api-key", default=None, help="API key")
     parser.add_argument("--base-url", default=None, help="API base URL (for local servers: http://localhost:8000/v1)")
     parser.add_argument("--tool-call-format", default=None, choices=["hermes", "glm", "alan"],
@@ -99,6 +112,32 @@ def main() -> None:
         if not session_id:
             print(f"Error: No unique session matching '{continue_prefix}'.", file=sys.stderr)
             sys.exit(1)
+
+    # Reconcile --backend / --provider (deprecated alias). Done before
+    # building settings_cli so we don't carry the old key any further.
+    legacy_provider = all_args.pop("provider", None)
+    if legacy_provider is not None:
+        if all_args.get("backend") is not None:
+            print(
+                "Error: pass either --backend or --provider, not both.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        from alancode.settings import _LEGACY_PROVIDER_MAP
+
+        mapped = _LEGACY_PROVIDER_MAP.get(str(legacy_provider).lower())
+        if mapped is None:
+            # User probably typed something like --provider ollama, expecting
+            # ollama to be a backend. Suggest the right form.
+            print(
+                f"Error: '{legacy_provider}' is not a backend.\n"
+                f"       Valid backends: auto, anthropic-native, scripted.\n"
+                f"       To use {legacy_provider}, pass it as part of the model "
+                f"name: --model {legacy_provider}/<model-name>",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        all_args["backend"] = mapped
 
     # CLI settings = non-None args, coerced to proper types
     from alancode.settings import coerce_value
@@ -293,8 +332,8 @@ def _first_run_setup(cwd: str) -> None:
     print("  Welcome to Alan Code!")
     print("=" * 60)
     print()
-    print("  Default provider and model of current project:")
-    print("    litellm / anthropic/claude-sonnet-4-6")
+    print("  Default backend and model of current project:")
+    print("    anthropic-native / claude-sonnet-4-6")
     print()
 
     # Detect API keys
@@ -304,8 +343,9 @@ def _first_run_setup(cwd: str) -> None:
         print()
         for d in detections:
             print(f"    {d['label']}")
-            print(f"      /settings-project provider={d['provider']}")
             print(f"      /settings-project model={d['model']}")
+            if d.get("note"):
+                print(f"      ({d['note']})")
             print()
 
     print("  To change default settings, use /settings-project. All future")
@@ -320,14 +360,18 @@ def _first_run_setup(cwd: str) -> None:
 
 
 def _detect_api_keys() -> list[dict]:
-    """Detect available API keys and suggest provider/model configs."""
+    """Detect available API keys and suggest model configs.
+
+    The backend is inferred from the model name, so we only need to
+    surface the right ``--model`` value here.
+    """
     detections = []
 
     if os.environ.get("ANTHROPIC_API_KEY"):
         detections.append({
             "label": "ANTHROPIC_API_KEY detected",
-            "provider": "litellm",
-            "model": "anthropic/claude-sonnet-4-6",
+            "model": "claude-sonnet-4-6",
+            "note": "Native Anthropic backend used automatically.",
         })
 
     if os.environ.get("OPENROUTER_API_KEY"):
@@ -340,15 +384,19 @@ def _detect_api_keys() -> list[dict]:
                 label += " [low balance]"
         detections.append({
             "label": label,
-            "provider": "litellm",
             "model": "openrouter/anthropic/claude-sonnet-4",
         })
 
     if os.environ.get("OPENAI_API_KEY"):
         detections.append({
             "label": "OPENAI_API_KEY detected",
-            "provider": "litellm",
-            "model": "openai/gpt-4o",
+            "model": "gpt-4o",
+        })
+
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        detections.append({
+            "label": "GEMINI_API_KEY detected",
+            "model": "gemini/gemini-2.5-pro",
         })
 
     return detections
