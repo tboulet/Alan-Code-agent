@@ -281,9 +281,16 @@ class MyBackend(LLMProvider):
 agent = AlanCodeAgent(backend=MyBackend(...))
 ```
 
+## Remote-scripted backend
+
+`AlanCodeAgent(backend="scripted", model="remote", ...)` starts an embedded HTTP server and waits for an external caller (a human or another agent) to act as the LLM. Useful for debugging tool wiring, system prompts, and framework integrations without burning tokens.
+
+See [guides/remote-scripted-backend.md](../guides/remote-scripted-backend.md) for the endpoints, payload shapes, and a typical curl loop.
+
 ## Related
 
 - [guides/building-agents.md](../guides/building-agents.md) — tutorial-style introduction.
+- [guides/remote-scripted-backend.md](../guides/remote-scripted-backend.md) — HTTP-driven impersonation backend.
 - [reference/tools.md](tools.md) — what tools the agent has access to.
 - [reference/settings.md](settings.md) — what kwargs are valid and what defaults apply.
 - [architecture/query-loop.md](../architecture/query-loop.md) — what happens inside each `query_events_async` call.

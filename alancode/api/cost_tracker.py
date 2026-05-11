@@ -102,20 +102,36 @@ def _anthropic_cost(usage: Usage, model: str) -> float | None:
     ) / _PER_MILLION
 
 
+_SENTINEL_NON_PRICED_MODELS = frozenset({
+    # Names used by ScriptedProvider / RemoteScriptedProvider; not real models,
+    # litellm has no pricing for them and emits a noisy stdout banner if asked.
+    "remote", "scripted-model",
+})
+
+
 def _litellm_cost(usage: Usage, model: str) -> float | None:
     """Calculate cost using litellm's model pricing registry.
 
     Returns None if litellm doesn't know the model or isn't available.
+    litellm prints a "Provider List: ..." banner to stdout when it can't
+    resolve a model; we suppress that and also short-circuit known
+    test-only model names.
     """
+    if not model or model.lower() in _SENTINEL_NON_PRICED_MODELS:
+        return None
+    import contextlib
+    import io
     try:
         import litellm
-        prompt_cost, completion_cost = litellm.cost_per_token(
-            model=model,
-            prompt_tokens=usage.input_tokens,
-            completion_tokens=usage.output_tokens,
-            cache_read_input_tokens=usage.cache_read_input_tokens,
-            cache_creation_input_tokens=usage.cache_creation_input_tokens,
-        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            prompt_cost, completion_cost = litellm.cost_per_token(
+                model=model,
+                prompt_tokens=usage.input_tokens,
+                completion_tokens=usage.output_tokens,
+                cache_read_input_tokens=usage.cache_read_input_tokens,
+                cache_creation_input_tokens=usage.cache_creation_input_tokens,
+            )
         return prompt_cost + completion_cost
     except Exception:
         return None
