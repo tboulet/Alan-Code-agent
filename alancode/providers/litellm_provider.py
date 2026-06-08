@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
+from alancode.api.errors import is_prompt_too_long
 from alancode.providers.base import (
     LLMProvider,
     ModelInfo,
@@ -407,13 +408,11 @@ class LiteLLMProvider(LLMProvider):
                 error_type = "rate_limit"
             elif (
                 "ContextWindowExceededError" in type(e).__name__
-                # Narrower phrase list — the old `"context" in …` matched
-                # unrelated errors like "error in context of X" and
-                # over-triggered auto-compact.
-                or "context length" in error_str.lower()
-                or "context_length_exceeded" in error_str.lower()
-                or "maximum context" in error_str.lower()
-                or "prompt is too long" in error_str.lower()
+                # Centralised matcher — covers OpenAI, vLLM, SGLang, TGI,
+                # Anthropic, Ollama, Mistral and any other provider whose
+                # context-overflow error phrasing we have seen in the wild.
+                # Edit the pattern list in alancode/api/errors.py, not here.
+                or is_prompt_too_long(error_str)
             ):
                 error_type = "prompt_too_long"
             elif "Timeout" in type(e).__name__:

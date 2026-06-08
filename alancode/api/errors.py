@@ -29,13 +29,31 @@ class OverloadedError(Exception):
 
 
 _PROMPT_TOO_LONG_PATTERNS = (
+    # OpenAI / vLLM / NIM / generic OpenAI-compatible
+    "context length",
+    "context window",
+    "maximum context",
+    "context_length_exceeded",
+    "exceeds the model",
+    "exceeds the model's maximum",
+    # Anthropic / Mistral / generic prose
     "prompt is too long",
     "prompt too long",
-    "context window",
-    "context length",
-    "maximum context",
+    "prompt is too large",
+    # SGLang ("Input length (X) exceeds the maximum allowed length (Y)")
+    "exceeds the maximum allowed length",
+    "maximum allowed length",
+    "input length",
+    # TGI ("Input validation error: `inputs` tokens + `max_new_tokens` …")
+    "input validation error",
+    "inputs` tokens",
+    # Ollama (truncation warnings — model still responds, but worth catching)
+    "exceed context length",
+    "truncating input messages which exceed",
+    # Generic
     "token limit",
-    "exceeds the model",
+    "too many tokens",
+    "requested token count exceeds",
 )
 
 

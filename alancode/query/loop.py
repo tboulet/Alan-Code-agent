@@ -52,6 +52,7 @@ from alancode.providers.base import (
     StreamToolUseStop,
     ToolSchema,
 )
+from alancode.api.errors import is_prompt_too_long
 from alancode.api.retry import stream_with_retry
 from alancode.api.cost_tracker import CostTracker
 from alancode.tools.base import Tool, ToolUseContext
@@ -606,12 +607,14 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     state.transition = "max_output_tokens_recovery"
                     continue
 
-            # Emergency compaction: detect prompt-too-long errors
+            # Emergency compaction: detect prompt-too-long errors.
+            # The matcher in alancode.api.errors handles every provider
+            # phrasing we've seen — OpenAI, vLLM, SGLang, TGI, Ollama,
+            # Anthropic, Mistral. Edit the pattern list there, not here.
             if (
                 assistant_msg.is_api_error_message
                 and assistant_msg.api_error
-                and "prompt" in str(assistant_msg.api_error).lower()
-                and "too long" in str(assistant_msg.api_error).lower()
+                and is_prompt_too_long(str(assistant_msg.api_error))
                 and not state.has_attempted_emergency_compact
             ):
                 logger.info("Emergency compaction triggered (prompt too long)")
