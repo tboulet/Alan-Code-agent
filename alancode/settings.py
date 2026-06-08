@@ -37,7 +37,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "model": "claude-sonnet-4-6",
     "api_key": None,  # None = read from env var
     "base_url": None,  # None = use provider default. Set for local servers (e.g., http://localhost:8000/v1)
-    "tool_call_format": None,  # Text-based tool call format: "hermes", "glm", "alan", or None (native)
+    "tool_call_format": None,  # Text-based tool call format: "hermes", "hermes_xml", "glm", "alan", or None (native)
     # Session
     "permission_mode": "edit",  # 'yolo', 'edit', 'safe'
     "max_iterations_per_turn": None,  # None = unlimited. Caps API calls per user message.
@@ -198,7 +198,7 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "backend": _one_of("auto", "anthropic-native", "scripted"),
     "model": _is_str,
     "base_url": _is_str,
-    "tool_call_format": _one_of("hermes", "glm", "alan"),
+    "tool_call_format": _one_of("hermes", "hermes_xml", "glm", "alan"),
     "permission_mode": _one_of("yolo", "edit", "safe"),
     "max_iterations_per_turn": _is_pos_int_or_none,
     "max_output_tokens": _is_pos_int_or_none,

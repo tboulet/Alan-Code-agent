@@ -313,11 +313,124 @@ class AlanFormat(ToolCallFormat):
         )
 
 
+# ── Format: hermes_xml ────────────────────────────────────────────────────────
+#
+# Qwen3-Coder-Next / Qwen3-Next-family (and other Hermes-FunctionCalling-Lite
+# trained models) emit `<tool_call><function=NAME><parameter=KEY>VAL</parameter>
+# </function></tool_call>` instead of the JSON-inside-tag the plain `hermes`
+# format expects. The two are visually similar — same outer `<tool_call>` tag
+# — but the body is XML-shaped not JSON-shaped.
+
+
+_HERMES_XML_PATTERN = re.compile(
+    r"<tool_call>\s*<function=([^>\s]+)\s*>(.*?)</function>\s*</tool_call>",
+    re.DOTALL,
+)
+
+_HERMES_XML_ARG_PATTERN = re.compile(
+    r"<parameter=([^>\s]+)\s*>(.*?)</parameter>",
+    re.DOTALL,
+)
+
+# Loose: only fires malformed-detection when both <tool_call> and </tool_call>
+# are present (so prose mentions of "<tool_call>" don't trigger).
+_HERMES_XML_LOOSE_PATTERN = re.compile(
+    r"<tool_call>.*?</tool_call>",
+    re.DOTALL,
+)
+
+
+def _coerce_arg(raw: str) -> object:
+    """Try JSON-decode (numbers, bools, lists, objects) — else strip + return str."""
+    s = raw.strip()
+    if not s:
+        return ""
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return s
+
+
+class HermesXMLFormat(ToolCallFormat):
+    """Hermes-XML format: ``<tool_call><function=N><parameter=K>V</parameter></function></tool_call>``
+
+    Used by Qwen3-Coder-Next and other Hermes-FunctionCalling-Lite trained
+    models — the body of the <tool_call> tag is XML-shaped, NOT JSON.
+    """
+
+    def parse(self, text: str) -> list[ParsedToolCall]:
+        results = []
+        for match in _HERMES_XML_PATTERN.finditer(text):
+            name = match.group(1).strip()
+            body = match.group(2)
+            args: dict[str, object] = {}
+            for arg_match in _HERMES_XML_ARG_PATTERN.finditer(body):
+                k = arg_match.group(1).strip()
+                v = arg_match.group(2)
+                args[k] = _coerce_arg(v)
+            if name:
+                results.append(ParsedToolCall(
+                    name=name, input=args, raw_match=match.group(0),
+                ))
+        return results
+
+    def detect_malformed(self, text: str) -> bool:
+        # A <tool_call> block that doesn't satisfy the strict pattern AND
+        # isn't a valid `hermes` JSON-body either is malformed.
+        for match in _HERMES_XML_LOOSE_PATTERN.finditer(text):
+            blk = match.group(0)
+            if _HERMES_XML_PATTERN.match(blk):
+                continue
+            # Maybe it's JSON-body hermes-style — that's the sibling format's
+            # problem, not ours. Don't double-report.
+            if re.match(r"<tool_call>\s*\{.*?\}\s*</tool_call>", blk, re.DOTALL):
+                continue
+            return True
+        return False
+
+    def format_error(self) -> str:
+        return (
+            "Found <tool_call> block but content is not valid Hermes-XML.\n\n"
+            "Expected format:\n"
+            "<tool_call>\n"
+            "<function=tool_name>\n"
+            "<parameter=param>value</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n\n"
+            "Example:\n"
+            "<tool_call>\n"
+            "<function=Read>\n"
+            "<parameter=file_path>/path/to/file.py</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n\n"
+            "Please retry with the correct format."
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        tools_json = json.dumps(tool_schemas, indent=2)
+        return (
+            "\n\n# Tool Calling\n\n"
+            "You have access to the following tools:\n"
+            f"<tools>\n{tools_json}\n</tools>\n\n"
+            "To call a tool, output one or more <tool_call> blocks. The body of "
+            "each block uses <function=NAME> and <parameter=KEY>VALUE</parameter> "
+            "(NOT JSON):\n"
+            "<tool_call>\n"
+            "<function=tool_name>\n"
+            "<parameter=param>value</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n\n"
+            "You may call multiple tools by outputting multiple <tool_call> blocks.\n"
+            "After a tool call, wait for the result before continuing."
+        )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 
 FORMATS: dict[str, ToolCallFormat] = {
     "hermes": HermesFormat(),
+    "hermes_xml": HermesXMLFormat(),
     "glm": GLMFormat(),
     "alan": AlanFormat(),
 }
