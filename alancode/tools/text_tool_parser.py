@@ -425,6 +425,128 @@ class HermesXMLFormat(ToolCallFormat):
         )
 
 
+# ── Format: meta_json ─────────────────────────────────────────────────────────
+#
+# Llama-3.1+, Llama-3.3, and Meta tool-calling models emit a bare JSON object:
+#   {"type": "function", "name": "Read", "parameters": {"file_path": "..."}}
+# without any wrapping tag. The model relies on its chat template to wrap with
+# <|python_tag|>...<|eom_id|> tokens; when those aren't injected (default for
+# SGLang served as plain openai/* via LiteLLM), the JSON leaks into the
+# response content and nothing parses it.
+
+
+# Match a top-level {...} that contains "type": "function" and "name".
+# Non-greedy + balanced-brace matching is not in the stdlib regex engine, so
+# we capture the broadest plausible bracketed chunk and JSON-decode it.
+_META_JSON_PATTERN = re.compile(
+    r'\{\s*"type"\s*:\s*"function"\s*,.*?\}\s*\}',
+    re.DOTALL,
+)
+
+
+def _scan_meta_json_objects(text: str) -> list[tuple[str, dict]]:
+    """Find all top-level JSON objects in *text* that have type=function.
+
+    Uses a brace-counting scan because regex alone can't match balanced braces.
+    Returns a list of (raw_match, decoded_dict).
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # Find the next opening brace.
+        start = text.find("{", i)
+        if start == -1:
+            break
+        # Walk forward, balancing braces, respecting strings.
+        depth = 0
+        j = start
+        in_str = False
+        esc = False
+        while j < n:
+            ch = text[j]
+            if esc:
+                esc = False
+            elif ch == "\\" and in_str:
+                esc = True
+            elif ch == '"':
+                in_str = not in_str
+            elif not in_str:
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        chunk = text[start : j + 1]
+                        try:
+                            obj = json.loads(chunk)
+                        except (json.JSONDecodeError, ValueError):
+                            obj = None
+                        if isinstance(obj, dict) and obj.get("type") == "function" and obj.get("name"):
+                            out.append((chunk, obj))
+                        i = j + 1
+                        break
+            j += 1
+        else:
+            # No balanced close found; bail.
+            break
+    return out
+
+
+class MetaJSONFormat(ToolCallFormat):
+    """Meta-Llama raw-JSON format: ``{"type":"function","name":N,"parameters":{...}}``.
+
+    Used by Llama-3.1+, Llama-3.3 and other Meta-family tool-calling models when
+    their chat template's <|python_tag|>...<|eom_id|> wrappers are not injected
+    (typical for SGLang served as plain openai/* via LiteLLM).
+    """
+
+    def parse(self, text: str) -> list[ParsedToolCall]:
+        results = []
+        for raw, obj in _scan_meta_json_objects(text):
+            name = obj.get("name") or ""
+            params = obj.get("parameters", obj.get("arguments", {}))
+            if not isinstance(params, dict):
+                params = {}
+            if name:
+                results.append(ParsedToolCall(name=name, input=params, raw_match=raw))
+        return results
+
+    def detect_malformed(self, text: str) -> bool:
+        # If text mentions {"type": "function" but no valid object decodes,
+        # treat as malformed so we can return a corrective error to the model.
+        if '"type"' in text and '"function"' in text:
+            return not bool(_scan_meta_json_objects(text))
+        return False
+
+    def format_error(self) -> str:
+        return (
+            'Found a "type":"function" hint but no valid JSON tool call.\n\n'
+            "Expected format (one JSON object per call, no wrapping tags):\n"
+            '{"type": "function", "name": "tool_name", '
+            '"parameters": {"param": "value"}}\n\n'
+            "Example:\n"
+            '{"type": "function", "name": "Read", '
+            '"parameters": {"file_path": "/path/to/file.py"}}\n\n'
+            "Please retry with the correct format."
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        tools_json = json.dumps(tool_schemas, indent=2)
+        return (
+            "\n\n# Tool Calling\n\n"
+            "You have access to the following tools:\n"
+            f"<tools>\n{tools_json}\n</tools>\n\n"
+            "To call a tool, output ONE JSON object on its own (no wrapping "
+            "tags, no prose around it on the same line):\n"
+            '{"type": "function", "name": "tool_name", '
+            '"parameters": {"param": "value"}}\n\n'
+            "You may call multiple tools by outputting multiple JSON objects, "
+            "one per line. After a tool call, wait for the result before "
+            "continuing."
+        )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 
@@ -433,6 +555,7 @@ FORMATS: dict[str, ToolCallFormat] = {
     "hermes_xml": HermesXMLFormat(),
     "glm": GLMFormat(),
     "alan": AlanFormat(),
+    "meta_json": MetaJSONFormat(),
 }
 
 
