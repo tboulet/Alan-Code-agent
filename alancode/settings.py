@@ -76,6 +76,15 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "compaction_truncate_enabled": True,
     "compaction_clear_enabled": True,
     "compaction_auto_enabled": True,
+    # Incremental transcript persistence. When False (default), the transcript
+    # is written only at turn boundaries (existing behavior). When True, the
+    # transcript is also re-written periodically *during* a turn so the session
+    # is never lost if the turn never completes (rate-limit stall, SIGTERM /
+    # SIGKILL mid-turn). Opt-in for long-running batch/agentic consumers.
+    "incremental_transcript": False,
+    # Minimum seconds between mid-turn transcript flushes (debounce). Only used
+    # when incremental_transcript is True.
+    "incremental_transcript_interval_s": 3.0,
 }
 
 # Fields that should NOT be written to settings.json (ephemeral / per-invocation only)
@@ -225,6 +234,11 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "compaction_truncate_enabled": _is_bool,
     "compaction_clear_enabled": _is_bool,
     "compaction_auto_enabled": _is_bool,
+    "incremental_transcript": _is_bool,
+    "incremental_transcript_interval_s": (
+        lambda v: isinstance(v, (int, float)) and v >= 0,
+        "Must be a non-negative number",
+    ),
 }
 
 
