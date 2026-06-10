@@ -55,6 +55,7 @@ from alancode.session.session import (
     save_session_settings,
 )
 from alancode.session.transcript import (
+    append_transcript_message,
     load_transcript,
     record_transcript,
 )
@@ -550,6 +551,8 @@ class AlanCodeAgent:
             user_msg = create_user_message(message)
             self._messages.append(user_msg)
 
+            await append_transcript_message(self._session.session_id, user_msg, cwd=self._cwd)
+
             # --- system prompt ---
             mem_dir = get_memory_dir(self._cwd)
             global_mem_dir = get_global_memory_dir()
@@ -742,6 +745,9 @@ class AlanCodeAgent:
                 ) and not getattr(event, "hide_in_api", False):
                     if event is not user_msg:
                         self._messages.append(event)
+                        await append_transcript_message(
+                            self._session.session_id, event, cwd=self._cwd
+                        )
                 # Notify event listeners (GUI bridge, etc.)
                 for listener in self._event_listeners:
                     try:
