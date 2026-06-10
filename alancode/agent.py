@@ -18,7 +18,6 @@ import concurrent.futures
 import logging
 import os
 import queue
-import time
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncGenerator, Callable
@@ -56,6 +55,7 @@ from alancode.session.session import (
     save_session_settings,
 )
 from alancode.session.transcript import (
+    append_transcript_message,
     load_transcript,
     record_transcript,
 )
@@ -259,8 +259,6 @@ class AlanCodeAgent:
         session_id: str | None = None,
         ask_callback: Callable | None = None,
         verbose: bool = False,
-        incremental_transcript: bool | None = None,
-        incremental_transcript_interval_s: float | None = None,
         extra_tools: list | None = None,
         custom_system_prompt: str | None = None,
         gui_label: str | None = None,
@@ -336,8 +334,6 @@ class AlanCodeAgent:
             "max_output_tokens": max_output_tokens,
             "memory": memory,
             "tool_call_format": tool_call_format,
-            "incremental_transcript": incremental_transcript,
-            "incremental_transcript_interval_s": incremental_transcript_interval_s,
         }
         backend_explicit = backend_setting is not None or backend_instance is not None
         for k, v in constructor_overrides.items():
@@ -555,12 +551,7 @@ class AlanCodeAgent:
             user_msg = create_user_message(message)
             self._messages.append(user_msg)
 
-            # Incremental persistence (opt-in): write the prompt + session
-            # metadata to disk immediately, so even a turn whose very first LLM
-            # call stalls/dies leaves the transcript (prompt) recoverable.
-            incremental_transcript = bool(self._settings.get("incremental_transcript", False))
-            if incremental_transcript:
-                await self._flush_transcript_safe()
+            await append_transcript_message(self._session.session_id, user_msg, cwd=self._cwd)
 
             # --- system prompt ---
             mem_dir = get_memory_dir(self._cwd)
@@ -739,10 +730,6 @@ class AlanCodeAgent:
                 llm_perspective_callback=self._llm_perspective_callback,
             )
 
-            # Debounce clock for opt-in mid-turn transcript flushes.
-            flush_interval = float(self._settings.get("incremental_transcript_interval_s", 3.0))
-            last_flush = time.monotonic()
-
             async for event in query_loop(params):
                 # Capture the last final-assistant-message's usage so the
                 # display and next-iteration pre-call estimate can use it.
@@ -758,20 +745,15 @@ class AlanCodeAgent:
                 ) and not getattr(event, "hide_in_api", False):
                     if event is not user_msg:
                         self._messages.append(event)
+                        await append_transcript_message(
+                            self._session.session_id, event, cwd=self._cwd
+                        )
                 # Notify event listeners (GUI bridge, etc.)
                 for listener in self._event_listeners:
                     try:
                         await listener(event)
                     except Exception:
                         logger.debug("Event listener error", exc_info=True)
-                # Incremental persistence (opt-in): re-write the transcript at
-                # most once per ``incremental_transcript_interval_s`` so live
-                # viewers see progress and an unfinished/killed turn is not lost.
-                if incremental_transcript:
-                    now = time.monotonic()
-                    if now - last_flush >= flush_interval:
-                        await self._flush_transcript_safe()
-                        last_flush = now
                 yield event
 
             # Persist transcript
@@ -882,25 +864,6 @@ class AlanCodeAgent:
                 logger.debug("AGT root initialized: %s", sha[:7])
         except Exception:
             logger.debug("AGT root init failed (non-critical)", exc_info=True)
-
-    # ── Transcript persistence ───────────────────────────────────────────────
-
-    async def _flush_transcript_safe(self) -> None:
-        """Best-effort full transcript rewrite. Never raises into the turn loop.
-
-        Used for opt-in incremental persistence (``incremental_transcript``):
-        re-writes the canonical transcript.jsonl from the current in-memory
-        ``self._messages`` so a turn that never completes (rate-limit stall,
-        SIGTERM/SIGKILL mid-turn) still leaves the session on disk. Reuses the
-        same atomic full-rewrite as the end-of-turn write, so the on-disk
-        format, metadata line, and compaction handling are identical.
-        """
-        try:
-            await record_transcript(
-                self._session.session_id, self._messages, cwd=self._cwd
-            )
-        except Exception:
-            logger.debug("Incremental transcript flush failed", exc_info=True)
 
     # ── Control API ────────────────────────────────────────────────────────────
 

@@ -92,6 +92,46 @@ async def record_transcript(
         logger.warning("Failed to write transcript %s: %s", path, exc)
 
 
+async def append_transcript_message(
+    session_id: str,
+    message: Message,
+    *,
+    cwd: str | None = None,
+) -> None:
+    """Append a single *message* to the session transcript as one JSONL line.
+
+    Used to persist the transcript incrementally as a turn progresses, so the
+    session survives a turn that never completes (rate-limit stall, SIGTERM /
+    SIGKILL mid-turn) and live viewers see it grow. The full-rewrite
+    ``record_transcript`` still runs at the end of each turn and reconciles the
+    file (re-emitting metadata as line 1), so the two stay consistent.
+
+    The ``_metadata`` header is written once, when the file is first created,
+    to keep the same on-disk format ``record_transcript`` / ``load_transcript``
+    / ``get_last_session_id`` expect. Best-effort: never raises into the turn.
+    """
+    if not cwd:
+        return
+    path = get_session_transcript_path(cwd, session_id)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines: list[str] = []
+        if not path.exists():
+            metadata = {
+                "_metadata": {
+                    "cwd": cwd or "",
+                    "session_id": session_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            }
+            lines.append(json.dumps(metadata, default=str))
+        lines.append(json.dumps(message_to_dict(message), default=str))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Failed to append transcript %s: %s", path, exc)
+
+
 async def load_transcript(session_id: str, *, cwd: str | None = None) -> list[Message] | None:
     """Load messages from a session transcript.
 
