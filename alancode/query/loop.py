@@ -218,6 +218,36 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         model_info = state.cached_model_info
         threshold_pct = params.settings.get("compaction_threshold_percent", 80) / 100.0
         threshold_tokens = int(model_info.context_window * threshold_pct)
+        blocking_limit = model_info.context_window - params.settings.get(
+            "blocking_limit_buffer_tokens", 3000
+        )
+
+        # Pre-compaction floor check: system prompt + tool schemas alone
+        tool_schemas_for_floor = [
+            t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools
+        ]
+        floor_tokens = predicted_next_call_tokens(
+            params.model,
+            [],
+            system=params.system_prompt,
+            tools=tool_schemas_for_floor,
+            last_input_tokens=0,
+            last_output_tokens=0,
+            new_messages_since_last_call=None,
+        )
+        if floor_tokens >= blocking_limit:
+            yield create_assistant_error_message(
+                f"Context window {model_info.context_window} is too small "
+                f"for this configuration.",
+                error_details=(
+                    f"System prompt + tool schemas alone need "
+                    f"{floor_tokens} tokens, but the blocking limit is "
+                    f"{blocking_limit} ({model_info.context_window} CW − "
+                    f"{model_info.context_window - blocking_limit} buffer). "
+                    f"Use a model with a larger context window."
+                ),
+            )
+            return
 
         # Layer A: compaction_truncate_tool_results (truncate oversized results)
         if params.settings.get("compaction_truncate_enabled", True):
@@ -301,8 +331,15 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     }
 
         # -- Phase 3: Blocking limit check -------------------------------
-        # Reuse the same conservative estimate computed above.
-        blocking_limit = model_info.context_window - params.settings.get("blocking_limit_buffer_tokens", 3000)
+        current_tokens = predicted_next_call_tokens(
+            params.model,
+            messages_for_query,
+            system=params.system_prompt,
+            tools=[t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools],
+            last_input_tokens=state.last_input_tokens,
+            last_output_tokens=state.last_output_tokens,
+            new_messages_since_last_call=None,
+        )
         if current_tokens >= blocking_limit:
             yield create_assistant_error_message(
                 "Conversation too long. Please run /compact or start a new session."
