@@ -189,6 +189,20 @@ function renderAssistantFinal(data) {
     currentThinkingEl = null;
     if (!data.content) return;
 
+    // Synthetic error messages bypass the streaming pipeline. Render their
+    // text in the error color and surface error_details as a dim hint.
+    if (data.is_api_error_message) {
+        for (const block of data.content) {
+            if (block.type === "text" && block.text && block.text.trim()) {
+                appendMsg("msg-error", block.text);
+            }
+        }
+        if (data.error_details) {
+            appendMsg("msg-system", data.error_details);
+        }
+        return;
+    }
+
     for (const block of data.content) {
         if (block.type === "text" && block.text && !wasStreamed) {
             appendMsg("msg-assistant", block.text);
