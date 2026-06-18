@@ -211,6 +211,15 @@ def _display_assistant_message(msg: AssistantMessage, console: Console) -> None:
     Streaming deltas (hide_in_api=True) show text/thinking inline.
     Final messages show only tool calls (text was already streamed).
     """
+    # Render API error messages in red, with details if available.
+    if msg.is_api_error_message:
+        for block in msg.content:
+            if isinstance(block, TextBlock) and block.text.strip():
+                console.print(f"[red]{block.text.strip()}[/red]")
+        if msg.error_details:
+            console.print(f"[dim]{msg.error_details}[/dim]")
+        return
+
     if msg.hide_in_api:
         # Streaming delta — print inline without trailing newline.
         for block in msg.content:
