@@ -418,7 +418,7 @@ class LiteLLMProvider(LLMProvider):
             elif "Timeout" in type(e).__name__:
                 error_type = "timeout"
 
-            logger.error(f"LiteLLM error ({error_type}): {error_str}")
+            logger.error(f"LiteLLM error (identified as {error_type}): {error_str}")
             yield StreamError(error=error_str, error_type=error_type)
 
 
