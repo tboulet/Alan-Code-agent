@@ -589,7 +589,6 @@ class AlanCodeAgent:
 
             # --- text-based tool calling instructions ---
             tool_call_format = self._settings.get("tool_call_format")
-            model_info = self._provider.get_model_info(self._model)
             if tool_call_format:
                 tool_schemas = [
                     {

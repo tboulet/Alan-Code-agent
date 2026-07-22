@@ -242,7 +242,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 error_details=(
                     f"System prompt + tool schemas alone need "
                     f"{floor_tokens} tokens, but the blocking limit is "
-                    f"{blocking_limit} ({model_info.context_window} CW − "
+                    f"{blocking_limit} ({model_info.context_window} CW - "
                     f"{model_info.context_window - blocking_limit} buffer). "
                     f"Use a model with a larger context window."
                 ),
@@ -295,7 +295,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 yield circuit_breaker_msg
                 return
             else:
-                logger.info("Auto-compaction triggered (Layer C)")
+                logger.info("Auto-compaction triggered")
                 try:
                     result = await compaction_auto(
                         messages_for_query,
