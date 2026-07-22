@@ -159,7 +159,7 @@ async def run_session(
             console.print("\nGoodbye!", style="dim")
             break
         except (KeyboardInterrupt, asyncio.CancelledError):
-            console.print()
+            console.print("Use /exit to quit.", style="dim")
             continue
 
     await agent.close()
@@ -289,7 +289,7 @@ def _display_error(error: Exception, console) -> None:
     message, hint = classify_error(error)
     console.print(f"[red]{message}[/red]")
     if hint:
-        console.print(f"[dim]{hint}[/dim]")
+        console.print(f"[dim]Possible fix: {hint}[/dim]")
 
 
 async def _handle_slash_command(
