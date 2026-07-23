@@ -35,7 +35,7 @@ from alancode.memory.memdir import (
     load_project_instructions,
 )
 from alancode.memory.prompt import build_memory_section
-from alancode.messages.factory import create_user_message
+from alancode.messages.factory import create_system_message, create_user_message
 from alancode.messages.types import (
     AssistantMessage,
     AttachmentMessage,
@@ -547,6 +547,40 @@ class AlanCodeAgent:
                 self._init_agt_root()
 
         try:
+            # --- context-window probe (unknown local models, one-time) ---
+            # When get_model_info could not resolve the context window
+            # (cw_source == "fallback"), actively probe the server once and
+            # cache the result; every budget derivation depends on this
+            # value being real. Best-effort: a failed probe leaves the
+            # conservative fallback in effect.
+            try:
+                _mi = self._provider.get_model_info(self._model)
+                if (
+                    getattr(_mi, "cw_source", "registry") == "fallback"
+                    and hasattr(self._provider, "probe_and_cache_context_window")
+                    and not getattr(self._provider, "_cw_probe_attempted", False)
+                ):
+                    yield create_system_message(
+                        "Context window unknown for this model - probing the "
+                        "server (one-time, cached afterwards)..."
+                    )
+                    _detected = await self._provider.probe_and_cache_context_window(
+                        self._model
+                    )
+                    if _detected:
+                        yield create_system_message(
+                            f"Context window detected: {_detected:,} tokens."
+                        )
+                    else:
+                        yield create_system_message(
+                            "Context window probe inconclusive - assuming "
+                            "32,768 tokens. Set the 'context_window' setting "
+                            "to override.",
+                            level="warning",
+                        )
+            except Exception:
+                logger.debug("CW probe skipped (non-critical)", exc_info=True)
+
             # --- user message ---
             user_msg = create_user_message(message)
             self._messages.append(user_msg)

@@ -102,10 +102,19 @@ ProviderStreamEvent = (
 
 @dataclass
 class ModelInfo:
-    """Information about a model's capabilities."""
+    """Information about a model's capabilities.
+
+    ``cw_source`` records where ``context_window`` came from:
+    ``"override"`` (explicit config), ``"registry"`` (model registry),
+    ``"server"`` (queried from the serving endpoint), ``"known_table"``
+    (built-in fallback table), ``"cache"`` (previously probed value),
+    or ``"fallback"`` (nothing worked - conservative guess; the value is
+    NOT trustworthy and callers may trigger a probe).
+    """
     context_window: int = 200_000
     max_output_tokens: int = 8_192
     supports_thinking: bool = False
+    cw_source: str = "registry"
 
 
 @dataclass

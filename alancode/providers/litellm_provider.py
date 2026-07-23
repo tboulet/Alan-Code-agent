@@ -111,49 +111,116 @@ class LiteLLMProvider(LLMProvider):
         self._context_window_override = context_window
         self._max_output_override = max_output_tokens
         self._extra_kwargs = extra_kwargs or {}
+        self._cw_probe_attempted = False
+        self._cw_fallback_warned: set[str] = set()
 
     def get_model_info(self, model: str | None = None) -> ModelInfo:
         """Get model capabilities.
 
-        Resolution order:
-        1. Constructor overrides (context_window, max_output_tokens)
-        2. litellm model registry
-        3. Our fallback known-models table
-        4. Safe defaults
+        Context-window resolution chain (first hit wins):
+        1. Constructor override        -> cw_source "override"
+        2. litellm model registry      -> "registry"
+        3. Server metadata endpoints   -> "server"   (vLLM/SGLang, Ollama)
+        4. Known-models table          -> "known_table"
+        5. Probe cache                 -> "cache"    (a past probe's result)
+        6. Conservative 32k + warning  -> "fallback" (untrusted; the agent
+           may trigger probe_and_cache_context_window to replace it)
         """
         m = model or self._model
         ctx = self._context_window_override
+        source = "override" if ctx is not None else None
         max_out = self._max_output_override
         supports_thinking = False
 
-        # Try litellm's registry (covers hundreds of cloud models)
+        # Rung 2: litellm's registry (covers hundreds of cloud models).
+        # Also the source of max_output/thinking regardless of the CW rung.
         try:
             import litellm
             info = litellm.get_model_info(m)
             if ctx is None:
                 ctx = info.get("max_input_tokens") or info.get("max_tokens")
+                source = "registry" if ctx is not None else None
             if max_out is None:
                 max_out = info.get("max_output_tokens")
             supports_thinking = info.get("supports_thinking", False)
         except Exception:
             logger.debug(f"Model '{m}' not found in litellm registry, trying server fallbacks")
 
-        # Fallback: query the server's /v1/models endpoint (local servers)
+        # Rung 3: the serving endpoint's own metadata (local servers).
         if ctx is None and self._api_base:
             ctx = self._query_server_context_window(m)
+            source = "server" if ctx is not None else None
 
-        # Fallback: check our known-models table for context window
+        # Rung 4: known-models table.
         if ctx is None:
             for key, window in _KNOWN_CONTEXT_WINDOWS.items():
                 if key in m.lower():
                     ctx = window
+                    source = "known_table"
                     break
 
+        # Rung 5: a previously probed value.
+        if ctx is None:
+            from alancode.providers.cw_probe import load_cached_context_window
+            ctx = load_cached_context_window(m, self._api_base)
+            source = "cache" if ctx is not None else None
+
+        # Rung 6: conservative fallback - loudly, and only once per model.
+        if ctx is None:
+            ctx = 32_768
+            source = "fallback"
+            if m not in self._cw_fallback_warned:
+                self._cw_fallback_warned.add(m)
+                logger.warning(
+                    "Context window of model '%s' is UNKNOWN (registry, server "
+                    "metadata and cache all failed). Assuming a conservative "
+                    "%d tokens. Set the 'context_window' setting if you know "
+                    "the real value.", m, ctx,
+                )
+
         return ModelInfo(
-            context_window=ctx or 200_000,
+            context_window=ctx,
             max_output_tokens=max_out or 8_192,
             supports_thinking=supports_thinking,
+            cw_source=source or "registry",
         )
+
+    async def probe_and_cache_context_window(
+        self, model: str | None = None,
+    ) -> int | None:
+        """Probe the server for the real context window and cache the result.
+
+        Called by the agent (once per session at most) when
+        ``get_model_info`` reported ``cw_source == "fallback"``. Returns the
+        detected value, or None when probing failed or was distrusted -
+        in which case the conservative fallback stays in effect.
+        """
+        if self._cw_probe_attempted:
+            return None
+        self._cw_probe_attempted = True
+
+        from alancode.providers.cw_probe import (
+            probe_context_window,
+            save_cached_context_window,
+        )
+
+        m = model or self._model
+        result = await probe_context_window(
+            m, api_key=self._api_key, api_base=self._api_base,
+        )
+        if result.value:
+            save_cached_context_window(m, self._api_base, result.value, result.method)
+            logger.info(
+                "Context window of '%s' probed: %d tokens (cached).",
+                m, result.value,
+            )
+            return result.value
+
+        logger.warning(
+            "Context window probe for '%s' inconclusive (%s): %s. "
+            "Keeping the conservative fallback.", m, result.method, result.detail,
+        )
+        return None
 
     def _query_server_context_window(self, model: str) -> int | None:
         """Query a local server's /v1/models or /api/tags for context window info."""
@@ -175,17 +242,36 @@ class LiteLLMProvider(LLMProvider):
             except Exception:
                 continue
 
-        # Try Ollama /api/tags
+        # Try Ollama /api/show (POST with the model name). Note /api/tags
+        # does NOT expose context_length - it lives in /api/show's
+        # model_info under "<architecture>.context_length".
         try:
+            import re as _re
+
             ollama_base = base.replace("/v1", "")
-            resp = http_requests.get(f"{ollama_base}/api/tags", timeout=5)
+            # "ollama/llama3.1" -> the server knows it as "llama3.1"
+            server_model = model.split("/", 1)[1] if "/" in model else model
+            resp = http_requests.post(
+                f"{ollama_base}/api/show", json={"model": server_model}, timeout=5,
+            )
             if resp.status_code == 200:
-                for m_info in resp.json().get("models", []):
-                    details = m_info.get("details", {})
-                    ctx = details.get("context_length")
-                    if ctx:
-                        logger.info("Got context window %d from Ollama", ctx)
-                        return ctx
+                data = resp.json()
+                ctx = None
+                for key, value in (data.get("model_info") or {}).items():
+                    if key.endswith(".context_length"):
+                        ctx = int(value)
+                        break
+                # The SERVED context may be lower than the model max: Ollama
+                # runs with num_ctx (and silently truncates beyond it). If
+                # the modelfile sets one, that is the real limit.
+                params_str = data.get("parameters") or ""
+                num_ctx_match = _re.search(r"num_ctx\s+(\d+)", params_str)
+                if num_ctx_match:
+                    num_ctx = int(num_ctx_match.group(1))
+                    ctx = min(ctx, num_ctx) if ctx else num_ctx
+                if ctx:
+                    logger.info("Got context window %d from Ollama /api/show", ctx)
+                    return ctx
         except Exception:
             pass
 
