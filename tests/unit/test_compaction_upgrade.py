@@ -47,41 +47,19 @@ from alancode.utils.tokens import estimate_message_tokens
 
 
 class TestCompactionTruncate:
-    def test_below_threshold_noop(self):
-        """When estimated tokens < threshold, no truncation occurs."""
-        msg = create_tool_result_message("tu_1", "x" * 100_000)
-        messages = [msg]
-        # Even with a very high threshold, oversized results are always truncated
-        # (Layer A has no threshold gate — prevents context overflow from token estimation errors)
-        result = compaction_truncate_tool_results(messages, threshold_tokens=999_999, max_chars=50_000)
-        assert len(result) == 1
-        block = result[0].content[0]
-        assert "truncated" in block.content.lower()
-
-    def test_above_threshold_truncates(self):
-        """When estimated tokens >= threshold, oversized results are truncated."""
-        # Create a message with large tool result
-        msg = create_tool_result_message("tu_1", "x" * 100_000)
-        messages = [msg]
-        # Set low threshold so we're above it
-        result = compaction_truncate_tool_results(messages, threshold_tokens=1, max_chars=50_000)
-        assert len(result) == 1
-        block = result[0].content[0]
-        assert "truncated" in block.content.lower()
-
-    def test_no_threshold_always_runs(self):
-        """Without threshold, truncation always runs (backward compat)."""
+    def test_always_truncates_oversized(self):
+        """Layer A is always on: any result over max_chars is truncated."""
         msg = create_tool_result_message("tu_1", "x" * 100_000)
         result = compaction_truncate_tool_results([msg], max_chars=50_000)
+        assert len(result) == 1
         block = result[0].content[0]
         assert "truncated" in block.content.lower()
 
-    def test_oldest_first_processing(self):
-        """Oldest tool results are processed first."""
+    def test_all_oversized_processed(self):
+        """Every oversized result is truncated, not just the first."""
         msg1 = create_tool_result_message("tu_1", "FIRST" * 20_000)
         msg2 = create_tool_result_message("tu_2", "SECOND" * 20_000)
-        result = compaction_truncate_tool_results([msg1, msg2], max_chars=50_000, threshold_tokens=1)
-        # Both should be truncated since both exceed max_chars
+        result = compaction_truncate_tool_results([msg1, msg2], max_chars=50_000)
         assert "truncated" in result[0].content[0].content.lower()
         assert "truncated" in result[1].content[0].content.lower()
 

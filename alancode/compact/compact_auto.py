@@ -40,7 +40,6 @@ from alancode.compact.prompt import (
 )
 from alancode.utils.tokens import (
     estimate_message_tokens,
-    get_auto_compact_threshold,
     rough_token_count,
 )
 

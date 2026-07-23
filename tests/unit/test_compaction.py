@@ -24,9 +24,7 @@ from alancode.messages.factory import (
 )
 from alancode.settings import SETTINGS_DEFAULTS
 from alancode.utils.tokens import (
-    calculate_token_warning_state,
     estimate_message_tokens,
-    get_auto_compact_threshold,
     rough_token_count,
 )
 
@@ -197,29 +195,3 @@ class TestTokenCounting:
         # Should be > 0 with message overhead + content
         assert total > 0
 
-    def test_auto_compact_threshold(self):
-        threshold = get_auto_compact_threshold(200_000)
-        # Should be context_window - max(max_output, 20K) - buffer
-        expected = 200_000 - SETTINGS_DEFAULTS["compact_max_output_tokens"] - SETTINGS_DEFAULTS["auto_compact_buffer_tokens"]
-        assert threshold == expected
-
-    def test_warning_state_normal(self):
-        state = calculate_token_warning_state(10_000, 200_000)
-        assert state["is_above_warning"] is False
-        assert state["is_above_error"] is False
-        assert state["is_at_blocking_limit"] is False
-        assert state["percent_left"] > 0.9
-
-    def test_warning_state_above_warning(self):
-        # Usable = 200K - 20K = 180K
-        # Remaining = 180K - usage
-        # Warning threshold is 20K remaining
-        usage = 180_000 - SETTINGS_DEFAULTS["warning_threshold_buffer_tokens"] + 1
-        state = calculate_token_warning_state(usage, 200_000)
-        assert state["is_above_warning"] is True
-
-    def test_warning_state_blocking(self):
-        # Usable = 200K - 20K = 180K
-        usage = 180_000 - 1000  # Only 1000 tokens remaining
-        state = calculate_token_warning_state(usage, 200_000)
-        assert state["is_at_blocking_limit"] is True

@@ -252,8 +252,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # Layer A: compaction_truncate_tool_results (truncate oversized results)
         if params.settings.get("compaction_truncate_enabled", True):
             messages_for_query = compaction_truncate_tool_results(
-                messages_for_query, threshold_tokens=threshold_tokens,
-                settings=params.settings,
+                messages_for_query, settings=params.settings,
             )
 
         # Layer B: compaction_clear_tool_results (clear old tool results)

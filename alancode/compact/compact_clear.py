@@ -5,8 +5,6 @@ Clears content from old tool results while preserving the message structure.
 
 from __future__ import annotations
 
-import copy
-
 from alancode.messages.types import (
     AssistantMessage,
     Message,
@@ -31,7 +29,7 @@ def _estimate_block_tokens(block: ToolResultBlock) -> int:
         block: A ToolResultBlock whose content may be a string or list of TextBlocks.
 
     Returns:
-        Approximate token count using the ~4 chars/token heuristic.
+        Approximate token count using the chars/3 heuristic (see utils.tokens).
     """
     if isinstance(block.content, str):
         return rough_token_count(block.content)
