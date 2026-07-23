@@ -17,7 +17,6 @@ class LoopState:
     transition: str | None = None  # Why previous iteration continued
     auto_compact_tracking: dict | None = None  # {compacted, iteration_counter, consecutive_failures}
     turns_since_memory_update: int = 0  # Iterations since last memory reminder (intensive mode)
-    cached_model_info: Any = None  # Cached ModelInfo from provider (reset on model change)
     # Last API call's provider-reported usage, captured so the next
     # iteration's pre-call token estimate can use it as a floor.
     last_input_tokens: int = 0

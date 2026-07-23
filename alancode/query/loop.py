@@ -55,6 +55,7 @@ from alancode.providers.base import (
 from alancode.api.errors import is_prompt_too_long
 from alancode.api.retry import stream_with_retry
 from alancode.api.cost_tracker import CostTracker
+from alancode.budget import ConfigError, clamp_output_budget, resolve_context_budget
 from alancode.tools.base import Tool, ToolUseContext
 from alancode.tools.registry import tools_to_schemas
 from alancode.tools.orchestration import run_tools
@@ -182,6 +183,54 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             len(params.messages) if params.last_input_tokens_seed > 0 else 0
         ),
     )
+
+    # -- Per-turn budget resolution ------------------------------------
+    # Model geometry and settings are fixed for the whole turn, so every
+    # derived limit (threshold, clear target, blocking, caps) is resolved
+    # once here. See alancode/budget.py for the DAG.
+    model_info = params.provider.get_model_info(params.model)
+    try:
+        budget = resolve_context_budget(model_info, params.settings)
+    except ConfigError as e:
+        yield create_assistant_error_message(
+            "Invalid context/budget configuration.", error_details=str(e),
+        )
+        return
+    threshold_tokens = budget.threshold_compaction
+    blocking_limit = budget.max_context_size_allowed
+
+    # -- Floor check (once per turn: inputs are fixed) -----------------
+    # System prompt + tool schemas are sent on every call and cannot be
+    # compacted. If they alone exceed the blocking limit, the turn is
+    # unwinnable regardless of the conversation - fail fast with a
+    # diagnosis instead of letting Phase 3 give misleading /compact advice.
+    tool_schemas_for_floor = [
+        t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools
+    ]
+    floor_tokens = predicted_next_call_tokens(
+        params.model,
+        [],
+        system=params.system_prompt,
+        tools=tool_schemas_for_floor,
+        last_input_tokens=0,
+        last_output_tokens=0,
+        new_messages_since_last_call=None,
+    )
+    if floor_tokens >= blocking_limit:
+        yield create_assistant_error_message(
+            f"Context window {budget.context_window} is too small "
+            f"for this configuration.",
+            error_details=(
+                f"System prompt + tool schemas alone need "
+                f"{floor_tokens} tokens, but the blocking limit is "
+                f"{blocking_limit} ({budget.context_window} CW - "
+                f"{budget.max_output_tokens} output budget - "
+                f"{budget.safety_margin} margin). "
+                f"Use a model with a larger context window."
+            ),
+        )
+        return
+
     iteration = 0
 
     while True:
@@ -211,43 +260,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # -- Phase 2: Message preparation (compaction pipeline) ----------
         messages_for_query = get_messages_after_compact_boundary(state.messages)
-
-        # Compute compaction threshold from model context window (cached)
-        if state.cached_model_info is None:
-            state.cached_model_info = params.provider.get_model_info(params.model)
-        model_info = state.cached_model_info
-        threshold_pct = params.settings.get("compaction_threshold_percent", 80) / 100.0
-        threshold_tokens = int(model_info.context_window * threshold_pct)
-        blocking_limit = model_info.context_window - params.settings.get(
-            "blocking_limit_buffer_tokens", 3000
-        )
-
-        # Pre-compaction floor check: system prompt + tool schemas alone
-        tool_schemas_for_floor = [
-            t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools
-        ]
-        floor_tokens = predicted_next_call_tokens(
-            params.model,
-            [],
-            system=params.system_prompt,
-            tools=tool_schemas_for_floor,
-            last_input_tokens=0,
-            last_output_tokens=0,
-            new_messages_since_last_call=None,
-        )
-        if floor_tokens >= blocking_limit:
-            yield create_assistant_error_message(
-                f"Context window {model_info.context_window} is too small "
-                f"for this configuration.",
-                error_details=(
-                    f"System prompt + tool schemas alone need "
-                    f"{floor_tokens} tokens, but the blocking limit is "
-                    f"{blocking_limit} ({model_info.context_window} CW - "
-                    f"{model_info.context_window - blocking_limit} buffer). "
-                    f"Use a model with a larger context window."
-                ),
-            )
-            return
 
         # Layer A: compaction_truncate_tool_results (truncate oversized results)
         if params.settings.get("compaction_truncate_enabled", True):
@@ -302,6 +314,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         model=params.model,
                         memory_mode=params.memory_mode,
                         settings=params.settings,
+                        budget=budget,
                     )
                     if result:
                         # Yield compaction artefacts so the caller can display/store them
@@ -362,10 +375,11 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 ToolSchema(**s) for s in tools_to_schemas(params.tools)
             ]
 
-        max_tokens = (
-            state.max_output_tokens_override
-            or params.max_output_tokens
-            or model_info.max_output_tokens
+        requested_max_tokens = (
+            state.max_output_tokens_override or budget.max_output_tokens
+        )
+        max_tokens = clamp_output_budget(
+            budget, current_tokens, requested_max_tokens,
         )
 
         # Accumulators for the streamed response
@@ -661,6 +675,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         model=params.model,
                         memory_mode=params.memory_mode,
                         settings=params.settings,
+                        budget=budget,
                     )
                     if emergency_result:
                         state.messages = (

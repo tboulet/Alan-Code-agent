@@ -61,6 +61,16 @@ class CompactionResult:
 # ---------------------------------------------------------------------------
 
 
+def _estimate_api_dict_tokens(api_messages_dicts: list[dict]) -> int:
+    """Rough token estimate over already-serialized API message dicts."""
+    total = 0
+    for msg in api_messages_dicts:
+        total += 4  # per-message overhead
+        content = msg.get("content", "")
+        total += rough_token_count(content if isinstance(content, str) else str(content))
+    return total
+
+
 def truncate_middle_for_ptl(
     messages: list[UserMessage | AssistantMessage],
 ) -> list[UserMessage | AssistantMessage] | None:
@@ -95,6 +105,7 @@ async def compaction_auto(
     session_id: str | None = None,
     memory_mode: str = "on",
     settings: dict | None = None,
+    budget: Any = None,  # ContextBudget | None - sizes the summarizer call
 ) -> CompactionResult | None:
     """Compact the conversation by summarizing it via LLM (Layer C).
 
@@ -150,13 +161,27 @@ async def compaction_auto(
         kwargs["model"] = model
 
     for attempt in range(max_ptl_retries + 1):
+        # Size the summarizer's output so input + output + margin fits the window.
+        if budget is not None:
+            from alancode.budget import clamp_output_budget
+
+            est_input = _estimate_api_dict_tokens(api_messages_dicts)
+            call_max_tokens = max(
+                256,
+                clamp_output_budget(
+                    budget, est_input, budget.max_tokens_for_summary,
+                ),
+            )
+        else:
+            call_max_tokens = compact_max_output_tokens
+
         response_text = ""
         try:
             async for event in provider.stream(
                 api_messages_dicts,
                 compact_system,
                 tools=[],
-                max_tokens=compact_max_output_tokens,
+                max_tokens=call_max_tokens,
                 **kwargs,
             ):
                 if isinstance(event, StreamTextDelta):

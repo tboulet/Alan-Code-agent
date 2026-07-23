@@ -440,6 +440,17 @@ async def _handle_compact(agent: AlanCodeAgent, console, arg: str = "") -> None:
     custom_instructions = arg.strip() if arg.strip() else None
     console.print(f"[dim]Compacting conversation ({msg_count} messages)...[/dim]")
 
+    # Resolve the budget so the summarizer call is sized to the window
+    # (without it, /compact near the limit is rejected on small models).
+    try:
+        from alancode.budget import resolve_context_budget
+
+        _budget = resolve_context_budget(
+            agent._provider.get_model_info(agent._model), agent._settings,
+        )
+    except Exception:
+        _budget = None
+
     try:
         result = await compaction_auto(
             agent._messages,
@@ -449,6 +460,7 @@ async def _handle_compact(agent: AlanCodeAgent, console, arg: str = "") -> None:
             session_id=agent.session_id,
             memory_mode=agent._memory_mode,
             settings=agent._settings,
+            budget=_budget,
         )
         if result:
             agent._messages = [result.boundary_message] + result.summary_messages
