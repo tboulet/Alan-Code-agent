@@ -35,17 +35,10 @@ from alancode.memory.memdir import (
     ALAN_MD,
     ensure_memory_structure,
     ensure_project_instructions,
-    get_global_memory_dir,
-    get_memory_dir,
-    load_global_memory_index,
-    load_global_project_instructions,
-    load_memory_index,
-    load_project_instructions,
 )
-from alancode.memory.prompt import build_memory_section, get_save_command_prompt
+from alancode.memory.prompt import get_save_command_prompt
 from alancode.messages.factory import create_user_message
 from alancode.messages.types import Usage
-from alancode.prompt.system_prompt import get_system_prompt
 from alancode.settings import (
     coerce_value,
     get_settings_path,
@@ -107,28 +100,7 @@ async def run_session(
     if agent._messages:
         ui.on_initial_conversation(agent._messages)
     try:
-        mem_dir = get_memory_dir(agent._cwd)
-        global_mem_dir = get_global_memory_dir()
-        memory_section = build_memory_section(
-            agent._memory_mode,
-            str(mem_dir),
-            load_memory_index(cwd=agent._cwd),
-            global_memory_dir=str(global_mem_dir),
-            global_memory_index=load_global_memory_index(),
-        )
-        global_instr = load_global_project_instructions()
-        project_instr = load_project_instructions(agent._cwd)
-        append_parts = [p for p in (global_instr, project_instr) if p]
-        append_prompt = "\n\n".join(append_parts) if append_parts else None
-        sp, _boundary = get_system_prompt(
-            tools=agent._tools,
-            skills=agent._skill_registry.list_all(),
-            model=agent._model,
-            cwd=agent._cwd,
-            append_prompt=append_prompt,
-            memory_section=memory_section,
-            scratchpad_dir=str(agent._scratchpad_dir),
-        )
+        sp, _boundary = agent.build_system_prompt()
         ui.on_initial_system_prompt("\n\n".join(sp))
     except Exception:
         pass

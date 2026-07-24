@@ -62,6 +62,7 @@ class SkillTool(Tool):
         # Build the response with tool restriction hints if applicable
         parts = [f'<skill-prompt name="{skill_name}">']
         if skill.allowed_tools:
+            context.active_skill_filter = skill.allowed_tools
             tools_str = ", ".join(skill.allowed_tools)
             parts.append(
                 f"IMPORTANT: While executing this skill, you may only use "

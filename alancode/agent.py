@@ -589,61 +589,7 @@ class AlanCodeAgent:
             await append_transcript_message(self._session.session_id, user_msg, cwd=self._cwd)
 
             # --- system prompt ---
-            mem_dir = get_memory_dir(self._cwd)
-            global_mem_dir = get_global_memory_dir()
-            memory_index = load_memory_index(cwd=self._cwd)
-            global_memory_index = (
-                None if self._programmatic else load_global_memory_index()
-            )
-            memory_section_text = build_memory_section(
-                self._memory_mode,
-                str(mem_dir),
-                memory_index,
-                global_memory_dir=str(global_mem_dir),
-                global_memory_index=global_memory_index,
-            )
-            if self._programmatic:
-                global_instructions = None
-                project_instructions = None
-            else:
-                global_instructions = load_global_project_instructions()
-                project_instructions = load_project_instructions(self._cwd)
-            # Combine global + project instructions (project wins on conflicts)
-            append_parts = [p for p in (global_instructions, project_instructions) if p]
-            append_prompt = "\n\n".join(append_parts) if append_parts else None
-            system_prompt, system_static_boundary = get_system_prompt(
-                tools=self._tools,
-                skills=self._skill_registry.list_all(),
-                model=self._model,
-                cwd=self._cwd,
-                custom_prompt=self._custom_system_prompt,
-                append_prompt=append_prompt,
-                memory_section=memory_section_text,
-                scratchpad_dir=str(self._scratchpad_dir),
-            )
-
-            # --- text-based tool calling instructions ---
-            tool_call_format = self._settings.get("tool_call_format")
-            if tool_call_format:
-                tool_schemas = [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.input_schema,
-                        },
-                    }
-                    for t in self._tools
-                    if t.is_enabled()
-                ]
-                system_prompt.append(
-                    get_tool_format_system_prompt(tool_call_format, tool_schemas)
-                )
-                logger.info(
-                    "Text-based tool calling enabled (format=%s, %d tools)",
-                    tool_call_format, len(tool_schemas),
-                )
+            system_prompt, system_static_boundary = self.build_system_prompt()
 
             # --- tool context ---
             context = ToolUseContext(
@@ -829,6 +775,79 @@ class AlanCodeAgent:
                 logger.warning("Failed to persist turn-boundary state: %s", exc)
             # Clear active skill filter after turn completes
             self._active_skill_filter = None
+
+    def build_system_prompt(self) -> tuple[list[str], int]:
+        """Assemble the full system prompt exactly as sent to the API.
+
+        The single source of truth for prompt assembly: used by
+        ``query_events_async`` at the start of every turn, and by UIs for
+        previews (the GUI "LLM Perspective" panel) so what is displayed
+        can never drift from what is sent.
+
+        Returns:
+            (sections, static_boundary) - the list of system prompt
+            sections and the index marking the end of the static
+            (cacheable) prefix.
+        """
+        mem_dir = get_memory_dir(self._cwd)
+        global_mem_dir = get_global_memory_dir()
+        memory_index = load_memory_index(cwd=self._cwd)
+        global_memory_index = (
+            None if self._programmatic else load_global_memory_index()
+        )
+        memory_section_text = build_memory_section(
+            self._memory_mode,
+            str(mem_dir),
+            memory_index,
+            global_memory_dir=str(global_mem_dir),
+            global_memory_index=global_memory_index,
+        )
+        if self._programmatic:
+            global_instructions = None
+            project_instructions = None
+        else:
+            global_instructions = load_global_project_instructions()
+            project_instructions = load_project_instructions(self._cwd)
+        # Combine global + project instructions (project wins on conflicts)
+        append_parts = [p for p in (global_instructions, project_instructions) if p]
+        append_prompt = "\n\n".join(append_parts) if append_parts else None
+        system_prompt, system_static_boundary = get_system_prompt(
+            tools=self._tools,
+            skills=self._skill_registry.list_all(),
+            model=self._model,
+            cwd=self._cwd,
+            custom_prompt=self._custom_system_prompt,
+            append_prompt=append_prompt,
+            memory_section=memory_section_text,
+            scratchpad_dir=str(self._scratchpad_dir),
+        )
+
+        # Text-based tool calling instructions (models without native
+        # tool_use): schemas travel in the system prompt instead of the
+        # API request.
+        tool_call_format = self._settings.get("tool_call_format")
+        if tool_call_format:
+            tool_schemas = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.input_schema,
+                    },
+                }
+                for t in self._tools
+                if t.is_enabled()
+            ]
+            system_prompt.append(
+                get_tool_format_system_prompt(tool_call_format, tool_schemas)
+            )
+            logger.info(
+                "Text-based tool calling enabled (format=%s, %d tools)",
+                tool_call_format, len(tool_schemas),
+            )
+
+        return system_prompt, system_static_boundary
 
     async def close(self) -> None:
         """Fire SessionEnd hooks. Call once when the session is over."""

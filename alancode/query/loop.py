@@ -67,6 +67,7 @@ from alancode.compact.compact_auto import compaction_auto
 from alancode.tools.text_tool_parser import extract_tool_calls_from_text, MAX_TEXT_TOOL_RETRIES
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
+from alancode.skills.tool_filter import filter_tools_for_skill
 from alancode.utils.tokens import estimate_message_tokens, predicted_next_call_tokens
 
 logger = logging.getLogger(__name__)
@@ -498,13 +499,21 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         if params.llm_perspective_callback:
             params.llm_perspective_callback(api_messages_dicts, params.system_prompt)
 
+        # Model-invoked skills may restrict the tool set for the rest of
+        # the turn (see ToolUseContext.active_skill_filter).
+        effective_tools = params.tools
+        if params.context.active_skill_filter:
+            effective_tools = filter_tools_for_skill(
+                params.tools, params.context.active_skill_filter
+            )
+
         # Don't pass tool schemas to the provider when using text-based
         # tool calling — tools are communicated via the system prompt instead.
         if params.settings.get("tool_call_format"):
             tool_schemas = []
         else:
             tool_schemas = [
-                ToolSchema(**s) for s in tools_to_schemas(params.tools)
+                ToolSchema(**s) for s in tools_to_schemas(effective_tools)
             ]
 
         requested_max_tokens = (
@@ -827,7 +836,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         tool_results: list[UserMessage] = []
 
         async for update in run_tools(
-            tool_use_blocks, params.tools, params.context,
+            tool_use_blocks, effective_tools, params.context,
             max_concurrency=params.settings.get("max_tool_concurrency", 10),
             permission_callback=params.permission_callback,
         ):
