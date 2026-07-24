@@ -148,24 +148,21 @@ def _hard_truncate_fallback(
     tail = list(messages[head_end:])
     dropped = 0
 
-    def _shrink_tail() -> None:
-        nonlocal dropped
-        while len(tail) > 2 and estimate_message_tokens(head + tail) > target_tokens:
-            tail.pop(0)
-            dropped += 1
-        # Clean seam: the first post-head message must be able to start
-        # the (rest of the) conversation.
-        while tail and not _is_plain_user_text(tail[0]):
-            tail.pop(0)
-            dropped += 1
-
-    _shrink_tail()
-
-    # Escape hatch: the head alone blows the target - drop it too.
-    if head and estimate_message_tokens(head + tail) > target_tokens:
+    # Drop a too-big head up front (escape hatch): otherwise every head+tail
+    # estimate stays over target and the tail is emptied to compensate for the
+    # head's weight, sacrificing recent work to save an unkeepable head.
+    if head and estimate_message_tokens(head) > target_tokens:
         dropped += len(head)
         head = []
-        _shrink_tail()
+
+    while tail and estimate_message_tokens(head + tail) > target_tokens:
+        tail.pop(0)
+        dropped += 1
+    # Clean seam: the first post-head message must be able to start the
+    # (rest of the) conversation.
+    while tail and not _is_plain_user_text(tail[0]):
+        tail.pop(0)
+        dropped += 1
 
     return head + tail, dropped
 

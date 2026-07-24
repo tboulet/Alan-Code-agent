@@ -46,6 +46,7 @@ TOOL_RESULT_CAP_CHARS_MAX = 10_000  # absolute ceiling of the per-result cap
 TOOL_RESULT_CAP_T_FRACTION = 0.10   # ...or 10% of T (in tokens), whichever is lower
 CHARS_PER_TOKEN = 3                 # mirror of utils.tokens.CHARS_PER_TOKEN_FALLBACK
 DEFAULT_SUMMARY_MAX_TOKENS = 20_000
+MIN_SUMMARY_OUTPUT_TOKENS = 256      # below this legal ceiling, shrink input instead of calling
 
 
 class ConfigError(ValueError):

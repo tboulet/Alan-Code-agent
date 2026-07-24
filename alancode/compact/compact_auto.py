@@ -38,7 +38,7 @@ from alancode.compact.prompt import (
     get_post_compact_message,
     get_post_compact_notification,
 )
-from alancode.budget import DEFAULT_SUMMARY_MAX_TOKENS
+from alancode.budget import DEFAULT_SUMMARY_MAX_TOKENS, MIN_SUMMARY_OUTPUT_TOKENS
 from alancode.utils.tokens import (
     estimate_message_tokens,
     rough_token_count,
@@ -174,17 +174,19 @@ async def compaction_auto(
             from alancode.budget import clamp_output_budget
 
             est_input = _estimate_api_dict_tokens(api_messages_dicts)
-            call_max_tokens = max(
-                256,
-                clamp_output_budget(
-                    budget, est_input, budget.max_tokens_for_summary,
-                ),
+            call_max_tokens = clamp_output_budget(
+                budget, est_input, budget.max_tokens_for_summary,
             )
         else:
             call_max_tokens = compact_max_output_tokens
 
         response_text = ""
         try:
+            if call_max_tokens < MIN_SUMMARY_OUTPUT_TOKENS:
+                # No legal room for a useful summary: route through the same
+                # middle-truncation retry as a provider PTL rather than emit
+                # an over-budget call (I1).
+                raise _PromptTooLongError("input leaves no legal output budget")
             async for event in provider.stream(
                 api_messages_dicts,
                 compact_system,
