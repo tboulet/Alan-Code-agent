@@ -39,6 +39,7 @@ from alancode.compact.prompt import (
     get_post_compact_notification,
 )
 from alancode.budget import DEFAULT_SUMMARY_MAX_TOKENS, MIN_SUMMARY_OUTPUT_TOKENS
+from alancode.api.errors import is_prompt_too_long
 from alancode.utils.tokens import (
     estimate_message_tokens,
     rough_token_count,
@@ -197,8 +198,8 @@ async def compaction_auto(
                 if isinstance(event, StreamTextDelta):
                     response_text += event.text
                 elif isinstance(event, StreamError):
-                    error_msg = event.error.lower() if event.error else ""
-                    if "prompt" in error_msg and "too long" in error_msg:
+                    error_msg = event.error or ""
+                    if is_prompt_too_long(error_msg):
                         raise _PromptTooLongError(event.error)
                     # Other errors: log and fail
                     logger.warning("Compaction stream error: %s", event.error)

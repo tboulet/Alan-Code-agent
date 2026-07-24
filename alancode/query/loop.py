@@ -611,8 +611,45 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     return
 
         except Exception as e:
+            if (
+                is_prompt_too_long(str(e))
+                and not state.has_attempted_emergency_compact
+            ):
+                logger.info("Emergency compaction triggered (prompt too long)")
+                state.has_attempted_emergency_compact = True
+                try:
+                    emergency_result = await compaction_auto(
+                        messages_for_query,
+                        params.provider,
+                        model=params.model,
+                        memory_mode=params.memory_mode,
+                        settings=params.settings,
+                        budget=budget,
+                    )
+                    if emergency_result:
+                        yield emergency_result.boundary_message
+                        for msg in emergency_result.summary_messages:
+                            yield msg
+                        state.messages = (
+                            [emergency_result.boundary_message]
+                            + emergency_result.summary_messages
+                        )
+                        state.transition = "emergency_compact_retry"
+                        continue
+                except Exception as compact_error:
+                    logger.warning(
+                        "Emergency compaction failed: %s", compact_error,
+                    )
+
             logger.error("Query error: %s", e)
-            yield create_assistant_error_message(str(e))
+            yield create_assistant_error_message(
+                str(e),
+                api_error=(
+                    "prompt_too_long"
+                    if is_prompt_too_long(str(e))
+                    else None
+                ),
+            )
             return
 
         # -- Phase 5: Build final assistant message ----------------------
@@ -794,37 +831,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     state.max_output_tokens_override = None
                     state.transition = "max_output_tokens_recovery"
                     continue
-
-            # Emergency compaction: detect prompt-too-long errors.
-            # The matcher in alancode.api.errors handles every provider
-            # phrasing we've seen — OpenAI, vLLM, SGLang, TGI, Ollama,
-            # Anthropic, Mistral. Edit the pattern list there, not here.
-            if (
-                assistant_msg.is_api_error_message
-                and assistant_msg.api_error
-                and is_prompt_too_long(str(assistant_msg.api_error))
-                and not state.has_attempted_emergency_compact
-            ):
-                logger.info("Emergency compaction triggered (prompt too long)")
-                try:
-                    emergency_result = await compaction_auto(
-                        messages_for_query,
-                        params.provider,
-                        model=params.model,
-                        memory_mode=params.memory_mode,
-                        settings=params.settings,
-                        budget=budget,
-                    )
-                    if emergency_result:
-                        state.messages = (
-                            [emergency_result.boundary_message]
-                            + emergency_result.summary_messages
-                        )
-                        state.has_attempted_emergency_compact = True
-                        state.transition = "emergency_compact_retry"
-                        continue
-                except Exception as e:
-                    logger.warning("Emergency compaction failed: %s", e)
 
             # Normal completion
             return
