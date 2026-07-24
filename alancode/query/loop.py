@@ -24,10 +24,8 @@ from alancode.messages.types import (
     Message,
     QueryYield,
     RequestStartEvent,
-    SystemMessage,
     TextBlock,
     ThinkingBlock,
-    ToolResultBlock,
     ToolUseBlock,
     Usage,
     UserMessage,
@@ -36,7 +34,6 @@ from alancode.messages.types import (
 from alancode.messages.factory import (
     create_assistant_error_message,
     create_attachment_message,
-    create_compact_boundary_message,
     create_user_interruption_message,
     create_user_message,
 )
@@ -64,6 +61,11 @@ from alancode.tools.orchestration import run_tools
 from alancode.compact.compact_truncate import compaction_truncate_tool_results
 from alancode.compact.compact_clear import compaction_clear_tool_results
 from alancode.compact.compact_auto import compaction_auto
+from alancode.compact.hard_truncate import (
+    HardTruncationResult,
+    build_hard_truncation_result as _build_hard_truncation_result,
+    hard_truncate_messages as _hard_truncate_fallback,
+)
 from alancode.tools.text_tool_parser import extract_tool_calls_from_text, MAX_TEXT_TOOL_RETRIES
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
@@ -94,78 +96,6 @@ def _build_turn_reminders(context: ToolUseContext) -> list[UserMessage]:
         "</system-reminder>"
     )
     return [create_user_message(reminder_text, hide_in_ui=True)]
-
-
-
-
-def _is_plain_user_text(msg) -> bool:
-    """A message that can safely start (or restart) an API conversation:
-    plain user text, not an orphan tool result whose tool_use was cut."""
-    if not isinstance(msg, UserMessage):
-        return False
-    if isinstance(msg.content, str):
-        return True
-    return not any(isinstance(b, ToolResultBlock) for b in msg.content)
-
-
-def _hard_truncate_fallback(
-    messages: list[Message], target_tokens: int,
-) -> tuple[list[Message], int]:
-    """Deterministic, LLM-free last resort when summarization keeps failing.
-
-    Middle-out, by information value: the HEAD (a prior compact boundary +
-    its summary when present - the compressed representation of the whole
-    earlier conversation - otherwise the opening plain-user message, which
-    anchors the task) and the TAIL (recent work) are the most valuable parts
-    of the history; the middle is the most expendable. So the head is
-    preserved, then messages are dropped oldest-first from just after it
-    until the estimate fits under *target_tokens*, and the seam is advanced
-    until the remainder starts on a plain user message (an orphan tool
-    result at the seam would be rejected by the API).
-
-    Escape hatch: if the head alone exceeds the target (e.g. a giant first
-    paste), survival wins and the head is dropped too.
-
-    Returns (kept_messages, dropped_count). Information is lost, but the
-    session lives - strictly better than the dead-end the circuit breaker
-    used to produce (invariant I6).
-    """
-    if not messages:
-        return [], 0
-
-    # Head block: leading compact boundary + its summary message(s), when
-    # present; otherwise the opening message if it is plain user text.
-    head_end = 0
-    if isinstance(messages[0], SystemMessage):
-        head_end = 1
-        while head_end < len(messages) and getattr(
-            messages[head_end], "is_compact_summary", False
-        ):
-            head_end += 1
-    elif _is_plain_user_text(messages[0]):
-        head_end = 1
-    head = list(messages[:head_end])
-    tail = list(messages[head_end:])
-    dropped = 0
-
-    # Drop a too-big head up front (escape hatch): otherwise every head+tail
-    # estimate stays over target and the tail is emptied to compensate for the
-    # head's weight, sacrificing recent work to save an unkeepable head.
-    if head and estimate_message_tokens(head) > target_tokens:
-        dropped += len(head)
-        head = []
-
-    while tail and estimate_message_tokens(head + tail) > target_tokens:
-        tail.pop(0)
-        dropped += 1
-    # Clean seam: the first post-head message must be able to start the
-    # (rest of the) conversation.
-    while tail and not _is_plain_user_text(tail[0]):
-        tail.pop(0)
-        dropped += 1
-
-    return head + tail, dropped
-
 
 def _drain_message_queue(msg_queue) -> list[UserMessage]:
     """Drain queued messages from inject_message() into user messages.
@@ -332,6 +262,8 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # -- Phase 2: Message preparation (compaction pipeline) ----------
         messages_for_query = get_messages_after_compact_boundary(state.messages)
+        fallback_result: HardTruncationResult | None = None
+        compaction_failed = False
 
         # Layer A: per-result size cap (always on, middle-out truncation)
         a_truncated = 0
@@ -383,47 +315,10 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             failures = (state.auto_compact_tracking or {}).get("consecutive_failures", 0)
             max_failures = params.settings.get("max_consecutive_compact_failures", 3)
             if failures >= max_failures:
-                # Liveness fallback (invariant I6): summarization keeps
-                # failing, but the session must not die. Hard-truncate the
-                # oldest history deterministically (no LLM involved), tell
-                # the user and the model, and continue the turn. Target has
-                # headroom below T so Layer C is not immediately re-triggered;
-                # the failure counter resets so C gets fresh chances if the
-                # conversation grows back over the threshold.
-                fallback_target = int(threshold_tokens * 0.8)
-                pre_fallback_tokens = estimate_message_tokens(messages_for_query)
-                fallback_messages, dropped = _hard_truncate_fallback(
-                    messages_for_query, fallback_target,
-                )
-                # A boundary marker makes the truncation DURABLE: future
-                # turns cut here (get_messages_after_compact_boundary),
-                # exactly like a successful Layer C - without it, the next
-                # turn would rebuild the full oversized history from the
-                # agent's permanent record and hit the same wall again.
-                fallback_boundary = create_compact_boundary_message(
-                    trigger="auto",
-                    pre_tokens=pre_fallback_tokens,
-                    messages_summarized=dropped,
-                )
-                notice = create_user_message(
-                    f"Summarization failed {failures} times consecutively. "
-                    f"{dropped} older message(s) were hard-truncated from the "
-                    "context to keep the session alive. Earlier conversation "
-                    "details are gone - re-read files if something is missing.",
-                    hide_in_ui=False,
-                )
-                yield fallback_boundary
-                yield notice
-                messages_for_query = [fallback_boundary, notice] + fallback_messages
-                layers_modified = True
-                state.auto_compact_tracking = {
-                    "compacted": False,
-                    "turn_counter": 0,
-                    "consecutive_failures": 0,
-                }
-                logger.warning(
-                    "Compaction circuit breaker tripped: hard-truncated %d "
-                    "message(s) as liveness fallback", dropped,
+                fallback_result = _build_hard_truncation_result(
+                    messages_for_query,
+                    target_tokens=int(threshold_tokens * 0.8),
+                    failures=failures,
                 )
             else:
                 logger.info("Auto-compaction triggered")
@@ -452,6 +347,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                             "consecutive_failures": 0,
                         }
                     else:
+                        compaction_failed = True
                         state.auto_compact_tracking = {
                             "compacted": False,
                             "turn_counter": 0,
@@ -459,6 +355,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         }
                 except Exception as e:
                     logger.warning("Auto-compact failed: %s", e)
+                    compaction_failed = True
                     state.auto_compact_tracking = {
                         "compacted": False,
                         "turn_counter": 0,
@@ -482,6 +379,49 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             last_output_tokens=seed_output,
             new_messages_since_last_call=None,
         )
+
+        # If summarization failed and the request still cannot legally be
+        # sent, use the deterministic fallback now instead of ending the turn.
+        # This is the small-context-window liveness guarantee: it does not
+        # depend on accumulating several failures within one user turn.
+        if (
+            fallback_result is None
+            and compaction_failed
+            and current_tokens >= blocking_limit
+        ):
+            failures = (state.auto_compact_tracking or {}).get(
+                "consecutive_failures", 1,
+            )
+            fallback_result = _build_hard_truncation_result(
+                messages_for_query,
+                target_tokens=int(threshold_tokens * 0.8),
+                failures=failures,
+            )
+
+        if fallback_result is not None:
+            for fallback_message in fallback_result.messages:
+                yield fallback_message
+            messages_for_query = fallback_result.messages
+            layers_modified = True
+            state.auto_compact_tracking = {
+                "compacted": False,
+                "turn_counter": 0,
+                "consecutive_failures": 0,
+            }
+            current_tokens = predicted_next_call_tokens(
+                params.model,
+                messages_for_query,
+                system=params.system_prompt,
+                tools=[
+                    t.to_schema() if hasattr(t, "to_schema") else t
+                    for t in params.tools
+                ],
+            )
+            logger.warning(
+                "Compaction fallback hard-truncated %d message(s)",
+                fallback_result.dropped_count,
+            )
+
         if current_tokens >= blocking_limit:
             yield create_assistant_error_message(
                 "Conversation too long. Please run /compact or start a new session."
