@@ -36,52 +36,41 @@ logger = logging.getLogger(__name__)
 
 # ── Streaming text filter state ──────────────────────────────────────────────
 # Tracks whether we're inside <think> or <tool_call> tags during streaming.
-# Reset at the start of each assistant message rendering.
+# Owned by the UI instance (CLIUI) and passed explicitly - never global.
 
-_stream_state = {
-    "in_thinking": False,
-    "in_tool_call": False,
-    "buffer": "",
-    # True once a "thinking" header has been printed for the current
-    # thinking section. Cleared when the section ends so the header is
-    # printed again on the next entry. Lets thinking be visually distinct
-    # from other dim/italic content without re-printing the label per char.
-    "thinking_active": False,
-}
+
+def new_stream_state() -> dict:
+    """Fresh streaming display state (one per turn, owned by the UI)."""
+    return {
+        "in_thinking": False,
+        "in_tool_call": False,
+        "buffer": "",
+        # True once a "thinking" header has been printed for the current
+        # thinking section. Cleared when the section ends so the header is
+        # printed again on the next entry. Lets thinking be visually distinct
+        # from other dim/italic content without re-printing the label per char.
+        "thinking_active": False,
+    }
 
 
 _THINKING_LABEL = "[magenta]▎ Thinking:[/magenta] "
 
 
-def _begin_thinking_section(console: Console) -> None:
+def _begin_thinking_section(console: Console, state: dict) -> None:
     """Print the thinking header if not already active for this section."""
-    if not _stream_state["thinking_active"]:
+    if not state["thinking_active"]:
         console.print(_THINKING_LABEL, end="")
-        _stream_state["thinking_active"] = True
+        state["thinking_active"] = True
 
 
-def _end_thinking_section(console: Console) -> None:
+def _end_thinking_section(console: Console, state: dict) -> None:
     """Close an active thinking section with a newline."""
-    if _stream_state["thinking_active"]:
+    if state["thinking_active"]:
         console.print()
-        _stream_state["thinking_active"] = False
+        state["thinking_active"] = False
 
 
-def _reset_stream_state(assume_thinking: bool = False) -> None:
-    """Reset streaming display state (call at start of each turn).
-
-    Args:
-        assume_thinking: If True, start in thinking mode (for models like
-            GLM that output reasoning text before ``</think>`` without an
-            opening ``<think>`` tag).
-    """
-    _stream_state["in_thinking"] = assume_thinking
-    _stream_state["in_tool_call"] = False
-    _stream_state["buffer"] = ""
-    _stream_state["thinking_active"] = False
-
-
-def _stream_text_delta(text: str, console) -> None:
+def _stream_text_delta(text: str, console, state: dict) -> None:
     """Display a streaming text delta, filtering out think/tool_call markup.
 
     - Text inside ``<think>...</think>`` is displayed in dim italic.
@@ -89,14 +78,11 @@ def _stream_text_delta(text: str, console) -> None:
       structured tool call blocks after parsing).
     - Regular text is displayed normally.
     """
-    buf = _stream_state["buffer"] + text
-    _stream_state["buffer"] = ""
+    buf = state["buffer"] + text
+    state["buffer"] = ""
 
-    # If we entered this turn already in thinking mode (assume_thinking=True
-    # for models that emit reasoning before any opening tag), make sure the
-    # header is printed before the first char.
-    if _stream_state["in_thinking"]:
-        _begin_thinking_section(console)
+    if state["in_thinking"]:
+        _begin_thinking_section(console, state)
 
     i = 0
     while i < len(buf):
@@ -107,38 +93,38 @@ def _stream_text_delta(text: str, console) -> None:
 
             # <think>
             if remaining.startswith("<think>"):
-                _stream_state["in_thinking"] = True
-                _begin_thinking_section(console)
+                state["in_thinking"] = True
+                _begin_thinking_section(console, state)
                 i += len("<think>")
                 continue
             # </think>
             if remaining.startswith("</think>"):
-                _stream_state["in_thinking"] = False
-                _end_thinking_section(console)
+                state["in_thinking"] = False
+                _end_thinking_section(console, state)
                 i += len("</think>")
                 continue
             # <tool_call>
             if remaining.startswith("<tool_call>"):
-                _stream_state["in_tool_call"] = True
+                state["in_tool_call"] = True
                 i += len("<tool_call>")
                 continue
             # </tool_call>
             if remaining.startswith("</tool_call>"):
-                _stream_state["in_tool_call"] = False
+                state["in_tool_call"] = False
                 i += len("</tool_call>")
                 continue
 
             # Might be a partial tag at the end — buffer it
             if len(remaining) < 13:  # max tag length: </tool_call>
-                _stream_state["buffer"] = remaining
+                state["buffer"] = remaining
                 return
             # Not a known tag — print the '<' and continue
             pass
 
         char = buf[i]
-        if _stream_state["in_tool_call"]:
+        if state["in_tool_call"]:
             pass  # Suppress tool call markup
-        elif _stream_state["in_thinking"]:
+        elif state["in_thinking"]:
             console.print(f"[dim italic]{char}[/dim italic]", end="")
         else:
             console.print(char, end="", highlight=False)
@@ -166,7 +152,9 @@ def display_welcome(console: Console, agent: Any) -> None:
     )
 
 
-def display_event(event: StreamEvent | Message, console: Console) -> None:
+def display_event(
+    event: StreamEvent | Message, console: Console, stream_state: dict,
+) -> None:
     """Display a stream event or message to the console.
 
     Routing logic:
@@ -184,7 +172,7 @@ def display_event(event: StreamEvent | Message, console: Console) -> None:
         return
 
     if isinstance(event, AssistantMessage):
-        _display_assistant_message(event, console)
+        _display_assistant_message(event, console, stream_state)
         return
 
     if isinstance(event, UserMessage):
@@ -204,7 +192,9 @@ def display_event(event: StreamEvent | Message, console: Console) -> None:
         return
 
 
-def _display_assistant_message(msg: AssistantMessage, console: Console) -> None:
+def _display_assistant_message(
+    msg: AssistantMessage, console: Console, state: dict,
+) -> None:
     """Render an assistant message.
 
     Display order: thinking (dim italic) → text → tool calls.
@@ -227,10 +217,10 @@ def _display_assistant_message(msg: AssistantMessage, console: Console) -> None:
                 # If thinking was active (e.g. native ThinkingBlock streaming
                 # before any text), close the section so text starts on its
                 # own line.
-                _end_thinking_section(console)
-                _stream_text_delta(block.text, console)
+                _end_thinking_section(console, state)
+                _stream_text_delta(block.text, console, state)
             elif isinstance(block, ThinkingBlock) and block.thinking.strip():
-                _begin_thinking_section(console)
+                _begin_thinking_section(console, state)
                 console.print(f"[dim italic]{block.thinking}[/dim italic]", end="")
         return
 
@@ -243,7 +233,7 @@ def _display_assistant_message(msg: AssistantMessage, console: Console) -> None:
 
     # Close the streaming line if there was streamed content
     if has_text or has_thinking:
-        _end_thinking_section(console)
+        _end_thinking_section(console, state)
         console.print()
 
     # Show thinking first (if not already streamed — i.e., extracted post-stream)

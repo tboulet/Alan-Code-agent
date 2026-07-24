@@ -97,7 +97,7 @@ class SessionUI(ABC):
         CLI is a no-op.
         """
 
-    def reset_stream_state(self, assume_thinking: bool = False) -> None:
+    def reset_stream_state(self) -> None:
         """Reset streaming display state before a new turn.
 
         CLI resets the ``<think>``/``<tool_call>`` tag filter state machine.

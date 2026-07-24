@@ -15,9 +15,9 @@ from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 
 from alancode.cli.display import (
-    _reset_stream_state,
     display_event,
     display_replay,
+    new_stream_state,
 )
 from alancode.gui.base import SessionUI
 from alancode.messages.types import Message, StreamEvent, Usage
@@ -33,6 +33,7 @@ class CLIUI(SessionUI):
 
     def __init__(self) -> None:
         self._console = Console()
+        self._stream_state = new_stream_state()
 
         # Set up prompt-toolkit with persistent history.
         # Enter = submit, Alt+Enter (Esc then Enter) = newline.
@@ -78,7 +79,7 @@ class CLIUI(SessionUI):
         display_replay(messages, self._console, limit=100)
 
     async def on_agent_event(self, event: StreamEvent | Message) -> None:
-        display_event(event, self._console)
+        display_event(event, self._console, self._stream_state)
 
     async def on_cost(
         self, usage: Usage, cost_usd: float, cost_unknown: bool,
@@ -109,8 +110,8 @@ class CLIUI(SessionUI):
         # Blank line between user input and assistant response for readability.
         self._console.print()
 
-    def reset_stream_state(self, assume_thinking: bool = False) -> None:
-        _reset_stream_state(assume_thinking=assume_thinking)
+    def reset_stream_state(self) -> None:
+        self._stream_state = new_stream_state()
 
     # ── Console ───────────────────────────────────────────────────────────
 

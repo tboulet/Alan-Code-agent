@@ -52,7 +52,7 @@ def get_session_transcript_path(cwd: str, session_id: str) -> Path:
 # ── Write / Read ───────────────────────────────────────────────────────────
 
 
-async def record_transcript(
+def record_transcript(
     session_id: str,
     messages: list[Message],
     *,
@@ -92,7 +92,7 @@ async def record_transcript(
         logger.warning("Failed to write transcript %s: %s", path, exc)
 
 
-async def append_transcript_message(
+def append_transcript_message(
     session_id: str,
     message: Message,
     *,
@@ -132,7 +132,7 @@ async def append_transcript_message(
         logger.warning("Failed to append transcript %s: %s", path, exc)
 
 
-async def load_transcript(session_id: str, *, cwd: str | None = None) -> list[Message] | None:
+def load_transcript(session_id: str, *, cwd: str | None = None) -> list[Message] | None:
     """Load messages from a session transcript.
 
     Returns ``None`` if the file does not exist or cannot be read.

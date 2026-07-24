@@ -143,8 +143,7 @@ async def _handle_prompt(
     ui: SessionUI,
 ) -> None:
     """Send a prompt to the agent and display events through the UI."""
-    tool_call_format = agent._settings.get("tool_call_format")
-    ui.reset_stream_state(assume_thinking=tool_call_format is not None)
+    ui.reset_stream_state()
     ui.on_agent_start()
 
     interrupted = False

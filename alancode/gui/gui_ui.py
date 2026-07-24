@@ -277,7 +277,7 @@ class GUIUI(SessionUI):
     def on_agent_done(self) -> None:
         asyncio.ensure_future(self.send_to_all(json.dumps({"kind": "agent_done"})))
 
-    def reset_stream_state(self, assume_thinking: bool = False) -> None:
+    def reset_stream_state(self) -> None:
         pass  # GUI doesn't have a streaming state machine
 
     # ── SessionUI: Console ────────────────────────────────────────────────

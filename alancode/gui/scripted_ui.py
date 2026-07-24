@@ -316,8 +316,8 @@ class ScriptedUI(SessionUI):
     def on_agent_done(self) -> None:
         self.lifecycle_log.append("agent_done")
 
-    def reset_stream_state(self, assume_thinking: bool = False) -> None:
-        self.lifecycle_log.append(f"reset_stream(thinking={assume_thinking})")
+    def reset_stream_state(self) -> None:
+        self.lifecycle_log.append("reset_stream()")
 
     # ── SessionUI: Git Tree ──────────────────────────────────────────
 

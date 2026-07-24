@@ -154,9 +154,9 @@ class TestScriptedUILogging:
         ui = ScriptedUI.from_inputs([])
         ui.on_agent_start()
         ui.on_agent_done()
-        ui.reset_stream_state(assume_thinking=True)
+        ui.reset_stream_state()
         assert ui.lifecycle_log == [
-            "agent_start", "agent_done", "reset_stream(thinking=True)",
+            "agent_start", "agent_done", "reset_stream()",
         ]
 
     def test_console_capture(self):
@@ -198,7 +198,7 @@ class TestScriptedUIWithAgent:
         assert "RequestStartEvent" in event_types
         assert len(ui.cost_log) == 1
         assert ui.lifecycle_log == [
-            "reset_stream(thinking=False)",  # Won't appear without _handle_prompt
+            "reset_stream()",  # Won't appear without _handle_prompt
             "agent_start", "agent_done",
         ] or ui.lifecycle_log == ["agent_start", "agent_done"]
 

@@ -448,7 +448,7 @@ class AlanCodeAgent:
 
         # Load transcript from previous session if resuming
         if session_id:
-            messages = _run_async_safe(load_transcript(session_id, cwd=self._cwd))
+            messages = load_transcript(session_id, cwd=self._cwd)
             if messages:
                 self._messages = messages
                 logger.info(
@@ -479,7 +479,7 @@ class AlanCodeAgent:
             answer = agent.query("What files are in this project?")
             print(answer)
         """
-        return _run_async(self._query_text_async(message))
+        return _run_async(self.query_async(message))
 
     def query_events(self, message: str) -> list:
         """Send a message and return the complete list of events.
@@ -493,7 +493,10 @@ class AlanCodeAgent:
             for event in events:
                 print(type(event).__name__)
         """
-        return _run_async(self._query_events_collect_async(message))
+        async def _collect() -> list:
+            return [event async for event in self.query_events_async(message)]
+
+        return _run_async(_collect())
 
     async def query_async(self, message: str) -> str:
         """Send a message and return the final assistant text (async).
@@ -506,7 +509,11 @@ class AlanCodeAgent:
             answer = await agent.query_async("Fix the bug")
             return {"answer": answer}
         """
-        return await self._query_text_async(message)
+        last_text = ""
+        async for event in self.query_events_async(message):
+            if isinstance(event, AssistantMessage) and not event.hide_in_api:
+                last_text = event.text
+        return last_text
 
     async def query_events_async(
         self, message: str
@@ -586,7 +593,7 @@ class AlanCodeAgent:
             user_msg = create_user_message(message)
             self._messages.append(user_msg)
 
-            await append_transcript_message(self._session.session_id, user_msg, cwd=self._cwd)
+            append_transcript_message(self._session.session_id, user_msg, cwd=self._cwd)
 
             # --- system prompt ---
             system_prompt, system_static_boundary = self.build_system_prompt()
@@ -725,7 +732,7 @@ class AlanCodeAgent:
                 ) and not getattr(event, "hide_in_api", False):
                     if event is not user_msg:
                         self._messages.append(event)
-                        await append_transcript_message(
+                        append_transcript_message(
                             self._session.session_id, event, cwd=self._cwd
                         )
                 # Notify event listeners (GUI bridge, etc.)
@@ -736,8 +743,9 @@ class AlanCodeAgent:
                         logger.debug("Event listener error: %s", exc, exc_info=True)
                 yield event
 
-            # Persist transcript
-            await record_transcript(
+            # Full rewrite: reconciles out-of-band _messages mutations
+            # (slash commands, reverts) that the incremental appends miss.
+            record_transcript(
                 self._session.session_id, self._messages, cwd=self._cwd
             )
 
@@ -745,7 +753,7 @@ class AlanCodeAgent:
             # Generator abandoned (Ctrl+C in REPL) — save state before cleanup
             logger.info("Turn interrupted by user")
             try:
-                await record_transcript(
+                record_transcript(
                     self._session.session_id, self._messages, cwd=self._cwd
                 )
             except Exception as exc:
@@ -1016,23 +1024,6 @@ class AlanCodeAgent:
         """Number of user messages processed in this session."""
         return self._session.turn_count
 
-    # ── Async internals ───────────────────────────────────────────────────
-
-    async def _query_text_async(self, message: str) -> str:
-        """Consume the event stream and return just the final text."""
-        last_text = ""
-        async for event in self.query_events_async(message):
-            if isinstance(event, AssistantMessage) and not event.hide_in_api:
-                last_text = event.text
-        return last_text
-
-    async def _query_events_collect_async(self, message: str) -> list:
-        """Consume the event stream into a list."""
-        events: list = []
-        async for event in self.query_events_async(message):
-            events.append(event)
-        return events
-
     def update_session_setting(self, key: str, value: Any) -> str | None:
         """Validate, update a setting for this session in-memory + on disk.
 
@@ -1152,12 +1143,3 @@ def _run_async(coro):
             return future.result()
 
     return asyncio.run(coro)
-
-
-def _run_async_safe(coro):
-    """Like _run_async but returns None on failure instead of raising."""
-    try:
-        return _run_async(coro)
-    except Exception:
-        logger.debug("Async operation failed (ignored)", exc_info=True)
-        return None
