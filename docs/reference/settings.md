@@ -19,19 +19,18 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `memory` | string | `off` | Memory |
 | `verbose` | bool | `false` | Logging |
 | `hooks` | object | `{}` | Hooks |
-| `compact_max_output_tokens` | int | `20_000` | Compaction |
+| `context_window` | int \| `"auto"` | `"auto"` | Budget |
+| `compact_max_output_tokens` | int \| `"auto"` | `"auto"` | Compaction |
 | `capped_default_max_tokens` | int | `8_000` | Output control |
 | `escalated_max_tokens` | int | `64_000` | Output control |
 | `auto_compact_buffer_tokens` | int | `13_000` | Compaction |
 | `warning_threshold_buffer_tokens` | int | `20_000` | Compaction |
-| `blocking_limit_buffer_tokens` | int | `3_000` | Compaction |
 | `max_consecutive_compact_failures` | int | `3` | Compaction |
-| `compaction_threshold_percent` | int | `80` | Compaction |
+| `compaction_threshold_percent` | int \| `"auto"` | `"auto"` (80) | Compaction |
 | `max_compact_ptl_retries` | int | `3` | Compaction |
 | `max_output_tokens_recovery_limit` | int | `3` | Error recovery |
 | `max_tool_concurrency` | int | `10` | Tool execution |
-| `tool_result_max_chars` | int | `20_000` | Tool execution |
-| `compact_clear_keep_recent` | int | `10` | Compaction |
+| `tool_result_max_chars` | int \| `"auto"` | `"auto"` | Tool execution |
 | `thinking_budget_default` | int | `10_000` | Thinking |
 | `memory_reminder_threshold` | int | `10` | Memory |
 | `max_scratchpad_sessions` | int | `5` | Sessions |
@@ -122,17 +121,17 @@ Dict mapping hook-type name to list of hook configs. See [guides/hooks.md](../gu
 
 ## Compaction
 
+### `context_window`
+Overrides the model's detected context window. `"auto"` (default) resolves it from the model registry, the serving endpoint's metadata, or a one-time probe (see `alancode/budget.py` and `alancode/providers/cw_probe.py`). Set an integer only when detection is wrong.
+
 ### `compaction_threshold_percent`
-When Layer C (auto-compact) kicks in, as a percentage of the context window. Default 80.
+When Layer C (auto-compact) kicks in, as a percentage of the *usable input budget* (context window minus output reservation and margin). `"auto"` = 80.
 
 ### `tool_result_max_chars`
-Layer A truncates any single tool result exceeding this. Default 20 000 chars.
-
-### `compact_clear_keep_recent`
-Layer B clears old tool results but keeps the most recent N. Default 10.
+Layer A truncates any single tool result exceeding this (middle-out: head and tail kept, sentinel between). `"auto"` = `min(10 000, 10% of the compaction threshold in chars)`.
 
 ### `compact_max_output_tokens`
-Output budget for the Layer C summarization call. Default 20 000.
+Output budget for the Layer C summarization call. `"auto"` = `min(20 000, what fits in the window)`; always clamped at call time so the summarizer request is legal.
 
 ### `auto_compact_buffer_tokens`
 Emergency compaction trigger — if predicted tokens would land within this margin of the context ceiling. Default 13 000.
@@ -140,11 +139,8 @@ Emergency compaction trigger — if predicted tokens would land within this marg
 ### `warning_threshold_buffer_tokens`
 User-facing "context is filling up" warning trigger. Default 20 000.
 
-### `blocking_limit_buffer_tokens`
-Hard floor — refuses API calls that would land this close to the ceiling. Default 3 000.
-
 ### `max_consecutive_compact_failures`
-Circuit-breaker threshold. After N failed compactions in a row, Alan surfaces an error and stops trying. Default 3.
+Circuit-breaker threshold. After N failed compactions in a row, Alan hard-truncates the oldest history (deterministic, no LLM) with a visible notice and keeps the session alive. Default 3.
 
 ### `max_compact_ptl_retries`
 Prompt-too-long retries during the compaction summarize step itself. Default 3.

@@ -37,10 +37,12 @@ Each iteration, if the predicted pre-call token count is over the threshold, lay
 Rewrites individual `tool_result` blocks whose content exceeds `tool_result_max_chars` (default 20 000 chars). The block is replaced with:
 
 ```
-[ALAN-TRUNCATED] Tool result truncated — 216000 chars exceeded 20000 limit.
+<first 60% of the cap>
+[ALAN-TRUNCATED: middle 91% of output elided (196,000 of 216,000 chars)]
+<last 40% of the cap>
 ```
 
-The `[ALAN-TRUNCATED]` sentinel lets later compaction passes (and debugging) tell synthetic content from real. The structure of the message is preserved (it stays a `tool_result` with the same `tool_use_id`), so the conversation shape is intact.
+Truncation is middle-out: the head (structure, first errors) and the tail (conclusions, final state) survive; only the middle is elided. The `[ALAN-TRUNCATED` sentinel lets later compaction passes (and debugging) tell synthetic content from real. The structure of the message is preserved (it stays a `tool_result` with the same `tool_use_id`), so the conversation shape is intact.
 
 **When it helps**: a single bloated tool output (e.g., `cat` on a 500 KB log) dominates the context. This layer chops just that one block without touching surrounding messages.
 
@@ -48,7 +50,7 @@ The `[ALAN-TRUNCATED]` sentinel lets later compaction passes (and debugging) tel
 
 `alancode/compact/compact_clear.py`
 
-Replaces the **content** of older `tool_result` blocks with a short sentinel, keeping only the N most recent (`compact_clear_keep_recent = 10` by default). The model still sees that a tool was called, but the output is reduced to:
+Damage control, not economization: inactive until the estimated size exceeds the *clear target* G (halfway between the compaction threshold T and the blocking limit - see `alancode/budget.py`). Above G, it replaces the **content** of `tool_result` blocks oldest-first, stopping as soon as the estimate is back at G - so it can never bring the size below T, which means it never pre-empts Layer C (the information-preserving path). There is no keep-recent floor; recent results are protected by the target itself. The model still sees that a tool was called, but the output is reduced to:
 
 ```
 [cleared to free context space]
@@ -109,13 +111,13 @@ Settings in `.alan/settings.json` (or `/settings <key> <value>` at runtime):
 
 | Setting | Default | What it does |
 |---|---|---|
-| `compaction_threshold_percent` | 80 | When auto-compact kicks in, as % of context window. |
-| `tool_result_max_chars` | 20 000 | Layer A's per-tool-result size cap. |
-| `compact_clear_keep_recent` | 10 | Layer B's "keep recent N" count. |
-| `compact_max_output_tokens` | 20 000 | Output budget for the Layer C summary call. |
-| `auto_compact_buffer_tokens` | 13 000 | How close to ceiling before emergency compact. |
-| `blocking_limit_buffer_tokens` | 3 000 | Hard floor — refuse calls below this. |
-| `max_consecutive_compact_failures` | 3 | Circuit breaker threshold. |
+| `context_window` | "auto" | Detected from registry/server/probe; int to override. |
+| `compaction_threshold_percent` | "auto" (80) | When auto-compact kicks in, as % of the usable input budget. |
+| `tool_result_max_chars` | "auto" | Layer A's per-result cap: min(10k, 10% of threshold). |
+| `compact_max_output_tokens` | "auto" | Layer C summary budget, clamped to fit the window. |
+| `max_consecutive_compact_failures` | 3 | After N failures: hard-truncate fallback (session lives). |
+
+The blocking limit is no longer a setting: it is derived as `context_window - max_output_tokens - safety_margin` (the point where a full response no longer fits). See `alancode/budget.py` for the whole derivation DAG.
 
 ## Inspecting what happened
 

@@ -51,22 +51,23 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "verbose": False,
     # Hooks (lifecycle event hooks — see alancode/hooks/registry.py)
     "hooks": {},
-    # Token / context management
-    "compact_max_output_tokens": 20_000,  # Tokens reserved for compaction summary output
+    # Token / context management. Budget keys accept "auto" (computed from
+    # the model's context window - see alancode/budget.py for the DAG and
+    # the auto formulas) or an explicit positive integer.
+    "context_window": "auto",  # "auto" = resolve from registry/server/probe; int = trust this value
+    "compact_max_output_tokens": "auto",  # Summarizer output budget (auto: min(20k, CW - T - m))
     "capped_default_max_tokens": 8_000,  # Default max_tokens (slot reservation optimization)
-    "escalated_max_tokens": 64_000,  # Retry budget after capped default is hit
+    "escalated_max_tokens": 64_000,  # Retry budget after capped default is hit (clamped to the window)
     "auto_compact_buffer_tokens": 13_000,  # Buffer below context window that triggers auto-compact
     "warning_threshold_buffer_tokens": 20_000,  # Remaining tokens to trigger warning
-    "blocking_limit_buffer_tokens": 3_000,  # Hard floor: refuse to call API below this remaining
     "max_consecutive_compact_failures": 3,  # Circuit breaker for auto-compact retries
-    "compaction_threshold_percent": 80,  # Percentage of context window that triggers compaction layers
+    "compaction_threshold_percent": "auto",  # T as % of usable input (auto: 80)
     "max_compact_ptl_retries": 3,  # Max prompt-too-long retries during compaction summarize
     # Error recovery
     "max_output_tokens_recovery_limit": 3,  # Max multi-turn recovery attempts on output limit hit
     # Tool execution
     "max_tool_concurrency": 10,  # Max parallel read-only tool executions
-    "tool_result_max_chars": 20_000,  # Per-tool-result size before truncation
-    "compact_clear_keep_recent": 10,  # Number of recent tool results to preserve during Layer B (clear)
+    "tool_result_max_chars": "auto",  # Per-result cap (auto: min(10k, 10% of T in chars))
     # Thinking
     "thinking_budget_default": 10_000,  # Default thinking token budget (when model supports it)
     # Memory
@@ -80,6 +81,10 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
 
 # Fields that should NOT be written to settings.json (ephemeral / per-invocation only)
 _EPHEMERAL_FIELDS = {"api_key"}
+
+# Settings removed by the budget redesign; stripped (with a notice) when
+# found in an existing settings.json.
+_DEPRECATED_KEYS = {"blocking_limit_buffer_tokens", "compact_clear_keep_recent"}
 
 
 def get_alan_dir(cwd: str | None = None) -> Path:
@@ -120,6 +125,16 @@ def load_settings(cwd: str | None = None) -> dict[str, Any]:
             "%s used the legacy 'provider' key — auto-migrated to 'backend'. "
             "Re-save settings to silence this notice (/settings backend=<value>).",
             path,
+        )
+
+    # Strip keys removed by the budget redesign (their behaviour is now
+    # derived - see alancode/budget.py). Old settings.json files were
+    # initialized with the full defaults, so they all carry these.
+    for key in _DEPRECATED_KEYS & settings.keys():
+        settings.pop(key)
+        logger.info(
+            "%s contains the removed setting '%s' (superseded by the "
+            "auto-computed budget) - ignored.", path, key,
         )
 
     return settings
@@ -193,6 +208,11 @@ _is_str = (lambda v: isinstance(v, str), "Must be a string")
 _is_bool = (lambda v: isinstance(v, bool), "Must be a boolean")
 _is_pos_int = (lambda v: isinstance(v, int) and v > 0, "Must be a positive integer")
 _is_pos_int_or_none = (lambda v: v is None or (isinstance(v, int) and v > 0), "Must be a positive integer or null")
+_is_auto = lambda v: isinstance(v, str) and v.lower() == "auto"
+_is_pos_int_or_auto = (
+    lambda v: _is_auto(v) or (isinstance(v, int) and not isinstance(v, bool) and v > 0),
+    'Must be a positive integer or "auto"',
+)
 
 SETTING_VALIDATORS: dict[str, tuple] = {
     "backend": _one_of("auto", "anthropic-native", "scripted"),
@@ -201,24 +221,29 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "tool_call_format": _one_of("hermes", "hermes_xml", "glm", "alan", "meta_json"),
     "permission_mode": _one_of("yolo", "edit", "safe"),
     "max_iterations_per_turn": _is_pos_int_or_none,
-    "max_output_tokens": _is_pos_int_or_none,
+    "max_output_tokens": (
+        lambda v: v is None or _is_pos_int_or_auto[0](v),
+        'Must be a positive integer, "auto", or null',
+    ),
     "custom_system_prompt": _is_str,
     "append_system_prompt": _is_str,
     "memory": _one_of("on", "off", "intensive"),
     "verbose": _is_bool,
-    "compact_max_output_tokens": _is_pos_int,
+    "context_window": _is_pos_int_or_auto,
+    "compact_max_output_tokens": _is_pos_int_or_auto,
     "capped_default_max_tokens": _is_pos_int,
     "escalated_max_tokens": _is_pos_int,
     "auto_compact_buffer_tokens": _is_pos_int,
     "warning_threshold_buffer_tokens": _is_pos_int,
-    "blocking_limit_buffer_tokens": _is_pos_int,
     "max_consecutive_compact_failures": _is_pos_int,
-    "compaction_threshold_percent": (lambda v: isinstance(v, int) and 20 <= v <= 99, "Must be an integer between 20 and 99"),
+    "compaction_threshold_percent": (
+        lambda v: _is_auto(v) or (isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 99),
+        'Must be an integer between 1 and 99, or "auto"',
+    ),
     "max_compact_ptl_retries": _is_pos_int,
     "max_output_tokens_recovery_limit": _is_pos_int,
     "max_tool_concurrency": _is_pos_int,
-    "tool_result_max_chars": _is_pos_int,
-    "compact_clear_keep_recent": _is_pos_int,
+    "tool_result_max_chars": _is_pos_int_or_auto,
     "thinking_budget_default": _is_pos_int,
     "memory_reminder_threshold": _is_pos_int,
     "max_scratchpad_sessions": _is_pos_int,

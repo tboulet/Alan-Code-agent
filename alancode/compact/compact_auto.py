@@ -38,6 +38,7 @@ from alancode.compact.prompt import (
     get_post_compact_message,
     get_post_compact_notification,
 )
+from alancode.budget import DEFAULT_SUMMARY_MAX_TOKENS
 from alancode.utils.tokens import (
     estimate_message_tokens,
     rough_token_count,
@@ -155,7 +156,12 @@ async def compaction_auto(
     # 4. PTL retry loop
     s = settings or {}
     max_ptl_retries = s.get("max_compact_ptl_retries", 3)
-    compact_max_output_tokens = s.get("compact_max_output_tokens", 20_000)
+    compact_max_output_tokens = s.get(
+        "compact_max_output_tokens", DEFAULT_SUMMARY_MAX_TOKENS
+    )
+    if not isinstance(compact_max_output_tokens, int):
+        # "auto" without a resolved budget: legacy default
+        compact_max_output_tokens = DEFAULT_SUMMARY_MAX_TOKENS
 
     response_text = ""
     kwargs: dict[str, Any] = {}

@@ -557,6 +557,7 @@ class AlanCodeAgent:
                 _mi = self._provider.get_model_info(self._model)
                 if (
                     getattr(_mi, "cw_source", "registry") == "fallback"
+                    and not isinstance(self._settings.get("context_window"), int)
                     and hasattr(self._provider, "probe_and_cache_context_window")
                     and not getattr(self._provider, "_cw_probe_attempted", False)
                 ):

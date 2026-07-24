@@ -108,7 +108,7 @@ Taking the max protects against under-budgeting.
 ## Phase 3 — Blocking-limit check
 
 ```python
-blocking_limit = model_info.context_window - params.settings.get("blocking_limit_buffer_tokens", 3000)
+blocking_limit = budget.max_context_size_allowed  # CW - max_output_tokens - margin
 if current_tokens >= blocking_limit:
     yield create_assistant_error_message(
         "Conversation too long. Please run /compact or start a new session."
@@ -116,7 +116,7 @@ if current_tokens >= blocking_limit:
     return
 ```
 
-Last-chance refusal. If we're within 3k tokens of the ceiling even after compaction, don't even try the API call. Turn ends cleanly.
+Last-chance refusal. The limit is the point where a full response no longer fits the window (`alancode/budget.py` derives it once per turn). If we're past it even after compaction, don't even try the API call. Turn ends cleanly.
 
 ## Phase 4 — API call (streaming)
 

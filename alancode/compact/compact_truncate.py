@@ -21,6 +21,11 @@ from alancode.messages.types import (
 # is synthetic truncation output rather than real tool data.
 TRUNCATION_SENTINEL = "[ALAN-TRUNCATED"
 
+# Per-result cap used when no resolved budget is available (legacy path /
+# "auto" setting without a ContextBudget). The budget's auto formula
+# (min(10k, 10% of threshold)) supersedes this whenever a budget exists.
+DEFAULT_TOOL_RESULT_MAX_CHARS = 20_000
+
 # Head/tail split of the kept characters: starts carry structure (headers,
 # first errors), tails carry conclusions and final state.
 HEAD_FRACTION = 0.6
@@ -110,7 +115,12 @@ def compaction_truncate_tool_results(
     since the last API call measured it).
     """
     if max_chars is None:
-        max_chars = (settings or {}).get("tool_result_max_chars", 20_000)
+        max_chars = (settings or {}).get(
+            "tool_result_max_chars", DEFAULT_TOOL_RESULT_MAX_CHARS
+        )
+        if not isinstance(max_chars, int):
+            # "auto" without a resolved budget: legacy default
+            max_chars = DEFAULT_TOOL_RESULT_MAX_CHARS
 
     # Collect indices of oversized tool results (oldest first — natural order)
     oversized: list[tuple[int, int]] = []  # (msg_idx, block_idx)

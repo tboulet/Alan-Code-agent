@@ -356,7 +356,7 @@ class TestCircuitBreaker:
     def test_compaction_threshold_percent_default(self):
         """The default for compaction_threshold_percent is 80."""
         from alancode.settings import SETTINGS_DEFAULTS
-        assert SETTINGS_DEFAULTS["compaction_threshold_percent"] == 80
+        assert SETTINGS_DEFAULTS["compaction_threshold_percent"] == "auto"  # auto = 80
 
     def test_max_compact_ptl_retries_default(self):
         """The default for max_compact_ptl_retries is 3."""

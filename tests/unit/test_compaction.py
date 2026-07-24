@@ -45,7 +45,7 @@ class TestToolResultBudget:
         assert block.content == "short result"
 
     def test_large_results_truncated_middle_out(self):
-        cap = SETTINGS_DEFAULTS["tool_result_max_chars"]
+        cap = 20_000  # legacy default cap (setting is "auto" now)
         large_content = "H" * cap + "x" * 1000 + "T" * cap
         msg = create_tool_result_message("tu_1", large_content)
         result, count = compaction_truncate_tool_results([msg])
@@ -69,7 +69,7 @@ class TestToolResultBudget:
         assert "elided" in block.content
 
     def test_does_not_mutate_input(self):
-        large_content = "x" * (SETTINGS_DEFAULTS["tool_result_max_chars"] + 100)
+        large_content = "x" * (20_000 + 100)
         msg = create_tool_result_message("tu_1", large_content)
         original_content = msg.content[0].content
         compaction_truncate_tool_results([msg])
@@ -87,7 +87,7 @@ class TestToolResultBudget:
         user_msg = create_user_message("question")
         assistant_msg = create_assistant_message("answer")
         small_tool = create_tool_result_message("tu_1", "small")
-        large_tool = create_tool_result_message("tu_2", "y" * (SETTINGS_DEFAULTS["tool_result_max_chars"] + 1))
+        large_tool = create_tool_result_message("tu_2", "y" * (20_000 + 1))
 
         result, count = compaction_truncate_tool_results(
             [user_msg, assistant_msg, small_tool, large_tool]

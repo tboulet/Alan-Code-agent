@@ -24,6 +24,7 @@ from alancode.messages.types import (
     Message,
     QueryYield,
     RequestStartEvent,
+    SystemMessage,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -65,7 +66,7 @@ from alancode.compact.compact_auto import compaction_auto
 from alancode.tools.text_tool_parser import extract_tool_calls_from_text, MAX_TEXT_TOOL_RETRIES
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
-from alancode.utils.tokens import predicted_next_call_tokens
+from alancode.utils.tokens import estimate_message_tokens, predicted_next_call_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,78 @@ def _build_turn_reminders(context: ToolUseContext) -> list[UserMessage]:
     return [create_user_message(reminder_text, hide_in_ui=True)]
 
 
+
+
+def _is_plain_user_text(msg) -> bool:
+    """A message that can safely start (or restart) an API conversation:
+    plain user text, not an orphan tool result whose tool_use was cut."""
+    if not isinstance(msg, UserMessage):
+        return False
+    if isinstance(msg.content, str):
+        return True
+    return not any(isinstance(b, ToolResultBlock) for b in msg.content)
+
+
+def _hard_truncate_fallback(
+    messages: list[Message], target_tokens: int,
+) -> tuple[list[Message], int]:
+    """Deterministic, LLM-free last resort when summarization keeps failing.
+
+    Middle-out, by information value: the HEAD (a prior compact boundary +
+    its summary when present - the compressed representation of the whole
+    earlier conversation - otherwise the opening plain-user message, which
+    anchors the task) and the TAIL (recent work) are the most valuable parts
+    of the history; the middle is the most expendable. So the head is
+    preserved, then messages are dropped oldest-first from just after it
+    until the estimate fits under *target_tokens*, and the seam is advanced
+    until the remainder starts on a plain user message (an orphan tool
+    result at the seam would be rejected by the API).
+
+    Escape hatch: if the head alone exceeds the target (e.g. a giant first
+    paste), survival wins and the head is dropped too.
+
+    Returns (kept_messages, dropped_count). Information is lost, but the
+    session lives - strictly better than the dead-end the circuit breaker
+    used to produce (invariant I6).
+    """
+    if not messages:
+        return [], 0
+
+    # Head block: leading compact boundary + its summary message(s), when
+    # present; otherwise the opening message if it is plain user text.
+    head_end = 0
+    if isinstance(messages[0], SystemMessage):
+        head_end = 1
+        while head_end < len(messages) and getattr(
+            messages[head_end], "is_compact_summary", False
+        ):
+            head_end += 1
+    elif _is_plain_user_text(messages[0]):
+        head_end = 1
+    head = list(messages[:head_end])
+    tail = list(messages[head_end:])
+    dropped = 0
+
+    def _shrink_tail() -> None:
+        nonlocal dropped
+        while len(tail) > 2 and estimate_message_tokens(head + tail) > target_tokens:
+            tail.pop(0)
+            dropped += 1
+        # Clean seam: the first post-head message must be able to start
+        # the (rest of the) conversation.
+        while tail and not _is_plain_user_text(tail[0]):
+            tail.pop(0)
+            dropped += 1
+
+    _shrink_tail()
+
+    # Escape hatch: the head alone blows the target - drop it too.
+    if head and estimate_message_tokens(head + tail) > target_tokens:
+        dropped += len(head)
+        head = []
+        _shrink_tail()
+
+    return head + tail, dropped
 
 
 def _drain_message_queue(msg_queue) -> list[UserMessage]:
@@ -311,13 +384,36 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             failures = (state.auto_compact_tracking or {}).get("consecutive_failures", 0)
             max_failures = params.settings.get("max_consecutive_compact_failures", 3)
             if failures >= max_failures:
-                # Surface error to user and stop — continuing would just fail again
-                circuit_breaker_msg = create_user_message(
-                    "Compaction has failed 3 times consecutively. Use /clear to start fresh.",
+                # Liveness fallback (invariant I6): summarization keeps
+                # failing, but the session must not die. Hard-truncate the
+                # oldest history deterministically (no LLM involved), tell
+                # the user and the model, and continue the turn. Target has
+                # headroom below T so Layer C is not immediately re-triggered;
+                # the failure counter resets so C gets fresh chances if the
+                # conversation grows back over the threshold.
+                fallback_target = int(threshold_tokens * 0.8)
+                fallback_messages, dropped = _hard_truncate_fallback(
+                    messages_for_query, fallback_target,
+                )
+                notice = create_user_message(
+                    f"Summarization failed {failures} times consecutively. "
+                    f"{dropped} older message(s) were hard-truncated from the "
+                    "context to keep the session alive. Earlier conversation "
+                    "details are gone - re-read files if something is missing.",
                     hide_in_ui=False,
                 )
-                yield circuit_breaker_msg
-                return
+                yield notice
+                messages_for_query = [notice] + fallback_messages
+                layers_modified = True
+                state.auto_compact_tracking = {
+                    "compacted": False,
+                    "turn_counter": 0,
+                    "consecutive_failures": 0,
+                }
+                logger.warning(
+                    "Compaction circuit breaker tripped: hard-truncated %d "
+                    "message(s) as liveness fallback", dropped,
+                )
             else:
                 logger.info("Auto-compaction triggered")
                 try:
