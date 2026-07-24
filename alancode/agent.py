@@ -786,8 +786,8 @@ class AlanCodeAgent:
                 for listener in self._event_listeners:
                     try:
                         await listener(event)
-                    except Exception:
-                        logger.debug("Event listener error", exc_info=True)
+                    except Exception as exc:
+                        logger.debug("Event listener error: %s", exc, exc_info=True)
                 yield event
 
             # Persist transcript
@@ -802,11 +802,11 @@ class AlanCodeAgent:
                 await record_transcript(
                     self._session.session_id, self._messages, cwd=self._cwd
                 )
-            except Exception:
-                logger.debug("Failed to save state on interrupt", exc_info=True)
-        except Exception:
+            except Exception as exc:
+                logger.debug("Failed to save state on interrupt: %s", exc, exc_info=True)
+        except Exception as exc:
             self._state = AgentState.ERROR
-            logger.exception("Agent error")
+            logger.exception("Agent error: %s", exc)
             raise
         finally:
             self._state = AgentState.WAITING

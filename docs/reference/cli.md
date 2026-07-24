@@ -33,7 +33,7 @@ By default, Alan uses provider-native tool calling. If your provider/model doesn
 
 | Flag | Description | Default |
 |---|---|---|
-| `--tool-call-format` | Text-based tool-call format for models without native tool calling: `hermes`, `glm`, or `alan`. | *(none — uses native)* |
+| `--tool-call-format` | Text-based tool-call format for models without native tool calling: `hermes`, `hermes_xml`, `glm`, `alan`, or `meta_json`. | *(none - uses native)* |
 
 ## Session behavior
 

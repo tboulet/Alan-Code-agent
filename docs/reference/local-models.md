@@ -22,7 +22,7 @@ For models without native tool support, use **text-based tool calling** — Alan
 alancode --model openai/<model> --base-url http://localhost:8000/v1 --tool-call-format hermes
 ```
 
-Available formats: `hermes`, `glm`, `alan`.
+Available formats: `hermes`, `hermes_xml`, `glm`, `alan`, `meta_json`.
 
 ## Model name format
 

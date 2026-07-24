@@ -57,7 +57,8 @@ def main() -> None:
     )
     parser.add_argument("--api-key", default=None, help="API key")
     parser.add_argument("--base-url", default=None, help="API base URL (for local servers: http://localhost:8000/v1)")
-    parser.add_argument("--tool-call-format", default=None, choices=["hermes", "glm", "alan"],
+    parser.add_argument("--tool-call-format", default=None,
+                        choices=["hermes", "hermes_xml", "glm", "alan", "meta_json"],
                         help="Text-based tool call format for models without native tool calling")
     parser.add_argument("--permission-mode", default=None, choices=["yolo", "edit", "safe"])
     parser.add_argument(
