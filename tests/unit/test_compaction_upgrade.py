@@ -12,7 +12,7 @@ Tests cover:
 import pytest
 
 from alancode.compact.compact_truncate import (
-    REPLACEMENT_MESSAGE,
+    TRUNCATION_SENTINEL,
     compaction_truncate_tool_results,
 )
 from alancode.compact.compact_clear import (
@@ -38,7 +38,7 @@ from alancode.messages.factory import (
     create_tool_result_message,
     create_user_message,
 )
-from alancode.utils.tokens import estimate_message_tokens
+from alancode.utils.tokens import estimate_message_tokens, rough_token_count
 
 
 # ---------------------------------------------------------------------------
@@ -50,18 +50,20 @@ class TestCompactionTruncate:
     def test_always_truncates_oversized(self):
         """Layer A is always on: any result over max_chars is truncated."""
         msg = create_tool_result_message("tu_1", "x" * 100_000)
-        result = compaction_truncate_tool_results([msg], max_chars=50_000)
+        result, count = compaction_truncate_tool_results([msg], max_chars=50_000)
         assert len(result) == 1
+        assert count == 1
         block = result[0].content[0]
-        assert "truncated" in block.content.lower()
+        assert "ALAN-TRUNCATED" in block.content
 
     def test_all_oversized_processed(self):
         """Every oversized result is truncated, not just the first."""
         msg1 = create_tool_result_message("tu_1", "FIRST" * 20_000)
         msg2 = create_tool_result_message("tu_2", "SECOND" * 20_000)
-        result = compaction_truncate_tool_results([msg1, msg2], max_chars=50_000)
-        assert "truncated" in result[0].content[0].content.lower()
-        assert "truncated" in result[1].content[0].content.lower()
+        result, count = compaction_truncate_tool_results([msg1, msg2], max_chars=50_000)
+        assert count == 2
+        assert "ALAN-TRUNCATED" in result[0].content[0].content
+        assert "ALAN-TRUNCATED" in result[1].content[0].content
 
     def test_does_not_mutate_input(self):
         """Original messages are not modified."""
@@ -91,61 +93,54 @@ class TestCompactionClear:
         )
         return assistant, user
 
-    def test_below_threshold_noop(self):
-        """When estimated tokens < threshold, no clearing occurs."""
+    def test_at_or_below_target_noop(self):
+        """When estimated tokens <= clear target, no clearing occurs."""
         messages = []
         for i in range(15):
             a, u = self._make_tool_exchange("Bash", f"tu_{i}", f"output_{i}" * 100)
             messages.extend([a, u])
 
-        # Very high threshold -- should be a no-op
         new_msgs, tokens_saved = compaction_clear_tool_results(
-            messages, keep_recent=5, threshold_tokens=999_999,
+            messages, clear_target_tokens=999_999,
         )
         assert tokens_saved == 0
 
-    def test_above_threshold_clears(self):
-        """When estimated tokens >= threshold, old tool results are cleared."""
+    def test_above_target_clears_no_floor(self):
+        """Above the target, clearing has NO keep-recent floor: with a tiny
+        target even the newest compactable results are cleared."""
         messages = []
         for i in range(15):
             a, u = self._make_tool_exchange("Bash", f"tu_{i}", f"output_{i}" * 100)
             messages.extend([a, u])
 
-        # Very low threshold -- should clear
         new_msgs, tokens_saved = compaction_clear_tool_results(
-            messages, keep_recent=5, threshold_tokens=1,
+            messages, clear_target_tokens=1,
         )
         assert tokens_saved > 0
 
-        # Count cleared results
         cleared_count = 0
         for msg in new_msgs:
             if isinstance(msg, UserMessage) and isinstance(msg.content, list):
                 for block in msg.content:
                     if isinstance(block, ToolResultBlock) and block.content == CLEARED_MESSAGE:
                         cleared_count += 1
-        assert cleared_count == 10  # 15 - 5 recent = 10 cleared
+        assert cleared_count == 15  # all of them - no floor
 
-    def test_no_threshold_always_runs(self):
-        """Without threshold, clearing always runs (backward compat)."""
-        messages = []
-        for i in range(15):
-            a, u = self._make_tool_exchange("Bash", f"tu_{i}", f"output_{i}" * 100)
-            messages.extend([a, u])
-
-        new_msgs, tokens_saved = compaction_clear_tool_results(messages, keep_recent=5)
-        assert tokens_saved > 0
-
-    def test_oldest_first_clearing(self):
-        """Oldest tool results are cleared first."""
+    def test_oldest_first_stops_at_target(self):
+        """Clearing is oldest-first and stops once the estimate reaches
+        the target - newest results survive when the target allows."""
         messages = []
         for i in range(6):
-            a, u = self._make_tool_exchange("Bash", f"tu_{i}", f"output_{i}" * 100)
+            a, u = self._make_tool_exchange("Bash", f"tu_{i}", "content " * 300)
             messages.extend([a, u])
 
-        new_msgs, _ = compaction_clear_tool_results(messages, keep_recent=3, threshold_tokens=1)
+        total = estimate_message_tokens(messages)
+        per_result = rough_token_count("content " * 300)
+        target = total - int(2.5 * per_result)  # ~3 clears needed
+        new_msgs, _ = compaction_clear_tool_results(
+            messages, clear_target_tokens=target,
+        )
 
-        # First 3 should be cleared, last 3 preserved
         cleared = []
         preserved = []
         for msg in new_msgs:
@@ -157,12 +152,11 @@ class TestCompactionClear:
                         else:
                             preserved.append(block.tool_use_id)
 
-        assert len(cleared) == 3
-        assert len(preserved) == 3
-        # Cleared should be the oldest (tu_0, tu_1, tu_2)
-        assert set(cleared) == {"tu_0", "tu_1", "tu_2"}
-        # Preserved should be the newest (tu_3, tu_4, tu_5)
-        assert set(preserved) == {"tu_3", "tu_4", "tu_5"}
+        assert 1 <= len(cleared) < 6
+        # Cleared are exactly the oldest prefix
+        assert cleared == [f"tu_{i}" for i in range(len(cleared))]
+        # The newest survived
+        assert "tu_5" in preserved
 
 
 # ---------------------------------------------------------------------------

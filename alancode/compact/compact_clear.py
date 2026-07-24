@@ -77,66 +77,49 @@ def _collect_tool_result_indices(
 def compaction_clear_tool_results(
     messages: list[Message],
     *,
-    keep_recent: int | None = None,
+    clear_target_tokens: int,
     compactable_tools: set[str] = COMPACTABLE_TOOLS,
-    threshold_tokens: int | None = None,
-    settings: dict | None = None,
 ) -> tuple[list[Message], int]:
-    """Clear old tool result content to save tokens (Layer B).
+    """Clear old tool result content down to a token target (Layer B).
 
-    If *threshold_tokens* is provided, only runs when estimated token count
-    exceeds that threshold. Processes oldest tool results first and stops
-    when the estimated token count drops below the threshold (or all
-    clearable results have been processed).
+    Recent results are protected by the target itself: clearing stops at
+    G, and with the per-result cap at 10% of T a single clear can never
+    jump the estimate from above G to below T.
 
     Returns (new_messages, tokens_saved).
     Only clears tool results from compactable tools.
-    Preserves the last `keep_recent` tool results intact.
     """
-    if keep_recent is None:
-        keep_recent = (settings or {}).get("compact_clear_keep_recent", 10)
+    # Gate: nothing to do at or below the target.
+    current_tokens = estimate_message_tokens(messages)
+    if current_tokens <= clear_target_tokens:
+        return list(messages), 0
 
-    # Threshold gate: skip if below threshold
-    if threshold_tokens is not None:
-        current_tokens = estimate_message_tokens(messages)
-        if current_tokens < threshold_tokens:
-            return list(messages), 0
-
-    # Find all compactable tool result locations
+    # Find all compactable tool result locations (oldest first).
     tool_result_indices = _collect_tool_result_indices(messages, compactable_tools)
 
     if not tool_result_indices:
         return list(messages), 0
 
-    # Determine which to clear (all except the last keep_recent)
-    num_to_clear = max(0, len(tool_result_indices) - keep_recent)
-    if num_to_clear == 0:
-        return list(messages), 0
+    # Clear oldest first, stopping as soon as the estimate reaches the target.
+    indices_to_clear_list: list[tuple[int, int]] = []
+    running_saved = 0
+    for msg_idx, block_idx, _ in tool_result_indices:
+        msg = messages[msg_idx]
+        if not isinstance(msg, UserMessage) or not isinstance(msg.content, list):
+            continue
+        block = msg.content[block_idx]
+        if isinstance(block, ToolResultBlock):
+            old_tokens = _estimate_block_tokens(block)
+            new_tokens = rough_token_count(CLEARED_MESSAGE)
+            saved = max(0, old_tokens - new_tokens)
+            indices_to_clear_list.append((msg_idx, block_idx))
+            running_saved += saved
+            if current_tokens - running_saved <= clear_target_tokens:
+                break
+    indices_to_clear = set(indices_to_clear_list)
 
-    # If threshold-gated, process oldest first and stop when below threshold
-    if threshold_tokens is not None:
-        current_tokens = estimate_message_tokens(messages)
-        clearable = tool_result_indices[:num_to_clear]
-        indices_to_clear_list: list[tuple[int, int]] = []
-        running_saved = 0
-        for msg_idx, block_idx, _ in clearable:
-            msg = messages[msg_idx]
-            if not isinstance(msg, UserMessage) or not isinstance(msg.content, list):
-                continue
-            block = msg.content[block_idx]
-            if isinstance(block, ToolResultBlock):
-                old_tokens = _estimate_block_tokens(block)
-                new_tokens = rough_token_count(CLEARED_MESSAGE)
-                saved = max(0, old_tokens - new_tokens)
-                indices_to_clear_list.append((msg_idx, block_idx))
-                running_saved += saved
-                if current_tokens - running_saved < threshold_tokens:
-                    break
-        indices_to_clear = set(indices_to_clear_list)
-    else:
-        indices_to_clear = set(
-            (msg_idx, block_idx) for msg_idx, block_idx, _ in tool_result_indices[:num_to_clear]
-        )
+    if not indices_to_clear:
+        return list(messages), 0
 
     # Track which messages need modification
     messages_to_modify: dict[int, set[int]] = {}

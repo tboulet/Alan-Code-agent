@@ -19,11 +19,11 @@ from alancode.messages.types import (
 
 # Sentinel prefix so other compaction passes (and debugging) can tell this
 # is synthetic truncation output rather than real tool data.
-TRUNCATION_SENTINEL = "[ALAN-TRUNCATED]"
-REPLACEMENT_MESSAGE = (
-    TRUNCATION_SENTINEL
-    + " Tool result truncated — {original_size} chars exceeded {max_size} limit."
-)
+TRUNCATION_SENTINEL = "[ALAN-TRUNCATED"
+
+# Head/tail split of the kept characters: starts carry structure (headers,
+# first errors), tails carry conclusions and final state.
+HEAD_FRACTION = 0.6
 
 
 from alancode.compact.utils import text_length as _text_length
@@ -33,25 +33,42 @@ def _truncate_tool_result_content(
     content: str | list[TextBlock],
     max_chars: int,
 ) -> str | list[TextBlock]:
-    """Replace oversized tool result content with a truncation notice.
+    """Truncate oversized tool result content middle-out.
+
+    Keeps the first 60% and last 40% of the character budget, with a
+    sentinel in the middle stating what was elided, e.g.::
+
+        [ALAN-TRUNCATED: middle 78% of output elided (84,213 of 108,000 chars)]
 
     Args:
         content: Original tool result content (string or list of TextBlocks).
-        max_chars: Maximum allowed character count.
+        max_chars: Maximum allowed character count for the kept content.
 
     Returns:
-        A replacement string or single-element TextBlock list.
+        A truncated string or single-element TextBlock list.
     """
-    original_size = _text_length(content)
-    replacement = REPLACEMENT_MESSAGE.format(
-        original_size=original_size,
-        max_size=max_chars,
+    text = (
+        content
+        if isinstance(content, str)
+        else "".join(b.text for b in content)
+    )
+    original_size = len(text)
+    head_len = int(max_chars * HEAD_FRACTION)
+    tail_len = max_chars - head_len
+    elided = original_size - head_len - tail_len
+    elided_pct = round(elided * 100 / original_size) if original_size else 0
+
+    sentinel = (
+        f"{TRUNCATION_SENTINEL}: middle {elided_pct}% of output elided "
+        f"({elided:,} of {original_size:,} chars)]"
+    )
+    truncated = (
+        text[:head_len] + "\n" + sentinel + "\n" + text[original_size - tail_len:]
     )
 
     if isinstance(content, str):
-        return replacement
-    # For list[TextBlock], replace with a single TextBlock
-    return [TextBlock(text=replacement)]
+        return truncated
+    return [TextBlock(text=truncated)]
 
 
 def _process_tool_result_block(
@@ -81,8 +98,16 @@ def compaction_truncate_tool_results(
     *,
     max_chars: int | None = None,
     settings: dict | None = None,
-) -> list[Message]:
+) -> tuple[list[Message], int]:
     """Enforce a per-result size cap on tool results (Layer A).
+
+    Always on - every individual tool result whose content exceeds
+    *max_chars* is truncated middle-out (head + tail kept, sentinel in
+    between), regardless of total conversation size.
+
+    Returns (new_messages, truncated_count). The count lets the caller
+    know its usage-based token estimates are stale (content was removed
+    since the last API call measured it).
     """
     if max_chars is None:
         max_chars = (settings or {}).get("tool_result_max_chars", 20_000)
@@ -97,7 +122,7 @@ def compaction_truncate_tool_results(
                 oversized.append((msg_idx, block_idx))
 
     if not oversized:
-        return list(messages)
+        return list(messages), 0
 
     # Build modified message list, processing oldest first
     # Track which messages need modification
@@ -148,4 +173,4 @@ def compaction_truncate_tool_results(
         )
         result.append(new_msg)
 
-    return result
+    return result, len(oversized)

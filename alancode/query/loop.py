@@ -261,27 +261,40 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # -- Phase 2: Message preparation (compaction pipeline) ----------
         messages_for_query = get_messages_after_compact_boundary(state.messages)
 
-        # Layer A: compaction_truncate_tool_results (truncate oversized results)
+        # Layer A: per-result size cap (always on, middle-out truncation)
+        a_truncated = 0
         if params.settings.get("compaction_truncate_enabled", True):
-            messages_for_query = compaction_truncate_tool_results(
-                messages_for_query, settings=params.settings,
+            messages_for_query, a_truncated = compaction_truncate_tool_results(
+                messages_for_query, max_chars=budget.tool_result_cap_chars,
             )
 
-        # Layer B: compaction_clear_tool_results (clear old tool results)
+        # Layer B: damage control - clear old tool results down to the
+        # clear target G (strictly above the compaction threshold T, so B
+        # can never pre-empt Layer C, the information-preserving path).
+        # Inactive in normal operation; fires only when C failed or could
+        # not keep up.
+        b_tokens_saved = 0
         if params.settings.get("compaction_clear_enabled", True):
-            messages_for_query, tokens_saved = compaction_clear_tool_results(
-                messages_for_query, threshold_tokens=threshold_tokens,
-                settings=params.settings,
+            messages_for_query, b_tokens_saved = compaction_clear_tool_results(
+                messages_for_query,
+                clear_target_tokens=budget.tool_result_clear_target,
             )
 
-        # Layer C: compaction_auto (auto-compact if still above threshold).
-        # Pre-call token estimate:
-        # - usage_based = last_input + last_output + tokens added since last call
-        # - full_estimate = litellm.token_counter over the full upcoming payload
-        # We take max() so we never under-budget.
+        # Layer C: compaction_auto (summarize if at/over the threshold).
+        # Pre-call token estimate: max(usage_based, full_estimate), where
+        # usage_based = last call's exact usage + estimate of the delta.
+        # When Layer A or B just removed content, the last call's usage
+        # still counts it - the floor is stale - so we trust only the
+        # direct estimate of the actual post-A/B payload.
+        layers_modified = a_truncated > 0 or b_tokens_saved > 0
+        seed_input, seed_output = (
+            (0, 0)
+            if layers_modified
+            else (state.last_input_tokens, state.last_output_tokens)
+        )
         new_since_last = (
             state.messages[state.messages_len_at_last_call :]
-            if state.last_input_tokens > 0
+            if seed_input > 0
             else None
         )
         current_tokens = predicted_next_call_tokens(
@@ -289,8 +302,8 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             messages_for_query,
             system=params.system_prompt,
             tools=[t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools],
-            last_input_tokens=state.last_input_tokens,
-            last_output_tokens=state.last_output_tokens,
+            last_input_tokens=seed_input,
+            last_output_tokens=seed_output,
             new_messages_since_last_call=new_since_last,
         )
         if params.settings.get("compaction_auto_enabled", True) and current_tokens >= threshold_tokens:
@@ -322,6 +335,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         for msg in result.summary_messages:
                             yield msg
                         messages_for_query = [result.boundary_message] + result.summary_messages
+                        # The payload was just replaced wholesale - the
+                        # usage floor is stale for Phase 3 too.
+                        layers_modified = True
                         # Update tracking
                         state.auto_compact_tracking = {
                             "compacted": True,
@@ -343,13 +359,20 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     }
 
         # -- Phase 3: Blocking limit check -------------------------------
+        # Same staleness rule as above: after any A/B/C modification this
+        # iteration, the last call's usage no longer describes the payload.
+        seed_input, seed_output = (
+            (0, 0)
+            if layers_modified
+            else (state.last_input_tokens, state.last_output_tokens)
+        )
         current_tokens = predicted_next_call_tokens(
             params.model,
             messages_for_query,
             system=params.system_prompt,
             tools=[t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools],
-            last_input_tokens=state.last_input_tokens,
-            last_output_tokens=state.last_output_tokens,
+            last_input_tokens=seed_input,
+            last_output_tokens=seed_output,
             new_messages_since_last_call=None,
         )
         if current_tokens >= blocking_limit:

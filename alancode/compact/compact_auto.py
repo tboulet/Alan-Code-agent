@@ -133,8 +133,10 @@ async def compaction_auto(
     # Without this, a single huge tool result (e.g., 216K chars) would be
     # included in the compaction request, exceeding the LLM's context window.
     from alancode.compact.compact_truncate import compaction_truncate_tool_results
-    truncated_messages = compaction_truncate_tool_results(
-        relevant_messages, settings=settings,
+    truncated_messages, _ = compaction_truncate_tool_results(
+        relevant_messages,
+        max_chars=budget.tool_result_cap_chars if budget is not None else None,
+        settings=settings,
     )
 
     # 2. Build compact system prompt (REPLACEMENT, not appended)
