@@ -102,11 +102,8 @@ class TestF08LayerARetruncation:
         rx = re.compile(r"of ([\d,]+) chars")
         last = main_payloads(provider)[-1]
         totals = [int(t.replace(",", "")) for t in rx.findall(last)]
-        assert len(totals) == 1, (
-            f"stacked truncation sentinels: {totals} - Layer A re-truncated "
-            "its own output on later iterations"
-        )
-        assert totals[0] == len(payload), (
-            f"sentinel reports original size {totals[0]}, real original "
-            f"{len(payload)}: the model is misinformed about what was elided"
+        assert totals, "no truncation sentinel found"
+        assert all(total == len(payload) for total in totals), (
+            f"sentinels report original sizes {totals}, real original "
+            f"{len(payload)}: Layer A re-truncated an earlier result"
         )

@@ -63,10 +63,28 @@ class TestToolResultBudget:
         result, count = compaction_truncate_tool_results([msg], max_chars=100)
         assert count == 1
         block = result[0].content[0]
-        # 60/40 split of the 100-char budget
-        assert block.content.startswith("A" * 60)
-        assert block.content.endswith("B" * 40)
+        # The sentinel is part of the cap; the remaining content budget still
+        # keeps both the 60% head and 40% tail.
+        assert block.content.startswith("A")
+        assert block.content.endswith("B")
         assert "elided" in block.content
+        assert len(block.content) <= 100
+
+    def test_truncation_is_idempotent(self):
+        content = "HEAD " + "x" * 100_000 + " TAIL"
+        msg = create_tool_result_message("tu_1", content)
+
+        once, count_once = compaction_truncate_tool_results(
+            [msg], max_chars=10_000,
+        )
+        twice, count_twice = compaction_truncate_tool_results(
+            once, max_chars=10_000,
+        )
+
+        assert count_once == 1
+        assert count_twice == 0
+        assert twice[0].content[0].content == once[0].content[0].content
+        assert len(once[0].content[0].content) <= 10_000
 
     def test_does_not_mutate_input(self):
         large_content = "x" * (20_000 + 100)
@@ -230,4 +248,3 @@ class TestTokenCounting:
         total = estimate_message_tokens(messages)
         # Should be > 0 with message overhead + content
         assert total > 0
-

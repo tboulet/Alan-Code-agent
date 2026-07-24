@@ -58,8 +58,17 @@ def _truncate_tool_result_content(
         else "".join(b.text for b in content)
     )
     original_size = len(text)
-    head_len = int(max_chars * HEAD_FRACTION)
-    tail_len = max_chars - head_len
+
+    # The cap includes the sentinel and its surrounding newlines. Reserve
+    # enough room for the longest sentinel this result can produce, then
+    # divide the remaining content budget between the head and tail.
+    max_sentinel = (
+        f"{TRUNCATION_SENTINEL}: middle 100% of output elided "
+        f"({original_size:,} of {original_size:,} chars)]"
+    )
+    content_budget = max(0, max_chars - len(max_sentinel) - 2)
+    head_len = int(content_budget * HEAD_FRACTION)
+    tail_len = content_budget - head_len
     elided = original_size - head_len - tail_len
     elided_pct = round(elided * 100 / original_size) if original_size else 0
 
@@ -67,9 +76,11 @@ def _truncate_tool_result_content(
         f"{TRUNCATION_SENTINEL}: middle {elided_pct}% of output elided "
         f"({elided:,} of {original_size:,} chars)]"
     )
-    truncated = (
-        text[:head_len] + "\n" + sentinel + "\n" + text[original_size - tail_len:]
-    )
+    if len(sentinel) + 2 > max_chars:
+        truncated = sentinel[:max_chars]
+    else:
+        tail = text[original_size - tail_len:] if tail_len else ""
+        truncated = text[:head_len] + "\n" + sentinel + "\n" + tail
 
     if isinstance(content, str):
         return truncated
