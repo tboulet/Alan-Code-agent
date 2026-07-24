@@ -10,7 +10,7 @@ After every agent turn, Alan Code prints a one-line summary beneath the response
 
 - **Session (in / out)** — total input and output tokens since the session started (not just the last turn). Persists across turns, cleared on `/clear` or a new session.
 - **`= $…` (estimated)** — a best-effort USD estimate from the LiteLLM pricing registry. Shows `unknown` when the model isn't in the registry (common for local models, new releases, and fine-tunes).
-- **Conversation** — current conversation size in tokens vs. the model's context window, with percentage. Updated every turn; once it reaches the configured compaction threshold (`compaction_threshold_percent`, default 80%), Alan starts compacting.
+- **Conversation** - current conversation size in tokens vs. the model's context window, with percentage. Updated every turn. Compaction is based on the usable input budget after reserving response space and a safety margin, so the displayed context-window percentage is not the exact trigger percentage.
 
 ## Deeper breakdown — `/status`
 
@@ -39,8 +39,8 @@ Key settings that affect cost behavior (see [`cli.md`](cli.md)):
 
 - `max_iterations_per_turn` — hard cap on how many API calls a single user message can consume.
 - `max_output_tokens` — ceiling on per-call output, with internal escalation up to `escalated_max_tokens` when the model hits the limit and needs to recover.
-- `compaction_threshold_percent` — at what fraction of the context window Alan starts compacting to avoid hitting the hard ceiling (where calls would be refused).
-- `auto_compact_buffer_tokens` — how much headroom under the context window triggers automatic compaction.
+- `compaction_threshold_percent` - at what fraction of the usable input budget Alan starts summarizing.
+- `context_window` - normally automatic; override it only when model or server detection is wrong.
 
 ## Programmatic access
 

@@ -27,7 +27,8 @@ pytest --cov=alancode --cov-report=term-missing
 tests/
 ├── conftest.py         # shared fixtures (tmp session dirs, scripted providers, etc.)
 ├── unit/               # fast, local, no-network
-└── integration/        # full agent turns against the scripted provider
+├── integration/        # full agent turns against the scripted provider
+└── testing_*/          # adversarial and regression scenario suites
 ```
 
 ### `unit/`
@@ -58,6 +59,9 @@ Tests that exercise the full agent loop through `AlanCodeAgent.query_events_asyn
 - `test_scripted_ui.py` — the scripted UI fixture.
 - `test_agt_edge_cases.py` — AGT operations against a real git repo fixture.
 - `test_gui_phase2.py` — GUI event flow with a scripted UI.
+- `test_budget_regression.py` - full-loop context-budget and compaction regressions across small and large windows.
+
+The `testing_*` directories contain adversarial scenario suites used to challenge invariants such as legal request sizes, conversation liveness, and tool-history validity. They use deterministic providers and are safe to run with the rest of the suite. Accepted limitations remain as strict expected failures, so an unexpected pass prompts a review.
 
 ## Writing new tests
 

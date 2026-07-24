@@ -65,17 +65,18 @@ The pre-call gatekeeper. See [concepts/context-and-compaction.md](../concepts/co
 ```python
 messages_for_query = get_messages_after_compact_boundary(state.messages)
 
-# Get model info (cached per turn)
-if state.cached_model_info is None:
-    state.cached_model_info = params.provider.get_model_info(params.model)
-threshold_pct = params.settings.get("compaction_threshold_percent", 80) / 100.0
-threshold_tokens = int(model_info.context_window * threshold_pct)
+model_info = params.provider.get_model_info(params.model)
+budget = resolve_context_budget(model_info, params.settings)
 
 # Layer A
-messages_for_query = compaction_truncate_tool_results(messages_for_query, ...)
+messages_for_query, truncated = compaction_truncate_tool_results(
+    messages_for_query, max_chars=budget.tool_result_cap_chars
+)
 
 # Layer B
-messages_for_query, tokens_saved = compaction_clear_tool_results(messages_for_query, ...)
+messages_for_query, tokens_saved = compaction_clear_tool_results(
+    messages_for_query, clear_target_tokens=budget.tool_result_clear_target
+)
 
 # Layer C (pre-call estimate via `predicted_next_call_tokens`)
 current_tokens = predicted_next_call_tokens(
@@ -89,15 +90,14 @@ current_tokens = predicted_next_call_tokens(
         if state.last_input_tokens > 0 else None
     ),
 )
-if current_tokens >= threshold_tokens:
+if current_tokens >= budget.threshold_compaction:
     # fire Layer C
-    result = await compaction_auto(...)
+    result = await compaction_auto(..., budget=budget)
     if result:
-        state.messages = [result.boundary_message, *result.summary_messages]
-        # loop back and retry with summarized history
+        messages_for_query = [result.boundary_message, *result.summary_messages]
 ```
 
-Layers run in order; any layer bringing us below threshold stops the chain.
+Layers run in order. Layer A always enforces its per-result cap. Layer B only clears down to a target above the summarization threshold, so it cannot replace Layer C's information-preserving role.
 
 `predicted_next_call_tokens` is `max(usage_based, full_estimate)` where:
 - `usage_based = last_input_tokens + last_output_tokens + tokens(new_messages_since_last_call)`
@@ -109,6 +109,9 @@ Taking the max protects against under-budgeting.
 
 ```python
 blocking_limit = budget.max_context_size_allowed  # CW - max_output_tokens - margin
+if compaction_failed and current_tokens >= blocking_limit:
+    messages_for_query = hard_truncate_messages(...)
+
 if current_tokens >= blocking_limit:
     yield create_assistant_error_message(
         "Conversation too long. Please run /compact or start a new session."
@@ -116,7 +119,7 @@ if current_tokens >= blocking_limit:
     return
 ```
 
-Last-chance refusal. The limit is the point where a full response no longer fits the window (`alancode/budget.py` derives it once per turn). If we're past it even after compaction, don't even try the API call. Turn ends cleanly.
+The limit is the point where the reserved response no longer fits (`alancode/budget.py` derives it once per turn). If LLM summarization failed, a deterministic fallback first keeps a useful opening and a structurally valid recent tail. Refusal remains for an irreducible payload, such as a system prompt and tool schemas that cannot fit by themselves.
 
 ## Phase 4 — API call (streaming)
 
@@ -178,7 +181,9 @@ Store the reported usage for next iteration's pre-call estimate.
 
 ```python
 if params.abort_event and params.abort_event.is_set():
-    yield create_user_interruption_message(tool_use=False)
+    # Close every unexecuted tool call with a synthetic error result.
+    yield interruption_results
+    yield create_user_interruption_message(tool_use=bool(tool_use_blocks))
     return
 
 if not tool_use_blocks:
@@ -195,24 +200,17 @@ if not tool_use_blocks:
             yield recovery_msg   # "Resume directly..."
             continue
 
-    # Emergency compaction on PTL
-    if assistant_msg.api_error == "prompt_too_long" and not state.has_attempted_emergency_compact:
-        result = await compaction_auto(...)
-        state.messages = [...]
-        state.has_attempted_emergency_compact = True
-        continue
-
     # Normal completion
     return
 ```
 
-Multiple recovery paths, each one-shot. If the model stops mid-thought, escalate tokens or inject "Resume directly." If the prompt is too long, fire emergency compaction. None of these are used in the common case — they're safety nets.
+If the model stops mid-thought, Alan escalates the output budget or injects "Resume directly." Prompt-too-long errors are handled around the provider stream: Alan attempts emergency compaction there and retries the iteration once.
 
 ## Phase 8 — Tool execution
 
 ```python
 async for update in run_tools(
-    tool_use_blocks, params.tools, params.context,
+    tool_use_blocks, effective_tools, params.context,
     max_concurrency=params.settings.get("max_tool_concurrency", 10),
     permission_callback=params.permission_callback,
 ):
@@ -222,6 +220,8 @@ async for update in run_tools(
 ```
 
 `run_tools` in `alancode/tools/orchestration.py` batches the `ToolUseBlock`s into concurrent (for read-only) or serial (for write/exec) tasks. Each emits a `UserMessage` with a `ToolResultBlock`.
+
+If a model-invoked skill restricts its allowed tools, `effective_tools` contains only that subset. If the turn is interrupted, Alan emits synthetic error results for every tool call that did not complete so the stored provider history remains valid.
 
 For each tool, `run_tool_use` (in `alancode/tools/execution.py`):
 

@@ -134,10 +134,10 @@ Layer A truncates any single tool result exceeding this (middle-out: head and ta
 Output budget for the Layer C summarization call. `"auto"` = `min(20 000, what fits in the window)`; always clamped at call time so the summarizer request is legal.
 
 ### `auto_compact_buffer_tokens`
-Emergency compaction trigger — if predicted tokens would land within this margin of the context ceiling. Default 13 000.
+Retained for settings-file compatibility. The 1.2 loop derives its active thresholds from the resolved context budget instead.
 
 ### `warning_threshold_buffer_tokens`
-User-facing "context is filling up" warning trigger. Default 20 000.
+Retained for settings-file compatibility; it currently has no effect on loop behavior.
 
 ### `max_consecutive_compact_failures`
 Circuit-breaker threshold. After N failed compactions in a row, Alan hard-truncates the oldest history (deterministic, no LLM) with a visible notice and keeps the session alive. Default 3.

@@ -22,7 +22,6 @@ Explicit values are validated against their parents; impossible combinations
 raise :class:`ConfigError` at resolve time with a human explanation, instead
 of failing later inside an API call.
 
-Design doc: ``perso_dev/budget_redesign_decision_plan.md``.
 """
 
 from __future__ import annotations
@@ -238,9 +237,8 @@ def clamp_output_budget(
 ) -> int:
     """Clamp a call's max_tokens so ``input + max_tokens + margin <= CW``.
 
-    The per-call guarantee of legality (invariant I1): whatever the
-    requested budget (normal M, escalated, or summarizer S), the returned
-    value never overflows the window given the input estimate.
+    Whatever the requested budget (normal, escalated, or summarizer), the
+    returned value never overflows the window given the input estimate.
 
     Returns 0 when no output fits at all - the caller must not make the
     call (the blocking limit should normally prevent ever reaching this).

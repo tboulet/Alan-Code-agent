@@ -86,7 +86,7 @@ alan-code/
 │   ├── messages/          # message dataclasses + normalization
 │   ├── session/           # session persistence, state, transcripts
 │   ├── permissions/       # permission pipeline + rules
-│   ├── compact/           # 3-layer compaction
+│   ├── compact/           # 3-layer compaction + deterministic fallback
 │   ├── hooks/             # pre/post tool-use hooks
 │   ├── memory/            # memory system
 │   ├── skills/            # skill registry + parser

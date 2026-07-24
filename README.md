@@ -15,7 +15,7 @@ Works with any LiteLLM compatible API key or provider, and several local model p
 - **Browser GUI with three panels** — Chat, *LLM Perspective* (the model's exact view of the conversation), and a *Git Tree* of the agent's turns. `--gui`
 - **Cross-session memory** — per-project and global memory the agent reads/writes between sessions, with three modes (`off` / `on` / `intensive`).
 - **Live cost + token tracking** — estimated $ and token usage per API call, visible in-session.
-- **Runs anywhere** — Anthropic direct, any LiteLLM provider (OpenAI, OpenRouter, Gemini, …), or local models via vLLM / SGLang / Ollama, with a text-based tool-call fallback for models without native tool use.
+- **Broad model support** - Anthropic direct, any LiteLLM provider (OpenAI, OpenRouter, Gemini, ...), or local models via vLLM / SGLang / Ollama, with a text-based tool-call fallback for models without native tool use.
 - **Python library** — drive the agent from your own code with sync, async, or streaming APIs. Build auto-fix loops, orchestrators, or custom UIs in a few lines.
 
 
@@ -29,6 +29,7 @@ cd Alan-Code-agent
 pip install -e .
 ```
 
+Linux and macOS are supported. On Windows, use WSL; native Windows is not currently supported because session locking relies on a Unix API.
 
 # Quickstart
 
@@ -250,6 +251,7 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
+- **2026-07-25 - Alan Code 1.2** - Context budgets now adapt to the model and reserve legal output space on every call. Long sessions recover from aggregate tool-output growth, prompt-too-long responses, and failed summarization through context-scaled truncation, retrying compaction, and a deterministic last-resort fallback. Local-model context windows can be resolved from server metadata or a cached probe, and interrupted turns retain valid tool-call history.
 - **2026-05-11 — Provider / model UX redesign** — `--provider` is replaced by `--backend` (`auto` / `anthropic-native` / `scripted`); the upstream provider lives inside the model string as a prefix (`ollama/llama3`, `openrouter/...`, `gemini/...`). `--backend` is inferred from `--model` — bare Claude names use the native Anthropic SDK, everything else uses LiteLLM. Old `--provider` flag, settings key, and `/provider` command keep working as deprecated aliases for one release.
 - **2026-05-07 — Programmatic mode** — `AlanCodeAgent(programmatic=True, ...)` runs Alan as a library component for benchmark harnesses, parent agents, and unattended pipelines. Skips host-level state (`~/.alan/ALAN.md`, `~/.alan/memory/`, project `ALAN.md`, AGT bootstrap) and the network/git/ask-user tools. New `tools=` and `disabled_tools=` constructor params for fine-grained tool control.
 - **2026-04-28 — Prompt caching** — Alan now places `cache_control` breakpoints on tool definitions, system prompt, and conversation history, for both providers. System prompt was optimized to avoid cache-killing dynamic content. Reduce the cost of Alan Code.

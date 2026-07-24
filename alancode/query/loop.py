@@ -20,7 +20,6 @@ from typing import Any, AsyncGenerator
 from alancode.messages.types import (
     AssistantContentBlock,
     AssistantMessage,
-    AttachmentMessage,
     Message,
     QueryYield,
     RequestStartEvent,
@@ -65,15 +64,17 @@ from alancode.compact.compact_auto import compaction_auto
 from alancode.compact.hard_truncate import (
     HardTruncationResult,
     build_hard_truncation_result as _build_hard_truncation_result,
-    hard_truncate_messages as _hard_truncate_fallback,
+    hard_truncate_messages,
 )
 from alancode.tools.text_tool_parser import extract_tool_calls_from_text, MAX_TEXT_TOOL_RETRIES
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
 from alancode.skills.tool_filter import filter_tools_for_skill
-from alancode.utils.tokens import estimate_message_tokens, predicted_next_call_tokens
+from alancode.utils.tokens import predicted_next_call_tokens
 
 logger = logging.getLogger(__name__)
+
+_hard_truncate_fallback = hard_truncate_messages
 
 
 # ---------------------------------------------------------------------------
@@ -383,8 +384,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # If summarization failed and the request still cannot legally be
         # sent, use the deterministic fallback now instead of ending the turn.
-        # This is the small-context-window liveness guarantee: it does not
-        # depend on accumulating several failures within one user turn.
+        # A request over the blocking limit cannot wait for later turns.
         if (
             fallback_result is None
             and compaction_failed

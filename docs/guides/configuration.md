@@ -88,8 +88,9 @@ Highlights:
 | `permission_mode` | `edit` | `yolo`, `edit`, `safe` |
 | `memory` | `off` | `off`, `on`, `intensive` |
 | `max_iterations_per_turn` | `None` | Cap API calls per user message |
-| `compaction_threshold_percent` | `80` | When auto-compact fires |
-| `tool_result_max_chars` | `20_000` | Per-tool-result size before Layer A truncation |
+| `context_window` | `"auto"` | Resolve from model/server/probe; set an integer to override |
+| `compaction_threshold_percent` | `"auto"` (80) | Layer C threshold as a percentage of usable input space |
+| `tool_result_max_chars` | `"auto"` | Context-scaled per-result cap before Layer A truncation |
 | `hooks` | `{}` | Pre/post tool-use hooks |
 
 ## Where API keys go

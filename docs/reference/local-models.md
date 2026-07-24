@@ -36,3 +36,9 @@ LiteLLM uses the model name prefix to determine the API protocol:
 | `openrouter/<provider>/<name>` | OpenRouter |
 
 For local servers, use `openai/<model>` + `--base-url`.
+
+## Context-window detection
+
+Alan needs the model's real context window to reserve output space and compact at a safe point. With the default `context_window: "auto"`, it tries model-registry data, server metadata, and a one-time provider probe, then caches a successful probe in `~/.alan/context_windows.json`.
+
+If detection is unavailable, Alan uses a conservative fallback and prints a warning. If you know the server's configured value, set `context_window` to that integer in `.alan/settings.json`; the server may expose a smaller window than the model's theoretical maximum.

@@ -57,7 +57,7 @@ user types "fix this bug"
      phase 1: abort check
      phase 1.5: inject date/time system-reminder
      phase 2: compaction pre-check (truncate → clear → auto)
-     phase 3: blocking limit check
+     phase 3: blocking-limit check and deterministic fallback if needed
      phase 4: provider.stream() — streams response
      phase 5: collect content blocks into AssistantMessage
      phase 6: yield AssistantMessage to caller
@@ -125,6 +125,7 @@ user types "fix this bug"
 - `compact_truncate.py` — Layer A (per-tool-result truncation).
 - `compact_clear.py` — Layer B (old tool result clearing).
 - `compact_auto.py` — Layer C (forked-agent summarization).
+- `hard_truncate.py` - deterministic fallback when summarization cannot recover.
 - `prompt.py` — the 9-section summarization template.
 
 ### `alancode.hooks`

@@ -1,6 +1,6 @@
 # Context and compaction
 
-Long sessions run out of context. The model's context window is fixed — Claude Sonnet 4 has 200k tokens, GPT-4o has 128k, Gemini 2.5 has 1M. Without intervention, a dense debugging session fills the window in 15–30 turns.
+Every model has a finite context window shared by the system prompt, conversation, tool definitions, and the model's next response. A long session or a burst of tool output can exhaust that space.
 
 Alan Code solves this with a three-layer compaction pipeline that runs **before every API call**, progressively freeing space only when needed. You almost never have to think about it — but when you do, here's how it works.
 
@@ -11,20 +11,19 @@ Session: 8,118 in + 153 out = $0.0082 (estimated) | Conversation: 8,271 / 200,00
 ```
 
 - **Session** — cumulative tokens + $ since the session started.
-- **Conversation** — how full the context window is **right now**. When this approaches 80 %, compaction will fire on the next call.
+- **Conversation** - how full the context window is **right now**. The compaction trigger is lower because Alan reserves room for the next response and a safety margin.
 
-## The four concentric thresholds
+## The budget and its thresholds
 
-Alan uses four concentric token thresholds, each with its own reaction:
+Alan first reserves room for the next response and a safety margin. The remainder is the **usable input budget**. Its active thresholds are:
 
 | Threshold | Triggers | Effect |
 |---|---|---|
-| **Warning threshold** (`context_window - 20k`) | Display a "getting full" signal to the user. | Informational. |
-| **Auto-compact threshold** (`context_window * 80 %`) | Layer A → B → C run in order until we're back under it. | Compaction happens on the *next* pre-call check. |
-| **Compact buffer** (`context_window - 13k`) | Emergency compact inside the loop. | Last-chance summary on a 413 response. |
-| **Blocking limit** (`context_window - 3k`) | Refuse the API call outright. | Turn ends with "Conversation too long. Please run /compact or start a new session." |
+| **Compaction threshold T** (80% of usable input by default) | Layer C summarizes the conversation. | Compaction happens before the provider call. |
+| **Clear target G** (between T and the blocking limit) | Layer B clears old tool results down to G. | Damage control when the payload has grown well past T. |
+| **Blocking limit** (context window minus response reservation and safety margin) | The request cannot safely be sent unchanged. | Alan uses the deterministic fallback after a failed compaction, or reports that the fixed prompt and tools cannot fit. |
 
-All four are tunable via settings — see [reference/settings.md](../reference/settings.md).
+Layer A's per-result cap is also derived from T. See [reference/settings.md](../reference/settings.md) for the available overrides.
 
 ## The three compaction layers
 
@@ -34,7 +33,7 @@ Each iteration, if the predicted pre-call token count is over the threshold, lay
 
 `alancode/compact/compact_truncate.py`
 
-Rewrites individual `tool_result` blocks whose content exceeds `tool_result_max_chars` (default 20 000 chars). The block is replaced with:
+Rewrites individual `tool_result` blocks whose content exceeds `tool_result_max_chars`. Its automatic value is the smaller of 10,000 characters and roughly 10% of T converted to characters. The block is replaced with:
 
 ```
 <first 60% of the cap>
@@ -71,15 +70,15 @@ The heavy hitter. If we're still over threshold after A and B:
 
 **When it helps**: the conversation has substantial back-and-forth that no mechanical truncation can compress. The summary captures the intent, key decisions, pending tasks, and the exact current state.
 
-## The emergency path
+## Recovery paths
 
 If an API call **still** fails with `prompt too long` (the 413 path) despite the pre-call check:
 
 1. The stream error handler catches the PTL signal.
-2. Runs Layer C synchronously as an emergency compaction.
+2. Runs Layer C synchronously as an emergency compaction. The summarizer can itself shorten its input and retry when its request is too large.
 3. Retries the call with the summarized history.
 
-This is a belt-and-suspenders measure — rare in practice but essential for reliability.
+If summarization fails and the normal request is already at the blocking limit, Alan deterministically drops the oldest history while retaining a useful opening and a structurally valid recent tail. It records a compaction boundary and a visible notice before retrying. The same fallback runs after the configured number of consecutive compaction failures.
 
 ## Manual compaction
 
@@ -95,15 +94,9 @@ Runs Layer C on demand, whether or not you're near the threshold. Useful before 
 
 Any text after `/compact` is appended as *"Additional Instructions"* to the summarizer prompt, steering what to emphasize.
 
-## The circuit breaker
+## Repeated compaction failures
 
-If Layer C fails three times in a row (`max_consecutive_compact_failures = 3`), the circuit breaker fires and Alan surfaces:
-
-```
-Compaction has failed 3 times consecutively. Use /clear to start fresh.
-```
-
-Three failures strongly suggests an adversarial state (token-counting off by tens of thousands, summary prompt confusing the model, etc.). Rather than burn money in a loop, Alan bails out.
+If Layer C reaches `max_consecutive_compact_failures` (default 3), Alan stops spending calls on the summarizer and uses the deterministic fallback described above. The session remains usable, but older detail is lost.
 
 ## Tuning
 

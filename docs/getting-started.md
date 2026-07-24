@@ -10,6 +10,8 @@ pip install alancode
 
 Requires Python 3.11+. One install gives you the CLI, the browser GUI, the Python library, the Anthropic provider, and LiteLLM support for every other model provider.
 
+Linux and macOS are supported. On Windows, use WSL; native Windows is not currently supported because session locking relies on a Unix API.
+
 ## 2. Provide an API key
 
 Pick one — whichever matches the provider you want to use.
@@ -109,7 +111,7 @@ Full list in [reference/slash-commands.md](reference/slash-commands.md).
 alancode --resume
 ```
 
-Picks up the last session in this directory. The conversation (last 100 messages) is replayed automatically.
+Picks up the last session in this directory and restores its conversation.
 
 To list recent sessions and pick one:
 
