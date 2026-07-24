@@ -34,6 +34,7 @@ from alancode.messages.types import (
 from alancode.messages.factory import (
     create_assistant_error_message,
     create_attachment_message,
+    create_tool_result_message,
     create_user_interruption_message,
     create_user_message,
 )
@@ -737,7 +738,16 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # -- Phase 6: Check abort after streaming ------------------------
         if params.abort_event and params.abort_event.is_set():
-            yield create_user_interruption_message(tool_use=False)
+            for block in tool_use_blocks:
+                yield create_tool_result_message(
+                    tool_use_id=block.id,
+                    content="Tool execution was interrupted before it started.",
+                    is_error=True,
+                    source_tool_assistant_uuid=assistant_msg.uuid,
+                )
+            yield create_user_interruption_message(
+                tool_use=bool(tool_use_blocks),
+            )
             return
 
         # -- Phase 7: Handle no tool use (completion or recovery) --------
@@ -777,6 +787,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # -- Phase 8: Tool execution -------------------------------------
         tool_results: list[UserMessage] = []
+        completed_tool_ids: set[str] = set()
 
         async for update in run_tools(
             tool_use_blocks, effective_tools, params.context,
@@ -786,9 +797,19 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             if update.message:
                 yield update.message
                 tool_results.append(update.message)
+                completed_tool_ids.add(update.tool_use_id)
 
         # Check abort after tools
         if params.abort_event and params.abort_event.is_set():
+            for block in tool_use_blocks:
+                if block.id in completed_tool_ids:
+                    continue
+                yield create_tool_result_message(
+                    tool_use_id=block.id,
+                    content="Tool execution was interrupted before it completed.",
+                    is_error=True,
+                    source_tool_assistant_uuid=assistant_msg.uuid,
+                )
             yield create_user_interruption_message(tool_use=True)
             return
 

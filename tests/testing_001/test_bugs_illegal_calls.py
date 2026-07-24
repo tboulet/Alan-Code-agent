@@ -4,7 +4,12 @@ execution leaves a dangling tool_use in the next turn's payload).
 """
 
 from alancode.messages.types import AssistantMessage
-from alancode.providers.scripted_provider import ScriptedProvider, text, tool_call
+from alancode.providers.scripted_provider import (
+    ScriptedProvider,
+    multi_tool_call,
+    text,
+    tool_call,
+)
 
 from harness import (
     AuditedProvider,
@@ -108,3 +113,39 @@ class TestF09AbortDanglingToolUse:
             f"dangling tool_use ids in the next turn's payload: {dangling} "
             "- a real provider rejects this request with a 400"
         )
+
+    async def test_abort_closes_every_pending_call_without_executing(self, tmp_path):
+        provider = AuditedProvider(
+            ScriptedProvider.from_responses(
+                [multi_tool_call(("Dummy", {}), ("Dummy", {}))],
+                fallback=text("All done."),
+            ),
+            context_window=200_000,
+        )
+        tool = FloodTool("must not run")
+        agent = make_agent(tmp_path, provider, tools=[tool])
+
+        async def listener(event):
+            if isinstance(event, AssistantMessage) and event.has_tool_use:
+                agent._abort_event.set()
+
+        agent.add_event_listener(listener)
+        await run_turn(agent, "go")
+        agent.remove_event_listener(listener)
+        await run_turn(agent, "next turn")
+
+        assert tool.calls == 0
+        messages = [
+            call for call in provider.journal if call["kind"] == "main"
+        ][-1]["messages"]
+        call_ids = {
+            call["id"]
+            for message in messages
+            for call in message.get("tool_calls") or []
+        }
+        result_ids = {
+            message.get("tool_call_id")
+            for message in messages
+            if message.get("role") == "tool"
+        }
+        assert call_ids == result_ids
