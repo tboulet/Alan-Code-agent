@@ -36,6 +36,7 @@ from alancode.messages.types import (
 from alancode.messages.factory import (
     create_assistant_error_message,
     create_attachment_message,
+    create_compact_boundary_message,
     create_user_interruption_message,
     create_user_message,
 )
@@ -392,8 +393,19 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 # the failure counter resets so C gets fresh chances if the
                 # conversation grows back over the threshold.
                 fallback_target = int(threshold_tokens * 0.8)
+                pre_fallback_tokens = estimate_message_tokens(messages_for_query)
                 fallback_messages, dropped = _hard_truncate_fallback(
                     messages_for_query, fallback_target,
+                )
+                # A boundary marker makes the truncation DURABLE: future
+                # turns cut here (get_messages_after_compact_boundary),
+                # exactly like a successful Layer C - without it, the next
+                # turn would rebuild the full oversized history from the
+                # agent's permanent record and hit the same wall again.
+                fallback_boundary = create_compact_boundary_message(
+                    trigger="auto",
+                    pre_tokens=pre_fallback_tokens,
+                    messages_summarized=dropped,
                 )
                 notice = create_user_message(
                     f"Summarization failed {failures} times consecutively. "
@@ -402,8 +414,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     "details are gone - re-read files if something is missing.",
                     hide_in_ui=False,
                 )
+                yield fallback_boundary
                 yield notice
-                messages_for_query = [notice] + fallback_messages
+                messages_for_query = [fallback_boundary, notice] + fallback_messages
                 layers_modified = True
                 state.auto_compact_tracking = {
                     "compacted": False,
