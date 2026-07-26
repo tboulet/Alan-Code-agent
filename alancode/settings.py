@@ -31,6 +31,8 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     #     breakpoints, native thinking, and native tool_use. The right
     #     choice for bare Claude model names.
     #   - "scripted" : deterministic provider used by tests.
+    #   - "web" : drives an online assistant's web UI through its browser
+    #     window (X11); ``model`` selects the site (e.g. ``chatgpt``).
     # When the user sets ``model`` without an explicit ``backend``, the
     # backend is inferred from the model string (see ``infer_backend``).
     "backend": "anthropic-native",
@@ -215,7 +217,7 @@ _is_pos_int_or_auto = (
 )
 
 SETTING_VALIDATORS: dict[str, tuple] = {
-    "backend": _one_of("auto", "anthropic-native", "scripted"),
+    "backend": _one_of("auto", "anthropic-native", "scripted", "web"),
     "model": _is_str,
     "base_url": _is_str,
     "tool_call_format": _one_of("hermes", "hermes_xml", "glm", "alan", "meta_json"),

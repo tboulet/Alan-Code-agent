@@ -43,7 +43,7 @@ def main() -> None:
     parser.add_argument(
         "--backend", default=None,
         help=("Transport backend (advanced). One of: auto, anthropic-native, "
-              "scripted. Inferred from --model when not set."),
+              "scripted, web. Inferred from --model when not set."),
     )
     parser.add_argument(
         "--provider", default=None,
@@ -132,7 +132,7 @@ def main() -> None:
             # ollama to be a backend. Suggest the right form.
             print(
                 f"Error: '{legacy_provider}' is not a backend.\n"
-                f"       Valid backends: auto, anthropic-native, scripted.\n"
+                f"       Valid backends: auto, anthropic-native, scripted, web.\n"
                 f"       To use {legacy_provider}, pass it as part of the model "
                 f"name: --model {legacy_provider}/<model-name>",
                 file=sys.stderr,

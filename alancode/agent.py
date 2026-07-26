@@ -129,6 +129,8 @@ def _resolve_backend(
     - ``"auto"``             → ``LiteLLMProvider`` (universal, prefix-routed).
     - ``"anthropic-native"`` → ``AnthropicProvider`` (direct SDK).
     - ``"scripted"``         → ``ScriptedProvider`` (tests).
+    - ``"web"``              → ``WebProvider`` (drives an online assistant's
+      web UI through its browser window; ``model`` selects the site).
     """
     if isinstance(backend, LLMProvider):
         return backend
@@ -158,6 +160,11 @@ def _resolve_backend(
 
         return AnthropicProvider(api_key=api_key, model=model, base_url=base_url, **kwargs)
 
+    if name == "web":
+        from alancode.providers.web import WebProvider
+
+        return WebProvider(assistant=model or "chatgpt", **kwargs)
+
     if name == "scripted":
         # ``model="remote"`` selects the HTTP-driven impersonation backend;
         # any other model name (or None) uses the in-memory ScriptedProvider.
@@ -172,7 +179,7 @@ def _resolve_backend(
 
     raise ValueError(
         f"Unknown backend '{backend}'. "
-        f"Supported: 'auto', 'anthropic-native', 'scripted', "
+        f"Supported: 'auto', 'anthropic-native', 'scripted', 'web', "
         f"or pass an LLMProvider instance."
     )
 
