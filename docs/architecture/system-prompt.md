@@ -1,6 +1,6 @@
 # System prompt assembly
 
-The system prompt Alan sends in every API call is assembled by `alancode/prompt/system_prompt.py::get_system_prompt`. It's built as a list of sections; the provider decides how to serialize them (Anthropic: separate cache blocks; OpenAI-compatible: joined with `\n\n`).
+The system prompt Alan sends in every API call is assembled by `alancode/prompt/system_prompt.py::get_system_prompt`. It's built as a list of sections; the backend decides how to serialize them (Anthropic: separate cache blocks; OpenAI-compatible: joined with `\n\n`).
 
 ## Assembly order
 
@@ -15,17 +15,17 @@ The system prompt Alan sends in every API call is assembled by `alancode/prompt/
 | 7 | Communicating with the user | `get_communication_section` | always |
 | 8 | Session-specific guidance | `get_session_guidance_section` | always |
 | 9 | Environment | `get_environment_section(model, cwd)` | always (content varies) |
-| 10 | Available skills | `get_skills_section(skills)` | if ≥1 skill registered |
-| 11 | Memory | `build_memory_section(memory_mode, …)` | always (short stub when off) |
-| 12 | Scratchpad | `get_scratchpad_section(scratchpad_dir)` | always in normal runs |
-| 13 | `ALAN.md` append | — | if `ALAN.md` exists (project or global) |
+| 10 | Scratchpad | `get_scratchpad_section(scratchpad_dir)` | always in normal runs |
+| 11 | Available skills | `get_skills_section(skills)` | if ≥1 skill registered |
+| 12 | Memory | `build_memory_section(memory_mode, …)` | always (short stub when off) |
+| 13 | `ALAN.md` + `append_system_prompt` | assembled by `AlanCodeAgent` | if configured/present |
 | 14 | Tool-format instructions | `get_tool_format_system_prompt(fmt, schemas)` | if `tool_call_format` is set |
 
-Sections 1–8 are **static** — same bytes every call. Sections 9–14 vary per session / mode. This split is designed for Anthropic's prompt caching: section 1 alone, sections 2–8 together, section 9+ as a dynamic block. See [prompt-caching.md](prompt-caching.md).
+Sections 1–10 form the cacheable boundary. Environment and scratchpad values differ between sessions but remain stable for the lifetime of one agent. Sections 11–14 may change as skills, memory, or project instructions change. See [prompt-caching.md](prompt-caching.md).
 
 ## `custom_system_prompt` override
 
-If the `custom_system_prompt` setting is set, **sections 1–9 are replaced** by that string. Sections 10–14 (skills, memory, scratchpad, ALAN.md, tool-format) still append. Use with care — you lose all the tool guidance, action safety rules, and session awareness built in.
+If `custom_system_prompt` is set, it replaces sections 1–13, including skills, memory, scratchpad, and `ALAN.md`. An explicit `append_system_prompt` follows the replacement, and required text-tool schemas still follow when `tool_call_format` is set. Use with care: the replacement drops Alan's normal tool guidance, action safety rules, and session awareness.
 
 Prefer `append_system_prompt` for additive modifications.
 
@@ -96,13 +96,15 @@ You have been invoked in the following environment:
  - Session started: 2026-04-15 18:42
  - Model: openrouter/google/gemini-2.5-flash
 
-gitStatus:
- <output of `git status` + `git log --oneline -5`>
 ```
 
-`gitStatus` block omitted in non-git directories.
+Git status is intentionally not embedded because it changes after edits and would invalidate the prompt cache. The agent runs Git tools when it needs current repository state.
 
-### 10. Available skills (conditional)
+### 10. Scratchpad (conditional)
+
+> You have a session-scoped scratchpad directory at `<cwd>/.alan/sessions/<id>/scratchpad`. Use it for temporary notes, draft plans, or intermediate work. This directory is session-specific and does not carry over.
+
+### 11. Available skills (conditional)
 
 Only present when skills are registered. Format:
 
@@ -115,7 +117,7 @@ Skills are reusable prompt templates. Users invoke them via `/skill <name> [args
   TRIGGER: When the user asks for a code review.
 ```
 
-### 11. Memory (always, three variants)
+### 12. Memory (always, three variants)
 
 **`memory=off`** (short stub):
 
@@ -132,47 +134,29 @@ Skills are reusable prompt templates. Users invoke them via `/skill <name> [args
 - `## Before recommending from memory` — verify before acting.
 - Then the full contents of `~/.alan/memory/MEMORY.md` (global) and `<cwd>/.alan/memory/MEMORY.md` (project), appended.
 
-### 12. Scratchpad (conditional)
+### 13. ALAN.md and explicit append (conditional)
 
-> You have a session-scoped scratchpad directory at `<cwd>/.alan/sessions/<id>/scratchpad`. Use it for temporary notes, draft plans, or intermediate work. This directory is session-specific and does not carry over.
-
-### 13. ALAN.md append (conditional)
-
-Contents of `~/.alan/ALAN.md` + `<cwd>/ALAN.md`, joined with `\n\n`. Only sent if at least one file exists.
+Contents of `~/.alan/ALAN.md`, `<cwd>/ALAN.md`, and `append_system_prompt`, joined with `\n\n`. In programmatic mode the two files are skipped. With `custom_system_prompt`, only the explicit append is retained.
 
 ### 14. Tool-format instructions (conditional)
 
-For `--tool-call-format hermes|glm|alan`. Appended at the very end. See `alancode/tools/text_tool_parser.py`:
+For `--tool-call-format hermes|hermes_xml|glm|alan|meta_json`. Appended at the very end. See `alancode/tools/text_tool_parser.py`:
 
 - **hermes**: `<tool_call>{"name": ..., "arguments": ...}</tool_call>`
+- **hermes_xml**: `<tool_call><function=Name><parameter=key>value</parameter></function></tool_call>`
 - **glm**: `<tool_call>ToolName<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>` (closing tag now mandatory after an audit fix)
 - **alan**: `<tool_use>{"name": ..., "input": ...}</tool_use>`
+- **meta_json**: JSON tool calls used by Meta/Llama templates.
 
-## Provider-specific assembly
+## Backend-specific assembly
 
 ### Anthropic
 
-Sections are passed as a **list of cache blocks**, enabling fine-grained caching:
-
-```python
-system = [
-    {"type": "text", "text": intro, "cache_control": {"type": "ephemeral"}},
-    {"type": "text", "text": "\n\n".join(sections_2_to_8), "cache_control": {"type": "ephemeral"}},
-    {"type": "text", "text": "\n\n".join(dynamic_sections_9_plus)},
-]
-```
-
-Section 1 has its own cache breakpoint because `model_info.supports_extended_thinking` can change between calls, but the intro is the most stable block.
+Sections are passed as individual text blocks. Cache markers are placed on the last tool definition, the last block before `system_static_boundary`, the final system block when distinct, and the last assistant content block.
 
 ### LiteLLM
 
-LiteLLM's `completion(...)` accepts a single `system` parameter (or a `system`-role message). Alan joins all sections with `\n\n` into one string:
-
-```python
-messages = [{"role": "system", "content": "\n\n".join(sections)}, ...user/assistant messages]
-```
-
-No per-block caching (most LiteLLM backends don't support it). Some backends (Anthropic via LiteLLM, some Gemini versions) do — LiteLLM handles the translation.
+Alan sends a system-role message containing structured text blocks so it can place the same cache markers. LiteLLM passes supported markers through (for example to Anthropic/OpenRouter routes) and handles or strips them for other providers.
 
 ## Inspecting what was sent
 

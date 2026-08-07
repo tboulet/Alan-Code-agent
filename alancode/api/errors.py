@@ -25,6 +25,18 @@ class OverloadedError(Exception):
     """API is overloaded (529)."""
 
 
+class ServerError(Exception):
+    """Transient HTTP 5xx response from a model server."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class InvalidToolCallError(Exception):
+    """The model emitted a native tool call Alan could not decode."""
+
+
 # ── Detection helpers ──────────────────────────────────────────────────────
 
 
@@ -63,7 +75,13 @@ def is_prompt_too_long(error_message: str) -> bool:
     return any(pattern in lower for pattern in _PROMPT_TOO_LONG_PATTERNS)
 
 
-_RETRYABLE_TYPES = (RateLimitError, OverloadedError, ConnectionError, TimeoutError)
+_RETRYABLE_TYPES = (
+    RateLimitError,
+    OverloadedError,
+    ServerError,
+    ConnectionError,
+    TimeoutError,
+)
 
 
 def is_retryable_error(error: Exception) -> bool:
@@ -76,7 +94,7 @@ def is_retryable_error(error: Exception) -> bool:
     """
     if isinstance(error, _RETRYABLE_TYPES):
         return True
-    # Some providers wrap transient failures in generic exceptions.
+    # Some backends wrap transient failures in generic exceptions.
     msg = str(error).lower()
     if any(kw in msg for kw in ("rate limit", "429", "529", "overloaded", "too many requests")):
         return True
@@ -105,6 +123,10 @@ def classify_error(error: Exception) -> str:
         return "rate_limit"
     if isinstance(error, OverloadedError):
         return "overloaded"
+    if isinstance(error, ServerError):
+        return "server_error"
+    if isinstance(error, InvalidToolCallError):
+        return "invalid_tool_call"
     if isinstance(error, ConnectionError):
         return "connection"
     if isinstance(error, TimeoutError):

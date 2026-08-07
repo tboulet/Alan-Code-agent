@@ -10,12 +10,14 @@ For a tutorial-style introduction, see [guides/building-agents.md](../guides/bui
 from alancode import AlanCodeAgent
 
 AlanCodeAgent(
+    backend: str | LLMBackend | None = None,
     *,
-    cwd: str | None = None,
-    provider: str | LLMProvider = "litellm",  # or "anthropic"
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    request_timeout: int | str | None = None,
+    context_window: int | str | None = None,
+    cwd: str | None = None,
     permission_mode: str | None = None,
     max_iterations_per_turn: int | None = None,
     max_output_tokens: int | None = None,
@@ -26,11 +28,12 @@ AlanCodeAgent(
     verbose: bool = False,
     extra_tools: list[Tool] | None = None,
     custom_system_prompt: str | None = None,
+    append_system_prompt: str | None = None,
     gui_label: str | None = None,
     programmatic: bool = False,
     tools: list[Tool] | None = None,
     disabled_tools: list[str] | None = None,
-    **provider_kwargs: Any,
+    **backend_kwargs: Any,
 )
 ```
 
@@ -39,11 +42,14 @@ All settings omitted (`None`) fall through to `.alan/settings.json` → built-in
 Key arguments:
 
 - **`cwd`** — working directory the agent operates in. Defaults to `os.getcwd()`.
-- **`provider`** — either a string (`"anthropic"`, `"litellm"`, `"scripted"`) or a concrete `LLMProvider` instance (lets you inject a custom provider).
+- **`backend`** — either a string (`"auto"`, `"anthropic-native"`, `"scripted"`) or a concrete `LLMBackend` instance. If omitted, it is inferred from `model`.
+- **`request_timeout`** — positive seconds or `"auto"`. A custom `base_url` gets a 3,600-second automatic timeout for slow local inference.
+- **`context_window`** — positive token count or `"auto"`; also exposed as the resolved `agent.context_window` property.
 - **`session_id`** — if set, resume an existing session; otherwise a new session ID is generated.
 - **`ask_callback`** — `async def callback(question: str, options: list[str]) -> str`. Called when a tool needs user approval. Return the chosen option text (or any string to use as a free-text answer).
 - **`extra_tools`** — additional tools appended to the agent's tool list. See [guides/building-agents.md](../guides/building-agents.md) for embedding patterns.
-- **`custom_system_prompt`** — when set, replaces Alan's default system prompt sections entirely.
+- **`custom_system_prompt`** — full prompt replacement; normal skills, memory, scratchpad, and `ALAN.md` sections are omitted.
+- **`append_system_prompt`** — additive instructions after the normal prompt, or after `custom_system_prompt` when both are set.
 - **`gui_label`** — URL path segment for the GUI bridge. Defaults to the cwd basename.
 - **`programmatic`** — when `True`, runs Alan as a library component rather than a developer assistant. See [Programmatic mode](#programmatic-mode) below.
 - **`tools`** — explicit base tool list, replacing the default builtins. Composes with `disabled_tools` and `extra_tools`. See [Tool selection](#tool-selection) below.
@@ -116,6 +122,7 @@ Filter on `hide_in_api` to distinguish streaming deltas from final messages — 
 | `agent.cost_unknown` | `bool` | `True` if the model's pricing isn't known. |
 | `agent.cwd` | `str` | Working directory. |
 | `agent.turn_count` | `int` | Number of user messages processed this session. |
+| `agent.context_window` | `int` | Resolved context-window size after settings/model metadata. |
 
 `Usage` has: `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, plus a `total_input` property summing the three input types.
 
@@ -127,7 +134,7 @@ Filter on `hide_in_api` to distinguish streaming deltas from final messages — 
 agent.abort()
 ```
 
-Sets the abort event. The running turn's next `await` checkpoint catches it and unwinds cleanly.
+Sets the abort event. Alan checks it at loop checkpoints and after streaming; it does not forcibly terminate an in-flight SDK request.
 
 ### `inject_message(text: str)`
 
@@ -145,7 +152,7 @@ if error:
     print("Invalid:", error)
 ```
 
-Validates and updates a setting in-memory + on disk. Returns an error message string on validation failure, or `None` on success. Provider-related settings trigger provider recreation.
+Validates and updates a setting in memory and on disk. Returns an error message string on validation/backend-creation failure, or `None` on success. `backend`, `model`, `api_key`, `base_url`, and `request_timeout` trigger transactional backend recreation.
 
 ## Lifecycle
 
@@ -155,7 +162,7 @@ Validates and updates a setting in-memory + on disk. Returns an error message st
 await agent.close()
 ```
 
-Fires `session_end` hooks. Call once when done. The CLI does this on `/exit`.
+Idempotently fires `session_end` hooks, closes the backend's owned client/server resources, and releases the session lock. Call it when done; the CLI does this on `/exit`.
 
 ## Programmatic mode
 
@@ -175,7 +182,6 @@ When `programmatic=True`:
 - `~/.alan/ALAN.md` (global instructions) is **not** loaded.
 - `<cwd>/ALAN.md` (project instructions) is **not** loaded.
 - `~/.alan/memory/MEMORY.md` (global memory index) is **not** loaded.
-- AGT (Agentic Git Tree) bootstrap is skipped — no HEAD snapshot, no `.gitignore` mutation.
 - The default tool set excludes `WebFetch`, `GitCommit`, and `AskUserQuestion`. `SkillTool` is also not appended.
 
 Project-scoped state in `<cwd>/.alan/sessions/<id>/` (transcript, state, scratchpad) is unchanged — that's the agent's own working memory and is needed for resume.
@@ -207,6 +213,12 @@ agent = AlanCodeAgent(programmatic=True, extra_tools=[MyTool()])
 ## Session locking
 
 `SessionState` takes an exclusive `flock` on `<cwd>/.alan/sessions/<session_id>/session.lock` at construction. A second process attempting to open the same session raises `alancode.session.SessionLockedError`. The lock is released by `agent.close()` and on process exit.
+
+Distinct session IDs have separate state and transcript files. Project settings, project allow rules, and the context-window cache use lock-backed atomic read-modify-write operations, so concurrent updates do not corrupt JSON or silently lose unrelated entries.
+
+This does not make two coding agents transactionally safe in the same source tree: separate sessions can still edit the same file from stale views. Use a separate Git worktree per concurrent coding agent and merge their changes normally. Within one agent, read-only tool calls may run concurrently while write/exec calls are serialized; separate agents do not share that scheduler.
+
+The remaining process-global behavior is library configuration (for example LiteLLM logger verbosity), not conversation/request state. Each agent owns its backend instance, message list, abort event, session start time, and lifecycle.
 
 ## Custom permission callbacks
 
@@ -242,6 +254,9 @@ print(answer)
 
 print(f"Cost: ${agent.cost_usd:.4f}")
 print(f"Tokens: {agent.usage.total_input} in, {agent.usage.output_tokens} out")
+
+import asyncio
+asyncio.run(agent.close())
 ```
 
 ## Example: async streaming
@@ -253,14 +268,17 @@ from alancode.messages.types import AssistantMessage, TextBlock, ToolUseBlock
 
 async def main():
     agent = AlanCodeAgent(permission_mode="yolo")
-    async for event in agent.query_events_async("List files and summarize."):
-        if not isinstance(event, AssistantMessage):
-            continue
-        for block in event.content:
-            if event.hide_in_api and isinstance(block, TextBlock):
-                print(block.text, end="", flush=True)
-            elif not event.hide_in_api and isinstance(block, ToolUseBlock):
-                print(f"\n[tool: {block.name}({block.input})]")
+    try:
+        async for event in agent.query_events_async("List files and summarize."):
+            if not isinstance(event, AssistantMessage):
+                continue
+            for block in event.content:
+                if event.hide_in_api and isinstance(block, TextBlock):
+                    print(block.text, end="", flush=True)
+                elif not event.hide_in_api and isinstance(block, ToolUseBlock):
+                    print(f"\n[tool: {block.name}({block.input})]")
+    finally:
+        await agent.close()
 
 asyncio.run(main())
 ```
@@ -269,13 +287,15 @@ asyncio.run(main())
 
 ```python
 from alancode import AlanCodeAgent
-from alancode.providers.base import LLMProvider
+from alancode.backends.base import LLMBackend
 
-class MyBackend(LLMProvider):
+class MyBackend(LLMBackend):
     async def stream(self, messages, system, tools, *, model, max_tokens, thinking, **kwargs):
-        # yield StreamEvent objects
+        # yield BackendStreamEvent objects
         ...
     def get_model_info(self, model):
+        ...
+    async def close(self):
         ...
 
 agent = AlanCodeAgent(backend=MyBackend(...))

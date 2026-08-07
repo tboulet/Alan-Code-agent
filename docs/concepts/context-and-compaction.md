@@ -19,7 +19,7 @@ Alan first reserves room for the next response and a safety margin. The remainde
 
 | Threshold | Triggers | Effect |
 |---|---|---|
-| **Compaction threshold T** (80% of usable input by default) | Layer C summarizes the conversation. | Compaction happens before the provider call. |
+| **Compaction threshold T** (80% of usable input by default) | Layer C summarizes the conversation. | Compaction happens before the backend call. |
 | **Clear target G** (between T and the blocking limit) | Layer B clears old tool results down to G. | Damage control when the payload has grown well past T. |
 | **Blocking limit** (context window minus response reservation and safety margin) | The request cannot safely be sent unchanged. | Alan uses the deterministic fallback after a failed compaction, or reports that the fixed prompt and tools cannot fit. |
 

@@ -1,11 +1,11 @@
 """Anthropic model registry — capabilities for all known Claude models.
 
-Used by AnthropicProvider.get_model_info() to return accurate ModelInfo.
+Used by AnthropicBackend.get_model_info() to return accurate ModelInfo.
 The lookup tries exact match first, then prefix match (so a dated model ID
 like ``claude-sonnet-4-6-20260401`` matches ``claude-sonnet-4-6``).
 """
 
-from alancode.providers.base import ModelInfo
+from alancode.backends.base import ModelInfo
 
 
 ANTHROPIC_MODELS: dict[str, ModelInfo] = {

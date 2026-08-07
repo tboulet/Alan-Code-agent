@@ -78,7 +78,7 @@ Rules live per-project in `.alan/allow_rules.json`. Example:
 - `rule_content: null` = blanket rule, matches any input.
 - `rule_content: "pattern *"` = matches when the target field (`command` for Bash, `file_path` for Read/Edit/Write, …) starts with `pattern`.
 
-Matching is per-tool-field, not scanning every string in the args — so a rule `Read: "config*"` matches `file_path="config.json"` but not unrelated fields. See [`alancode/permissions/pipeline.py`](https://github.com/example/alan-code/blob/main/alancode/permissions/pipeline.py) for the exact logic.
+Matching is per-tool-field, not scanning every string in the args — so a rule `Read: "config*"` matches `file_path="config.json"` but not unrelated fields. See [`alancode/permissions/pipeline.py`](../../alancode/permissions/pipeline.py) for the exact logic.
 
 ## Deny rules
 
@@ -115,4 +115,3 @@ See `alancode/tools/execution.py` for `run_tool_use`, and `alancode/tools/orches
 - [reference/tools.md](../reference/tools.md) — full tool schemas.
 - [guides/hooks.md](../guides/hooks.md) — hook configuration.
 - [reference/settings.md](../reference/settings.md) — `permission_mode`, `max_tool_concurrency`.
-- [concepts/git-tree.md](git-tree.md) — `GitCommit` integration with AGT.

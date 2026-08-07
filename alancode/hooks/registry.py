@@ -31,6 +31,7 @@ They can return JSON on stdout to influence behavior:
 import asyncio
 import json
 import logging
+import shlex
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -133,8 +134,6 @@ async def execute_hook(
     Parses stdout as JSON for the result (PreToolUse).
     Respects timeout.
     """
-    import shlex
-
     result = HookResult(hook_name=hook.command)
     payload_bytes = json.dumps(payload).encode()
     # On failure of a PreToolUse hook, fall back to ASK (surface to the user)

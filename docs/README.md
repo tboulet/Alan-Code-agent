@@ -27,7 +27,6 @@ Welcome. Alan Code is a Python coding agent you can use as a **CLI**, a **browse
 - [Memory](concepts/memory.md) — the `off` / `on` / `intensive` modes and what they store
 - [Skills](concepts/skills.md) — user-defined prompt templates the agent can invoke
 - [Project context (ALAN.md)](concepts/project-context.md) — per-project instructions auto-loaded into the system prompt
-- [Git Tree (AGT)](concepts/git-tree.md) — `/move`, `/revert`, `/convrevert`, `/allrevert`
 
 ## Guides
 
@@ -42,7 +41,7 @@ Welcome. Alan Code is a Python coding agent you can use as a **CLI**, a **browse
 - [Slash commands](reference/slash-commands.md)
 - [Tools](reference/tools.md) — every built-in tool with schemas and examples
 - [Settings](reference/settings.md) — every `.alan/settings.json` key
-- [Backends and providers](reference/providers.md) — `auto` (LiteLLM, the rest), `anthropic-native` (direct SDK for Claude), `scripted`
+- [Backends and model providers](reference/backends.md) — `auto` (LiteLLM), `anthropic-native` (direct SDK for Claude), `scripted`
 - [Local models](reference/local-models.md) — vLLM / SGLang / Ollama / llama.cpp
 - [Cost tracking](reference/cost.md) — what the "Session" line means
 - [Python API](reference/python-api.md) — `AlanCodeAgent` and related

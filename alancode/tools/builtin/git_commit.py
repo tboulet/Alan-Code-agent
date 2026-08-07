@@ -1,8 +1,4 @@
-"""GitCommit tool — stage and commit files to git.
-
-Creates a commit tracked as an "Alan commit" in the session state,
-enabling AGT (Agentic Git Tree) visualization and navigation.
-"""
+"""GitCommit tool - stage and commit files to git."""
 
 from __future__ import annotations
 
@@ -11,6 +7,7 @@ import subprocess
 from typing import Any
 
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
+from alancode.utils.env import is_git_repo
 
 
 class GitCommitTool(Tool):
@@ -24,8 +21,7 @@ class GitCommitTool(Tool):
     def description(self) -> str:
         return (
             "Stage and commit files to git with a commit message. "
-            "If no files are specified, all changes are staged (git add -A). "
-            "The commit is tracked in the session for history visualization."
+            "If no files are specified, all changes are staged (git add -A)."
         )
 
     @property
@@ -69,7 +65,6 @@ class GitCommitTool(Tool):
             return ToolResult(data="Error: commit message is required.", is_error=True)
 
         # Check git repo
-        from alancode.utils.env import is_git_repo
         if not is_git_repo(cwd):
             return ToolResult(data="Error: not a git repository.", is_error=True)
 
@@ -130,21 +125,6 @@ class GitCommitTool(Tool):
         # Get branch name
         branch_result = self._run_git(cwd, "symbolic-ref", "--short", "HEAD")
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "detached"
-
-        # Update session state (AGT tracking)
-        state = context.session_state
-        if state is not None:
-            try:
-                with state.batch():
-                    state.add_alan_commit(new_sha)
-                    state.add_to_conv_path(new_sha)
-                    state.agent_position_sha = new_sha
-                    # Record message count so /convrevert can truncate precisely
-                    state.record_commit_message_index(
-                        new_sha, len(context.messages),
-                    )
-            except Exception:
-                pass  # AGT tracking is non-critical
 
         return ToolResult(
             data=f"Committed {short_sha} on {branch}: {message}",

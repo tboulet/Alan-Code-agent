@@ -60,7 +60,7 @@ Every API call streams. You see:
 - Incremental "thinking" blocks for models that support them.
 - Tool call blocks render in a boxed panel the moment they arrive.
 
-The stream is driven by `provider.stream(...)` which yields structured events: `StreamTextDelta`, `StreamToolUseStart`, `StreamToolUseStop`, etc. The loop consumes these, assembles them into messages, and yields the result to the caller.
+The stream is driven by `backend.stream(...)` which yields structured events: `StreamTextDelta`, `StreamToolUseStart`, `StreamToolUseStop`, etc. The loop consumes these, assembles them into messages, and yields the result to the caller.
 
 ## Error recovery
 
@@ -90,7 +90,7 @@ Between iterations the loop carries a `LoopState` (`alancode/query/state.py`):
 - `max_output_tokens_recovery_count` — for the 8k→64k escalation.
 - `has_attempted_emergency_compact` — one-shot per turn.
 - `last_input_tokens` / `last_output_tokens` — used by the pre-call compaction estimate.
-- `cached_model_info` — avoid re-querying provider for context window each iteration.
+- `cached_model_info` — avoid re-querying backend for context window each iteration.
 
 When a turn ends, `LoopState` is discarded. The durable state is `self._messages` on the agent and `SessionState` on disk.
 

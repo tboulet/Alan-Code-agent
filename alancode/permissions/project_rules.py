@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from alancode.settings import get_alan_dir
+from alancode.utils.atomic_io import atomic_write_json, interprocess_lock
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,6 @@ def save_project_allow_rules(
     rules: list[dict[str, Any]], cwd: str | None = None
 ) -> None:
     """Write the full list of allow rules to ``.alan/allow_rules.json``."""
-    from alancode.utils.atomic_io import atomic_write_json
     path = _rules_path(cwd)
     atomic_write_json(path, rules, indent=2)
 
@@ -62,9 +62,14 @@ def add_project_allow_rule(
     rule: dict[str, Any], cwd: str | None = None
 ) -> None:
     """Append a single rule and persist. Duplicates (same tool+content) are skipped."""
-    existing = load_project_allow_rules(cwd)
-    key = (rule.get("tool_name"), rule.get("rule_content"))
-    if any((r.get("tool_name"), r.get("rule_content")) == key for r in existing):
-        return
-    existing.append(rule)
-    save_project_allow_rules(existing, cwd)
+    path = _rules_path(cwd)
+    with interprocess_lock(path):
+        existing = load_project_allow_rules(cwd)
+        key = (rule.get("tool_name"), rule.get("rule_content"))
+        if any(
+            (item.get("tool_name"), item.get("rule_content")) == key
+            for item in existing
+        ):
+            return
+        existing.append(rule)
+        save_project_allow_rules(existing, cwd)

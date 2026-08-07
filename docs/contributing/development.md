@@ -81,7 +81,7 @@ alan-code/
 ├── alancode/              # the package
 │   ├── agent.py           # AlanCodeAgent class
 │   ├── query/             # query_loop + state
-│   ├── providers/         # Anthropic, LiteLLM, Scripted
+│   ├── backends/         # Anthropic, LiteLLM, Scripted
 │   ├── tools/             # built-in tools + orchestration
 │   ├── messages/          # message dataclasses + normalization
 │   ├── session/           # session persistence, state, transcripts
@@ -90,7 +90,6 @@ alan-code/
 │   ├── hooks/             # pre/post tool-use hooks
 │   ├── memory/            # memory system
 │   ├── skills/            # skill registry + parser
-│   ├── git_tree/          # AGT operations
 │   ├── cli/               # CLI entry point + REPL + display
 │   ├── gui/               # browser GUI (FastAPI + WebSocket + static/)
 │   ├── prompt/            # system prompt assembly
@@ -98,7 +97,7 @@ alan-code/
 │   └── utils/             # atomic I/O, token counting, env helpers
 ├── tests/
 │   ├── unit/              # fast, no-network, no-disk tests
-│   ├── integration/       # full agent runs with scripted provider
+│   ├── integration/       # full agent runs with scripted backend
 │   └── conftest.py
 ├── examples/              # runnable example scripts
 ├── docs/                  # these files
@@ -109,19 +108,25 @@ alan-code/
 
 Start reading in `alancode/query/loop.py::query_loop`. See [architecture/overview.md](../architecture/overview.md) for the full subsystem map.
 
-## Working with the scripted provider
+## Import and error-handling conventions
 
-For code that touches the agent loop or message handling, use the `ScriptedProvider` to write deterministic tests without hitting real APIs:
+Keep standard-library and normal internal imports at module scope. A function-local import is reserved for a genuinely optional/heavy dependency (`litellm`, `anthropic`, `requests`, `httpx`, FastAPI/uvicorn UI pieces) or a documented circular-import boundary. Local imports otherwise hide dependencies, defer obvious failures until runtime, and make tests harder to patch consistently.
+
+Catch exceptions at external boundaries where Alan must turn a failure into a model/user-visible result: SDK streams, filesystem tools, subprocesses, hooks, UI connections, and best-effort shutdown. Narrow the exception type when possible. If recovery or cleanup intentionally continues, log enough context at `DEBUG` or higher; do not silently swallow an actionable failure. Internal invariant failures should propagate to the agent boundary and retain their traceback.
+
+## Working with the scripted backend
+
+For code that touches the agent loop or message handling, use the `ScriptedBackend` to write deterministic tests without hitting real APIs:
 
 ```python
-from alancode.providers.scripted_provider import ScriptedProvider, text, tool_call
+from alancode.backends.scripted_backend import ScriptedBackend, text, tool_call
 
-provider = ScriptedProvider.from_responses([
+backend = ScriptedBackend.from_responses([
     tool_call("Bash", {"command": "ls"}),
     text("Found 3 files"),
 ])
 
-agent = AlanCodeAgent(backend=provider, permission_mode="yolo")
+agent = AlanCodeAgent(backend=backend, permission_mode="yolo")
 ```
 
 See `tests/integration/test_agent_loop.py` for examples.
@@ -165,7 +170,7 @@ Look at `git log --oneline -20` for current style. Generally:
 ### Add a new setting
 
 1. Add to `alancode/settings.py::SETTINGS_DEFAULTS`.
-2. Add a validator in `_VALIDATORS` if the type needs checking.
+2. Add a validator in `SETTING_VALIDATORS` if the type needs checking.
 3. Propagate to wherever it's consumed (usually `QueryParams` → `query_loop`).
 4. Add a CLI flag in `alancode/cli/main.py` if appropriate.
 5. Document in `docs/reference/settings.md`.
@@ -175,7 +180,7 @@ Look at `git log --oneline -20` for current style. Generally:
 1. Add the entry to `SLASH_COMMANDS` dict in `alancode/cli/repl.py`.
 2. Add a dispatch case in `_handle_slash_command`.
 3. Write `_handle_<command>` function.
-4. Add tests in `tests/unit/test_repl.py` (or integration).
+4. Add focused unit or integration coverage near the affected REPL behavior.
 5. Document in `docs/reference/slash-commands.md`.
 
 ## Related

@@ -12,17 +12,32 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
+from datetime import datetime as dt
 from pathlib import Path
 
 from alancode.agent import AlanCodeAgent
+from alancode.cli.errors import classify_error
 from alancode.cli.repl import run_session
+from alancode.cli.user_input import ask_user_cli
 from alancode.messages.types import AssistantMessage, TextBlock
-from alancode.session.session import get_last_session_id, find_session_by_prefix
+from alancode.session.session import (
+    find_session_by_prefix,
+    get_last_session_id,
+    load_session_settings,
+)
 from alancode.__version__ import __version__
-from alancode.settings import get_settings_path
+from alancode.settings import (
+    SETTINGS_DEFAULTS,
+    coerce_value,
+    get_settings_path,
+    load_settings,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -46,10 +61,6 @@ def main() -> None:
               "scripted. Inferred from --model when not set."),
     )
     parser.add_argument(
-        "--provider", default=None,
-        help="Deprecated alias for --backend. Will be removed in a future release.",
-    )
-    parser.add_argument(
         "--model", default=None,
         help=("Model to use. Bare names (gpt-4o, claude-sonnet-4-6) or "
               "LiteLLM-style provider/model prefixes "
@@ -57,6 +68,22 @@ def main() -> None:
     )
     parser.add_argument("--api-key", default=None, help="API key")
     parser.add_argument("--base-url", default=None, help="API base URL (for local servers: http://localhost:8000/v1)")
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="Model request timeout in seconds (custom endpoints default to 3600)",
+    )
+    parser.add_argument(
+        "--context-window",
+        "--cw",
+        dest="context_window",
+        type=int,
+        default=None,
+        metavar="TOKENS",
+        help="Override the detected model context window",
+    )
     parser.add_argument("--tool-call-format", default=None,
                         choices=["hermes", "hermes_xml", "glm", "alan", "meta_json"],
                         help="Text-based tool call format for models without native tool calling")
@@ -114,44 +141,28 @@ def main() -> None:
             print(f"Error: No unique session matching '{continue_prefix}'.", file=sys.stderr)
             sys.exit(1)
 
-    # Reconcile --backend / --provider (deprecated alias). Done before
-    # building settings_cli so we don't carry the old key any further.
-    legacy_provider = all_args.pop("provider", None)
-    if legacy_provider is not None:
-        if all_args.get("backend") is not None:
-            print(
-                "Error: pass either --backend or --provider, not both.",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        from alancode.settings import _LEGACY_PROVIDER_MAP
-
-        mapped = _LEGACY_PROVIDER_MAP.get(str(legacy_provider).lower())
-        if mapped is None:
-            # User probably typed something like --provider ollama, expecting
-            # ollama to be a backend. Suggest the right form.
-            print(
-                f"Error: '{legacy_provider}' is not a backend.\n"
-                f"       Valid backends: auto, anthropic-native, scripted.\n"
-                f"       To use {legacy_provider}, pass it as part of the model "
-                f"name: --model {legacy_provider}/<model-name>",
-                file=sys.stderr,
-            )
-            sys.exit(2)
-        all_args["backend"] = mapped
-
     # CLI settings = non-None args, coerced to proper types
-    from alancode.settings import coerce_value
     settings_cli = {}
     for k, v in all_args.items():
         if v is not None:
             settings_cli[k] = coerce_value(v) if isinstance(v, str) else v
 
     # Logging
-    if settings_cli.get("verbose"):
-        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s %(levelname)s: %(message)s")
-    else:
-        logging.basicConfig(level=logging.WARNING)
+    persisted_settings = (
+        load_session_settings(cwd, session_id)
+        if session_id
+        else load_settings(cwd)
+    )
+    verbose_enabled = settings_cli.get(
+        "verbose",
+        persisted_settings.get("verbose", SETTINGS_DEFAULTS["verbose"]),
+    )
+    log_level = logging.DEBUG if verbose_enabled else logging.WARNING
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [Alan Code] %(name)s %(levelname)s: %(message)s",
+        force=True,
+    )
 
     # First-run setup: detect API keys and configure defaults
     if not get_settings_path(cwd).exists():
@@ -159,7 +170,6 @@ def main() -> None:
 
     if print_instructions is not None:
         # Non-interactive mode — no UI, just run and print
-        from alancode.cli.user_input import ask_user_cli
         ask_cb = ask_user_cli if sys.stdin.isatty() else None
         agent = AlanCodeAgent(
             session_id=session_id,
@@ -214,8 +224,6 @@ async def _run_gui_mode(session_id, settings_cli, cwd):
 
 def _list_recent_sessions(cwd: str, max_sessions: int = 10) -> None:
     """List recent sessions with timestamps and last user message."""
-    import json
-
     sessions_dir = Path(cwd) / ".alan" / "sessions"
     if not sessions_dir.is_dir():
         print("No sessions found.")
@@ -285,8 +293,6 @@ def _list_recent_sessions(cwd: str, max_sessions: int = 10) -> None:
     print()
     print(f"  Recent sessions ({len(sessions)}):")
     print()
-
-    from datetime import datetime as dt
 
     for s in sessions:
         sid_short = s["id"][:12]
@@ -415,7 +421,7 @@ def _check_openrouter_balance() -> float | None:
         if resp.status_code == 200:
             return float(resp.json()["data"]["limit_remaining"])
     except Exception:
-        pass
+        logger.debug("Could not check OpenRouter balance", exc_info=True)
     return None
 
 
@@ -455,7 +461,6 @@ async def _run_print_mode(agent: AlanCodeAgent, prompt: str) -> None:
 
 
 def _display_error_stderr(error: Exception) -> None:
-    from alancode.cli.errors import classify_error
     message, _ = classify_error(error)
     print(f"\n{message}", file=sys.stderr)
 

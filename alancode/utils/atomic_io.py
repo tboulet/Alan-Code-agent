@@ -10,10 +10,34 @@ and Windows.
 from __future__ import annotations
 
 import json
+import fcntl
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+
+@contextmanager
+def interprocess_lock(target: str | Path):
+    """Serialize read-modify-write cycles associated with *target*.
+
+    The lock lives beside the target and is released automatically by the
+    kernel if a process exits. The small lock file itself is intentionally
+    persistent so concurrent processes always rendezvous on the same inode.
+    """
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_name(f".{target.name}.lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def atomic_write_text(path: str | Path, text: str) -> None:

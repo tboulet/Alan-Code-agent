@@ -5,10 +5,10 @@ F08 (Layer A re-truncates its own output, corrupting the sentinel).
 
 import re
 
-from alancode.providers.scripted_provider import ScriptedProvider, text, tool_call
+from alancode.backends.scripted_backend import ScriptedBackend, text, tool_call
 
-from harness import (
-    AuditedProvider,
+from .harness import (
+    AuditedBackend,
     FloodTool,
     main_payloads,
     make_agent,
@@ -19,14 +19,14 @@ from harness import (
 
 
 def breaker_setup(tmp_path, cw=32_768, n=18):
-    inner = ScriptedProvider.from_responses(
+    inner = ScriptedBackend.from_responses(
         [tool_call("Dummy", {}) for _ in range(n)],
         fallback=text("All done."),
     )
-    provider = AuditedProvider(inner, context_window=cw, summarizer_mode="error")
+    backend = AuditedBackend(inner, context_window=cw, summarizer_mode="error")
     tool = FloodTool(lambda i: f"RESULT-{i}-MARKER " + word_soup(8_000))
-    agent = make_agent(tmp_path, provider, tools=[tool])
-    return provider, agent, n
+    agent = make_agent(tmp_path, backend, tools=[tool])
+    return backend, agent, n
 
 
 class TestF03BreakerFallbackEatsTail:
@@ -37,13 +37,13 @@ class TestF03BreakerFallbackEatsTail:
         tool loop there is none - so the ENTIRE tail is dropped even when
         the target had room for most of it. Expected: recent results
         survive in the first post-fallback payload."""
-        provider, agent, n = breaker_setup(tmp_path)
+        backend, agent, n = breaker_setup(tmp_path)
 
         events = await run_turn(agent, "TASK-MARKER do the flooding")
         assert user_notices(events, "hard-truncated"), "breaker did not fire"
 
         post = [
-            p for p in main_payloads(provider) if "hard-truncated" in p
+            p for p in main_payloads(backend) if "hard-truncated" in p
         ]
         assert post, "no main call after the fallback"
         survivors = [
@@ -65,14 +65,14 @@ class TestF04BreakerBoundaryAmnesia:
         successful Layer C re-emits the summary after the boundary;
         the fallback re-emits nothing. Expected: the task anchor is
         still in the next turn's payload."""
-        provider, agent, n = breaker_setup(tmp_path)
+        backend, agent, n = breaker_setup(tmp_path)
 
         ev1 = await run_turn(agent, "TASK-MARKER do the flooding")
         assert user_notices(ev1, "hard-truncated"), "breaker did not fire"
-        n_calls_before = provider.main_calls
+        n_calls_before = backend.main_calls
 
         await run_turn(agent, "so, where were we?")
-        next_turn_payloads = main_payloads(provider)[n_calls_before:]
+        next_turn_payloads = main_payloads(backend)[n_calls_before:]
         assert next_turn_payloads
         assert "TASK-MARKER" in next_turn_payloads[0], (
             "the head kept by the fallback (the user's task statement) "
@@ -90,17 +90,17 @@ class TestF08LayerARetruncation:
         original size, on every call."""
         cw = 200_000
         payload = "HEAD " + word_soup(500_000) + " TAIL"
-        inner = ScriptedProvider.from_responses(
+        inner = ScriptedBackend.from_responses(
             [tool_call("Dummy", {}) for _ in range(3)],
             fallback=text("All done."),
         )
-        provider = AuditedProvider(inner, context_window=cw)
-        agent = make_agent(tmp_path, provider, tools=[FloodTool(payload)])
+        backend = AuditedBackend(inner, context_window=cw)
+        agent = make_agent(tmp_path, backend, tools=[FloodTool(payload)])
 
         await run_turn(agent, "go")
 
         rx = re.compile(r"of ([\d,]+) chars")
-        last = main_payloads(provider)[-1]
+        last = main_payloads(backend)[-1]
         totals = [int(t.replace(",", "")) for t in rx.findall(last)]
         assert totals, "no truncation sentinel found"
         assert all(total == len(payload) for total in totals), (

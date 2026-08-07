@@ -7,7 +7,7 @@ name = "alancode"
 dynamic = ["version"]
 description = "Alan Code — an open-source python agent inspired by Claude Code"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [
     { name = "Timothe Boulet" },
@@ -18,7 +18,7 @@ dependencies = [
     "rich>=13.0",
     "prompt-toolkit>=3.0",
     "pyyaml>=6.0",
-    # LiteLLM (any non-Anthropic provider)
+    # LiteLLM (any non-Anthropic backend)
     "litellm>=1.70",
     "requests>=2.31",
     # GUI (browser mode via `--gui`)

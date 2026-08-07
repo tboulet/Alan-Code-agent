@@ -2,10 +2,10 @@
 
 We use two signals for token accounting, in this order of preference:
 
-1. **Provider-reported ``usage``** — the exact token counts the API returned
+1. **Backend-reported ``usage``** — the exact token counts the API returned
    for the last call. Used directly for display (``/status``, one-liner).
 2. **Pre-call estimate** — needed inside the compaction pipeline before an
-   API call, because we can't ask the provider yet. Delegated to
+   API call, because we can't ask the backend yet. Delegated to
    ``litellm.token_counter`` when LiteLLM is available (real model-specific
    tokenizer), otherwise a chars/3 heuristic.
 
@@ -254,12 +254,12 @@ def predicted_next_call_tokens(
 
     - ``usage_based`` = ``last_input_tokens + last_output_tokens + tokens of
       messages added since the last call``. This is close-to-exact when
-      the provider populates ``usage``.
+      the backend populates ``usage``.
     - ``full_estimate`` = ``count_tokens_for_call(messages, ...)`` — a
       tokenizer-backed estimate of the whole upcoming payload.
 
     Taking the max protects against under-budgeting: if either side is
-    wrong, the other caps it conservatively. When the provider doesn't
+    wrong, the other caps it conservatively. When the backend doesn't
     populate ``usage`` (``last_input_tokens == 0``), we simply fall
     through to ``full_estimate``.
     """

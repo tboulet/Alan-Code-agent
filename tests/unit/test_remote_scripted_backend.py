@@ -1,4 +1,4 @@
-"""Tests for ``RemoteScriptedProvider`` (HTTP-driven impersonation backend)."""
+"""Tests for ``RemoteScriptedBackend`` (HTTP-driven impersonation backend)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import urllib.request
 
 import pytest
 
-from alancode.providers.base import (
+from alancode.backends.base import (
     StreamMessageDelta,
     StreamMessageStart,
     StreamMessageStop,
@@ -18,7 +18,7 @@ from alancode.providers.base import (
     StreamToolUseStop,
     ToolSchema,
 )
-from alancode.providers.remote_scripted_provider import RemoteScriptedProvider
+from alancode.backends.remote_scripted_backend import RemoteScriptedBackend
 
 
 # ── HTTP helpers ────────────────────────────────────────────────────────────
@@ -53,8 +53,8 @@ def _http_post_json(url: str, body: dict, timeout: float = 5.0) -> tuple[int, di
 
 
 @pytest.fixture
-def provider():
-    p = RemoteScriptedProvider()
+def backend():
+    p = RemoteScriptedBackend()
     yield p
     p.shutdown()
 
@@ -62,44 +62,44 @@ def provider():
 # ── Basic lifecycle ─────────────────────────────────────────────────────────
 
 
-def test_server_health_endpoint(provider):
-    code, data = _http_get(f"http://127.0.0.1:{provider._port}/api/health")
+def test_server_health_endpoint(backend):
+    code, data = _http_get(f"http://127.0.0.1:{backend._port}/api/health")
     assert code == 200
     assert data == {"ok": True}
 
 
-def test_session_endpoint_unbound(provider):
-    code, data = _http_get(f"http://127.0.0.1:{provider._port}/api/session")
+def test_session_endpoint_unbound(backend):
+    code, data = _http_get(f"http://127.0.0.1:{backend._port}/api/session")
     assert code == 200
     assert data["session_id"] is None
     assert data["cwd"] is None
-    assert data["port"] == provider._port
+    assert data["port"] == backend._port
 
 
-def test_session_endpoint_after_bind(provider, tmp_path):
-    provider.set_session_context(session_id="abcdef0123", cwd=str(tmp_path))
-    code, data = _http_get(f"http://127.0.0.1:{provider._port}/api/session")
+def test_session_endpoint_after_bind(backend, tmp_path):
+    backend.set_session_context(session_id="abcdef0123", cwd=str(tmp_path))
+    code, data = _http_get(f"http://127.0.0.1:{backend._port}/api/session")
     assert code == 200
     assert data["session_id"] == "abcdef0123"
     assert data["cwd"] == str(tmp_path)
 
 
-def test_pending_returns_204_when_idle(provider):
-    code, _ = _http_get(f"http://127.0.0.1:{provider._port}/api/pending")
+def test_pending_returns_204_when_idle(backend):
+    code, _ = _http_get(f"http://127.0.0.1:{backend._port}/api/pending")
     assert code == 204
 
 
-def test_respond_returns_409_when_no_pending(provider):
+def test_respond_returns_409_when_no_pending(backend):
     code, _ = _http_post_json(
-        f"http://127.0.0.1:{provider._port}/api/respond",
+        f"http://127.0.0.1:{backend._port}/api/respond",
         {"text": "hi"},
     )
     assert code == 409
 
 
-def test_two_providers_pick_distinct_ports():
-    a = RemoteScriptedProvider()
-    b = RemoteScriptedProvider()
+def test_two_backends_pick_distinct_ports():
+    a = RemoteScriptedBackend()
+    b = RemoteScriptedBackend()
     try:
         assert a._port != b._port
     finally:
@@ -111,19 +111,19 @@ def test_two_providers_pick_distinct_ports():
 
 
 def _drive_one_stream(
-    provider: RemoteScriptedProvider,
+    backend: RemoteScriptedBackend,
     response_body: dict,
     *,
     messages: list | None = None,
     tools: list[ToolSchema] | None = None,
 ) -> list:
-    """Run a single ``stream()`` cycle: kick off the provider, poll until
+    """Run a single ``stream()`` cycle: kick off the backend, poll until
     ``/api/pending`` returns the payload, POST the response, collect events."""
     events: list = []
 
     async def run() -> None:
         async def consume() -> None:
-            async for e in provider.stream(
+            async for e in backend.stream(
                 messages=messages or [{"role": "user", "content": "hi"}],
                 system=["sys"],
                 tools=tools or [],
@@ -133,11 +133,11 @@ def _drive_one_stream(
 
         consume_task = asyncio.create_task(consume())
 
-        # Wait until the provider has a pending call.
+        # Wait until the backend has a pending call.
         for _ in range(50):
             await asyncio.sleep(0.02)
             code, _ = _http_get(
-                f"http://127.0.0.1:{provider._port}/api/pending"
+                f"http://127.0.0.1:{backend._port}/api/pending"
             )
             if code == 200:
                 break
@@ -146,7 +146,7 @@ def _drive_one_stream(
             raise AssertionError("pending payload never appeared")
 
         code, _ = _http_post_json(
-            f"http://127.0.0.1:{provider._port}/api/respond", response_body
+            f"http://127.0.0.1:{backend._port}/api/respond", response_body
         )
         assert code == 200
 
@@ -156,8 +156,8 @@ def _drive_one_stream(
     return events
 
 
-def test_stream_text_only(provider):
-    events = _drive_one_stream(provider, {"text": "hello world"})
+def test_stream_text_only(backend):
+    events = _drive_one_stream(backend, {"text": "hello world"})
     types = [type(e).__name__ for e in events]
     assert types[0] == "StreamMessageStart"
     assert types[-1] == "StreamMessageStop"
@@ -169,9 +169,9 @@ def test_stream_text_only(provider):
     assert deltas[0].stop_reason == "end_turn"
 
 
-def test_stream_tool_call(provider):
+def test_stream_tool_call(backend):
     events = _drive_one_stream(
-        provider,
+        backend,
         {
             "tool_calls": [
                 {"name": "Bash", "input": {"command": "ls"}},
@@ -188,9 +188,9 @@ def test_stream_tool_call(provider):
     assert delta.stop_reason == "tool_use"
 
 
-def test_stream_text_plus_tool_calls(provider):
+def test_stream_text_plus_tool_calls(backend):
     events = _drive_one_stream(
-        provider,
+        backend,
         {
             "text": "running ls.",
             "tool_calls": [{"name": "Bash", "input": {"command": "ls"}}],
@@ -202,14 +202,14 @@ def test_stream_text_plus_tool_calls(provider):
     assert tool_starts[0].name == "Bash"
 
 
-def test_pending_includes_serialized_call(provider):
+def test_pending_includes_serialized_call(backend):
     """The pending payload must expose system, messages, tools — everything
     the external caller needs to act as the LLM."""
     events: list = []
 
     async def run() -> None:
         async def consume() -> None:
-            async for e in provider.stream(
+            async for e in backend.stream(
                 messages=[{"role": "user", "content": "ping"}],
                 system=["sys-line"],
                 tools=[
@@ -227,7 +227,7 @@ def test_pending_includes_serialized_call(provider):
         for _ in range(50):
             await asyncio.sleep(0.02)
             code, data = _http_get(
-                f"http://127.0.0.1:{provider._port}/api/pending"
+                f"http://127.0.0.1:{backend._port}/api/pending"
             )
             if code == 200:
                 payload = data
@@ -242,24 +242,24 @@ def test_pending_includes_serialized_call(provider):
         assert payload["model"] == "remote"
 
         _http_post_json(
-            f"http://127.0.0.1:{provider._port}/api/respond", {"text": "ok"}
+            f"http://127.0.0.1:{backend._port}/api/respond", {"text": "ok"}
         )
         await consume_task
 
     asyncio.run(run())
 
 
-def test_disk_mirror_when_bound(provider, tmp_path):
+def test_disk_mirror_when_bound(backend, tmp_path):
     """Pending payload is mirrored to
     ``<cwd>/.alan/sessions/<sid>/remote_inbox.json`` once bound."""
-    provider.set_session_context(session_id="deadbeef" + "0" * 24, cwd=str(tmp_path))
+    backend.set_session_context(session_id="deadbeef" + "0" * 24, cwd=str(tmp_path))
     expected = (
         tmp_path / ".alan" / "sessions" / ("deadbeef" + "0" * 24) / "remote_inbox.json"
     )
 
     async def run() -> None:
         async def consume() -> None:
-            async for _ in provider.stream(
+            async for _ in backend.stream(
                 messages=[{"role": "user", "content": "hi"}],
                 system=["s"],
                 tools=[],
@@ -281,19 +281,19 @@ def test_disk_mirror_when_bound(provider, tmp_path):
         assert data["model"] == "remote"
 
         _http_post_json(
-            f"http://127.0.0.1:{provider._port}/api/respond", {"text": "ok"}
+            f"http://127.0.0.1:{backend._port}/api/respond", {"text": "ok"}
         )
         await consume_task
 
     asyncio.run(run())
 
 
-def test_no_disk_mirror_when_unbound(provider, tmp_path):
+def test_no_disk_mirror_when_unbound(backend, tmp_path):
     """Without ``set_session_context``, no inbox file is written."""
 
     async def run() -> None:
         async def consume() -> None:
-            async for _ in provider.stream(
+            async for _ in backend.stream(
                 messages=[{"role": "user", "content": "hi"}],
                 system=["s"],
                 tools=[],
@@ -305,12 +305,12 @@ def test_no_disk_mirror_when_unbound(provider, tmp_path):
         for _ in range(20):
             await asyncio.sleep(0.02)
             code, _ = _http_get(
-                f"http://127.0.0.1:{provider._port}/api/pending"
+                f"http://127.0.0.1:{backend._port}/api/pending"
             )
             if code == 200:
                 break
         _http_post_json(
-            f"http://127.0.0.1:{provider._port}/api/respond", {"text": "ok"}
+            f"http://127.0.0.1:{backend._port}/api/respond", {"text": "ok"}
         )
         await consume_task
 
@@ -319,10 +319,10 @@ def test_no_disk_mirror_when_unbound(provider, tmp_path):
     assert not (tmp_path / ".alan").exists()
 
 
-def test_response_error_yields_stream_error(provider):
-    from alancode.providers.base import StreamError
+def test_response_error_yields_stream_error(backend):
+    from alancode.backends.base import StreamError
 
-    events = _drive_one_stream(provider, {"error": "boom"})
+    events = _drive_one_stream(backend, {"error": "boom"})
     errors = [e for e in events if isinstance(e, StreamError)]
     assert len(errors) == 1
     assert errors[0].error == "boom"
@@ -331,20 +331,20 @@ def test_response_error_yields_stream_error(provider):
 # ── Backend resolution wiring ───────────────────────────────────────────────
 
 
-def test_resolve_backend_picks_remote_provider():
+def test_resolve_backend_picks_remote_backend():
     from alancode.agent import _resolve_backend
 
     p = _resolve_backend("scripted", model="remote")
     try:
-        assert isinstance(p, RemoteScriptedProvider)
+        assert isinstance(p, RemoteScriptedBackend)
     finally:
         p.shutdown()
 
 
 def test_resolve_backend_other_model_still_uses_classic_scripted():
     from alancode.agent import _resolve_backend
-    from alancode.providers.scripted_provider import ScriptedProvider
+    from alancode.backends.scripted_backend import ScriptedBackend
 
     p = _resolve_backend("scripted", model="some-other-model")
-    assert isinstance(p, ScriptedProvider)
-    assert not isinstance(p, RemoteScriptedProvider)
+    assert isinstance(p, ScriptedBackend)
+    assert not isinstance(p, RemoteScriptedBackend)

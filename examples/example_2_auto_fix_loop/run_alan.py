@@ -16,10 +16,11 @@ Usage:
     # With a specific model:
     python examples/example_2_auto_fix_loop/run_alan.py --model openrouter/google/gemini-2.5-flash
 
-    # With scripted provider (no API, for demonstration):
+    # With scripted backend (no API, for demonstration):
     python examples/example_2_auto_fix_loop/run_alan.py --scripted
 """
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -60,7 +61,7 @@ def run_with_model(model: str) -> None:
     """Run the auto-fix loop with a real LLM."""
     clean_previous_solution()
     agent = AlanCodeAgent(
-        provider="litellm",
+        backend="auto",
         model=model,
         cwd=str(EXAMPLE_DIR),
         permission_mode="yolo",
@@ -98,6 +99,7 @@ def run_with_model(model: str) -> None:
                 "All tests pass now. Give a brief summary of the bugs you found and fixed."
             )
             print(f"\nSummary:\n{summary}")
+            asyncio.run(agent.close())
             return
 
         prompt = (
@@ -109,12 +111,13 @@ def run_with_model(model: str) -> None:
 
     print(f"\nFailed to fix all bugs after {MAX_ATTEMPTS} attempts.")
     print(f"Cost: ${agent.cost_usd:.4f}")
+    asyncio.run(agent.close())
 
 
 def run_scripted() -> None:
-    """Run with scripted provider to demonstrate the loop structure."""
+    """Run with scripted backend to demonstrate the loop structure."""
     clean_previous_solution()
-    from alancode.providers.scripted_provider import ScriptedProvider, rule, text, tool_call
+    from alancode.backends.scripted_backend import ScriptedBackend, rule, text, tool_call
 
     bugged = str(EXAMPLE_DIR / "code_bugged.py")
     tests = str(EXAMPLE_DIR / "test_inventory.py")
@@ -142,7 +145,7 @@ def run_scripted() -> None:
         "if product.quantity < threshold:", "if product.quantity <= threshold:"
     )
 
-    provider = ScriptedProvider(rules=[
+    backend = ScriptedBackend(rules=[
         # Turn 0: read the bugged code
         rule(turn=0, respond=tool_call("Read", {"file_path": bugged})),
         # Turn 1: read the tests
@@ -160,7 +163,7 @@ def run_scripted() -> None:
         )),
     ])
 
-    agent = AlanCodeAgent(provider=provider, cwd=str(EXAMPLE_DIR), permission_mode="yolo")
+    agent = AlanCodeAgent(backend=backend, cwd=str(EXAMPLE_DIR), permission_mode="yolo")
 
     print("Attempt 1 (scripted)\n")
     answer = agent.query(
@@ -182,6 +185,7 @@ def run_scripted() -> None:
     if fixed_path.exists():
         fixed_path.unlink()
         print("Cleaned up code_fixed.py")
+    asyncio.run(agent.close())
 
 
 if __name__ == "__main__":

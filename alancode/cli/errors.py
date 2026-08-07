@@ -16,7 +16,7 @@ def classify_error(error: Exception) -> tuple[str, str | None]:
     hint = None
 
     if "auth" in msg_lower or "api key" in msg_lower or "401" in msg:
-        hint = "Check your API key and provider settings."
+        hint = "Check your API key and backend settings."
 
     elif "rate limit" in msg_lower or "429" in msg:
         hint = "Wait a moment and try again."

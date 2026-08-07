@@ -65,7 +65,6 @@ class GUIUI(SessionUI):
         self._console_instance = _GUIConsole(self)
         self.llm_perspective: list[dict] | None = None
         self.llm_system_prompt: str = ""
-        self._last_tree_data: dict | None = None
 
     # ── Server lifecycle ──────────────────────────────────────────────────
 
@@ -90,7 +89,7 @@ class GUIUI(SessionUI):
             try:
                 await ws.close()
             except Exception:
-                pass
+                logger.debug("Could not close GUI websocket", exc_info=True)
         self._connections.clear()
         server.should_exit = True
         try:
@@ -100,9 +99,9 @@ class GUIUI(SessionUI):
             try:
                 await task
             except (asyncio.CancelledError, Exception):
-                pass
+                logger.debug("GUI server task did not cancel cleanly", exc_info=True)
         except (asyncio.CancelledError, Exception):
-            pass
+            logger.debug("GUI server task did not stop cleanly", exc_info=True)
 
     # ── WebSocket connection management ───────────────────────────────────
 
@@ -121,6 +120,7 @@ class GUIUI(SessionUI):
             try:
                 await ws.send_text(msg)
             except Exception:
+                logger.debug("Dropping unreachable GUI websocket", exc_info=True)
                 dead.add(ws)
         self._connections -= dead
 
@@ -159,16 +159,6 @@ class GUIUI(SessionUI):
                         "messages": self.llm_perspective,
                         "system_prompt": self.llm_system_prompt,
                     },
-                },
-            }, default=str))
-
-        # Send git tree data if available
-        if self._last_tree_data:
-            await ws.send_text(json.dumps({
-                "kind": "event",
-                "event": {
-                    "type": "git_tree_update",
-                    "data": self._last_tree_data,
                 },
             }, default=str))
 
@@ -311,7 +301,9 @@ class GUIUI(SessionUI):
                     output = agent_event_to_output(msg)
                     await self._send_event(output.type, output.data)
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Could not replay a conversation message", exc_info=True
+                    )
         asyncio.ensure_future(_send())
 
     def on_initial_system_prompt(self, system_prompt: str) -> None:
@@ -321,13 +313,6 @@ class GUIUI(SessionUI):
             "messages": [],
             "system_prompt": system_prompt,
         }))
-
-    # ── Git Tree (AGT) ───────────────────────────────────────────────────
-
-    def on_git_tree_update(self, tree_data: dict) -> None:
-        """Send git tree layout to all browsers."""
-        self._last_tree_data = tree_data
-        asyncio.ensure_future(self._send_event("git_tree_update", tree_data))
 
     # ── Handle incoming WebSocket messages ────────────────────────────────
 
@@ -394,4 +379,4 @@ class _GUIConsole(Console):
                     self._gui_ui._send_event("local_output", {"text": text})
                 )
             except RuntimeError:
-                pass
+                logger.debug("GUI event loop is unavailable for console output")

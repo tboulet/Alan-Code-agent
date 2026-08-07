@@ -83,7 +83,7 @@ The examples directory has three ready-to-run scripts:
 - [`examples/example_2_auto_fix_loop/`](../../examples/example_2_auto_fix_loop/) — iterate `agent.query()` + `pytest` until tests pass.
 - [`examples/example_3_streaming_agent.py`](../../examples/example_3_streaming_agent.py) — async streaming for custom UIs.
 
-Each runs against real LLMs or against the `ScriptedProvider` (no API needed) for deterministic testing.
+Each runs against real LLMs or against the `ScriptedBackend` (no API needed) for deterministic testing.
 
 ## Configuration
 
@@ -99,12 +99,15 @@ agent = AlanCodeAgent(
     cwd="/path/to/project",
     session_id=None,     # None = new session
     api_key=None,        # None = from env
+    request_timeout="auto",  # custom endpoints get a one-hour timeout
+    context_window="auto",   # registry/server/probe resolution
+    append_system_prompt="Follow my framework's task contract.",
     verbose=False,
     ask_callback=None,   # Custom permission prompt; see below
 )
 ```
 
-The transport backend is inferred from `model` — pass `backend="anthropic-native" | "auto" | "scripted"` (or an `LLMProvider` instance) only when you need to override the inference.
+The transport backend is inferred from `model` — pass `backend="anthropic-native" | "auto" | "scripted"` (or an `LLMBackend` instance) only when you need to override the inference.
 
 Omitted kwargs fall through the priority chain (session → project settings.json → defaults). See [guides/configuration.md](configuration.md).
 
@@ -138,7 +141,7 @@ Every turn, messages are persisted to `<cwd>/.alan/sessions/<session_id>/transcr
 agent = AlanCodeAgent(session_id="a1b2c3...")
 ```
 
-Session state (cost totals, allow rules, agent position, last usage) comes with it.
+Session state (cost totals, turn count, last usage, and transcript) comes with it. Permission rules are project-scoped and shared across sessions in that project.
 
 ## Costs and tokens
 
@@ -153,16 +156,16 @@ agent.last_usage.input_tokens  # most recent call only
 
 Both `usage` (cumulative) and `last_usage` (most recent) are `Usage` dataclasses with the full breakdown: input, output, cache-creation, cache-read.
 
-## Scripted provider — deterministic testing
+## Scripted backend — deterministic testing
 
 For tests and CI where real API calls aren't desired:
 
 ```python
-from alancode.providers.scripted_provider import (
-    ScriptedProvider, text, tool_call, multi_tool_call,
+from alancode.backends.scripted_backend import (
+    ScriptedBackend, text, tool_call, multi_tool_call,
 )
 
-provider = ScriptedProvider.from_responses([
+backend = ScriptedBackend.from_responses([
     multi_tool_call(
         ("Bash", {"command": "ls"}),
         ("Read", {"file_path": "/etc/hostname"}),
@@ -170,7 +173,7 @@ provider = ScriptedProvider.from_responses([
     text("Done. The system is ..."),
 ])
 
-agent = AlanCodeAgent(backend=provider, permission_mode="yolo")
+agent = AlanCodeAgent(backend=backend, permission_mode="yolo")
 answer = agent.query("check the system")
 ```
 
@@ -192,20 +195,21 @@ The message gets queued and delivered at the start of the next iteration. Handy 
 agent.abort()
 ```
 
-Sets the abort event. The next `await` checkpoint catches it and unwinds the turn cleanly. Used by GUI's "Stop" button and Ctrl+C in the CLI.
+Sets the abort event. Alan checks it at loop checkpoints and after streaming; it does not forcibly cancel an in-flight SDK request. Used by GUI's "Stop" button and Ctrl+C in the CLI.
 
 ## Lifecycle
 
 ```python
-agent = AlanCodeAgent(...)           # sync init; loads session state if session_id given
-try:
-    agent.query("...")
-    agent.query("...")
-finally:
-    agent.close()                    # async: fires session-end hooks
+async def run_agent():
+    agent = AlanCodeAgent(...)
+    try:
+        await agent.query_async("...")
+        await agent.query_async("...")
+    finally:
+        await agent.close()
 ```
 
-`agent.close()` is async. The CLI calls it for you on `/exit`. Library users should either call it themselves or use a context manager (not yet provided; TODO).
+`agent.close()` is async and idempotent. It fires session-end hooks, closes backend-owned clients/servers, and releases the session lock. The CLI calls it on `/exit`. A synchronous program can finish with `asyncio.run(agent.close())`.
 
 ## Programmatic mode
 
@@ -221,13 +225,13 @@ agent = AlanCodeAgent(
 )
 ```
 
-This detaches Alan from project- and host-level state that's normally helpful for an interactive assistant but would contaminate a controlled run: `~/.alan/ALAN.md`, `<cwd>/ALAN.md`, `~/.alan/memory/MEMORY.md`, AGT bootstrap, and the network/git/ask-user tools (`WebFetch`, `GitCommit`, `AskUserQuestion`, `Skill`).
+This detaches Alan from project- and host-level state that's normally helpful for an interactive assistant but would contaminate a controlled run: `~/.alan/ALAN.md`, `<cwd>/ALAN.md`, `~/.alan/memory/MEMORY.md`, and the network/git/ask-user tools (`WebFetch`, `GitCommit`, `AskUserQuestion`, `Skill`).
 
 Refine the tool set with `tools=` (full replacement) or `disabled_tools=` (subtractive). See [reference/python-api.md](../reference/python-api.md#programmatic-mode) for the full list of behaviors.
 
 ## Running multiple agents in the same `cwd`
 
-`SessionState` takes an exclusive lock on `<cwd>/.alan/sessions/<session_id>/session.lock`. Two processes loading the same `session_id` would otherwise stomp each other's writes; the second one now raises `alancode.session.SessionLockedError`. Two processes with **distinct** session IDs in the same `cwd` work fine — sessions are namespaced under `.alan/sessions/<id>/`.
+`SessionState` takes an exclusive lock on `<cwd>/.alan/sessions/<session_id>/session.lock`. A second process opening the same `session_id` raises `alancode.session.SessionLockedError`. Distinct IDs keep their transcripts/state separate, and shared JSON stores use lock-backed atomic updates. They can still make conflicting source edits in the same working tree, so run concurrent coding agents in separate Git worktrees.
 
 ## Related
 

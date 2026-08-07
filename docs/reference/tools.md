@@ -179,7 +179,7 @@ Fetches a URL (HTTP/HTTPS), strips HTML, returns text content.
 **Source**: `alancode/tools/builtin/git_commit.py`
 **Permission level**: `write`
 
-Stages and commits with a given message. Adds `Co-Authored-By: Alan Code` trailer. The commit SHA is tracked in session state so the GUI's Git Tree panel can colour agent commits blue.
+Stages and commits with a given message. Adds a `Co-Authored-By: Alan Code` trailer.
 
 **Parameters**:
 

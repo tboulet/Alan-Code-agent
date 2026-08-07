@@ -1,10 +1,10 @@
 # Prompt caching
 
-Prompt caching lets providers reuse previously computed prefixes, reducing input cost by up to 90% on cached tokens. For multi-turn agent sessions, this is the single largest cost lever.
+Prompt caching lets backends reuse previously computed prefixes, reducing input cost by up to 90% on cached tokens. For multi-turn agent sessions, this is the single largest cost lever.
 
 ## How it works
 
-Caching is provider-specific. Alan Code applies caching markers where possible and lets providers handle the rest:
+Caching is backend-specific. Alan Code applies caching markers where possible and lets backends handle the rest:
 
 - **Anthropic** (direct): `cache_control: {"type": "ephemeral"}` markers on content blocks. Prefix up to the marker is cached. Max 4 breakpoints per request. Cache hits cost 10% of regular input; writes cost 1.25x.
 - **OpenAI**: Automatic prefix-based caching. No markers needed.
@@ -13,7 +13,7 @@ Caching is provider-specific. Alan Code applies caching markers where possible a
 
 ## Alan's caching strategy
 
-### Anthropic provider (`anthropic_provider.py`)
+### Anthropic backend (`anthropic_backend.py`)
 
 Places up to 4 `cache_control` breakpoints per request:
 
@@ -22,11 +22,11 @@ Places up to 4 `cache_control` breakpoints per request:
 3. **Last system prompt section** — caches tools + full system prompt including dynamic sections
 4. **Last assistant message** — caches the entire conversation prefix
 
-The system prompt is split into static (sections 0-6, byte-identical across calls) and dynamic (sections 7+, stable within a session but can change on memory/skill/ALAN.md updates). This split is communicated via `system_static_boundary` from `get_system_prompt()`.
+The system prompt is split at `system_static_boundary`. The built-in/environment/scratchpad prefix is stable for one agent; skills, memory, project instructions, and explicit appended instructions follow it and may change. `get_system_prompt()` communicates the boundary to each backend.
 
-### LiteLLM provider (`litellm_provider.py`)
+### LiteLLM backend (`litellm_backend.py`)
 
-Uses the same `cache_control` markers injected into system message content blocks, tool definitions, and assistant messages. LiteLLM passes these through to providers that support them and ignores them for providers that don't.
+Uses the same `cache_control` markers injected into system message content blocks, tool definitions, and assistant messages. LiteLLM passes these through to backends that support them and ignores them for backends that don't.
 
 ## Cache invalidation
 

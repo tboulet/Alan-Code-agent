@@ -1,7 +1,7 @@
 """Context-window probing and caching for models with unknown limits.
 
 Last-resort resolution rung for the context window (see the chain in
-``LiteLLMProvider.get_model_info``): when the registry, the server metadata
+``LiteLLMBackend.get_model_info``): when the registry, the server metadata
 endpoints and the known-models table all failed, actively probe the server.
 
 Probing strategy (descending - cost-aware):
@@ -13,7 +13,7 @@ Probing strategy (descending - cost-aware):
 
 So we descend from a 1M-token ceiling, halving until the first success -
 paying for exactly ONE large prefill - then optionally refine once inside
-the bracket. The detected value is the provider's OWN count of what it
+the bracket. The detected value is the backend's OWN count of what it
 accepted (``usage.prompt_tokens`` of the successful probe), which is exact
 and immune to our padding-tokenization error.
 
@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from alancode.api.errors import is_prompt_too_long
-from alancode.utils.atomic_io import atomic_write_json
+from alancode.utils.atomic_io import atomic_write_json, interprocess_lock
 
 logger = logging.getLogger(__name__)
 
@@ -76,19 +76,19 @@ def save_cached_context_window(
     """Persist a probed context window. Best-effort - never raises."""
     path = _cache_file()
     try:
-        data: dict = {}
-        if path.is_file():
-            try:
-                data = json.loads(path.read_text())
-            except json.JSONDecodeError:
-                data = {}
-        data[_cache_key(model, api_base)] = {
-            "context_window": value,
-            "method": method,
-            "detected_at": datetime.now(timezone.utc).isoformat(),
-        }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(path, data)
+        with interprocess_lock(path):
+            data: dict = {}
+            if path.is_file():
+                try:
+                    data = json.loads(path.read_text())
+                except json.JSONDecodeError:
+                    data = {}
+            data[_cache_key(model, api_base)] = {
+                "context_window": value,
+                "method": method,
+                "detected_at": datetime.now(timezone.utc).isoformat(),
+            }
+            atomic_write_json(path, data)
     except OSError as exc:
         logger.warning("Could not write CW cache %s: %s", path, exc)
 
@@ -122,7 +122,7 @@ async def _probe_attempt(
                                     probing cannot continue.
 
     The padding is ``"a "`` repeated: roughly one token each in BPE
-    tokenizers. Precision does not matter - on success the provider's own
+    tokenizers. Precision does not matter - on success the backend's own
     ``usage.prompt_tokens`` is the measurement.
     """
     import litellm
@@ -148,7 +148,7 @@ async def _probe_attempt(
     if usage is not None:
         accepted = getattr(usage, "prompt_tokens", 0) or 0
     if accepted <= 0:
-        # Provider did not report usage - fall back to the nominal size.
+        # Backend did not report usage - fall back to the nominal size.
         accepted = n_tokens
     return ("ok", accepted)
 

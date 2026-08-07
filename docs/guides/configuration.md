@@ -1,6 +1,6 @@
 # Configuration
 
-Alan Code has many knobs — provider, model, permission mode, compaction thresholds, memory behaviour, and more. This guide explains **where settings live** and **how they resolve** so you can predict what's in effect at any moment.
+Alan Code has many knobs — backend, model, permission mode, compaction thresholds, memory behaviour, and more. This guide explains **where settings live** and **how they resolve** so you can predict what's in effect at any moment.
 
 ## The priority chain
 
@@ -28,8 +28,6 @@ A setting set at level 1 overrides everything below. A setting absent at level 1
 ```
 
 Auto-created on first run with sensible defaults. Commit it if you want teammates to pick up the same config, gitignore it if you don't.
-
-Old files using the `provider` key (`"litellm"` / `"anthropic"` / `"scripted"`) are auto-migrated to `backend` on first read.
 
 ### `.alan/sessions/<id>/settings.json` (per-session snapshot)
 
@@ -64,7 +62,7 @@ Three ways:
 > /settings permission_mode=yolo
 ```
 
-Updates the session's effective setting AND persists to the session snapshot. Takes effect immediately. Backend-related changes (`backend`, `model`, `api_key`, `base_url`) recreate the underlying `LLMProvider`. Changing `model` also re-infers the backend (bare `claude-*` → `anthropic-native`, anything else → `auto`).
+Updates the session's effective setting and persists it to the session snapshot. Takes effect immediately. Backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`) recreate the underlying `LLMBackend`; creation is transactional, so a failure keeps the old backend and settings. Changing `model` also re-infers the backend (bare `claude-*` → `anthropic-native`, anything else → `auto`).
 
 **Edit the project file**:
 ```
@@ -83,8 +81,9 @@ Highlights:
 
 | Key | Default | What it does |
 |---|---|---|
-| `provider` | `litellm` | `litellm`, `anthropic`, or `scripted` |
-| `model` | `anthropic/claude-sonnet-4-6` | Model identifier (LiteLLM format) |
+| `backend` | `anthropic-native` | `auto`, `anthropic-native`, or `scripted` |
+| `model` | `claude-sonnet-4-6` | Model identifier; non-Claude routes use LiteLLM provider prefixes |
+| `request_timeout` | `"auto"` | SDK default, or 3,600 seconds for a custom endpoint |
 | `permission_mode` | `edit` | `yolo`, `edit`, `safe` |
 | `memory` | `off` | `off`, `on`, `intensive` |
 | `max_iterations_per_turn` | `None` | Cap API calls per user message |
@@ -110,7 +109,7 @@ If you've been using Alan for a while, first-run has already happened — the fi
 
 ## Migrating settings forward
 
-New settings added in future Alan releases are auto-merged into your existing `.alan/settings.json` on next load: missing keys get the new default, existing keys preserve your customisations. You never have to re-run `/init` or delete the file to pick up new knobs.
+New settings added in future Alan releases are filled from built-in defaults in memory when absent from an older file. Existing values remain unchanged. The project file itself is not rewritten merely because a new default exists.
 
 ## Inspecting current settings
 
@@ -133,7 +132,7 @@ Both files overlap 95 %. The difference is their role:
 - **Project settings** are the declared baseline for this project.
 - **Session settings** are the snapshot that this specific session is using (even after you edit the project file).
 
-Example: you start a session with `permission_mode=edit`, then edit `.alan/settings.json` to `yolo`. This session stays on `edit` until `/clear` or restart. A new session (or `--resume` on this one) picks up `yolo`.
+Example: you start a session with `permission_mode=edit`, then edit `.alan/settings.json` to `yolo`. The current session and a later `--resume` of it keep the session snapshot. A brand-new session picks up `yolo`; use `/settings permission_mode=yolo` to change the current one.
 
 Most of the time you won't notice — but it explains why editing the project file mid-session seems not to take effect.
 

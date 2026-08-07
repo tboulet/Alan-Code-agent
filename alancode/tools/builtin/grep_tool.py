@@ -2,6 +2,7 @@
 
 import asyncio
 import fnmatch
+import logging
 import os
 import pathlib
 import re
@@ -9,6 +10,8 @@ import shutil
 from typing import Any
 
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_HEAD_LIMIT = 250
 
@@ -242,7 +245,8 @@ class GrepTool(Tool):
                 continue
             try:
                 text = fp.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except OSError as exc:
+                logger.debug("Skipping unreadable search path %s: %s", fp, exc)
                 continue
 
             if mode == "files_with_matches":

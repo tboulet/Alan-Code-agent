@@ -31,10 +31,8 @@ const llmMessages = document.getElementById("llm-messages");
 // Panel toggles
 const toggleChat = document.getElementById("toggle-chat");
 const toggleLlm = document.getElementById("toggle-llm");
-const toggleGitTree = document.getElementById("toggle-git-tree");
 const panelChat = document.getElementById("panel-chat");
 const panelLlm = document.getElementById("panel-llm");
-const panelGitTree = document.getElementById("panel-git-tree");
 
 // ── WebSocket connection ───────────────────────────────────────
 
@@ -138,12 +136,6 @@ function handleEvent(event) {
             appendMsg("msg-local-output", data.text || "");
             break;
 
-        case "git_tree_update":
-            if (typeof renderGitTree === "function") {
-                renderGitTree(data);
-            }
-            break;
-
         default:
             // Ignore unknown events
             break;
@@ -181,7 +173,7 @@ function renderAssistantFinal(data) {
     const wasStreamed = currentStreamEl !== null;
     currentStreamEl = null;
     // Drop the streamed thinking element if it ended up empty (whitespace-only).
-    // Some providers emit a thinking block per turn even when the model produced
+    // Some backends emit a thinking block per turn even when the model produced
     // no actual reasoning content.
     if (currentThinkingEl && !currentThinkingEl.textContent.trim()) {
         currentThinkingEl.remove();
@@ -476,7 +468,7 @@ function sendInputResponse(value) {
 // Known limitation: panel always gets OpenAI-shaped dicts (loop.py uses
 // messages_to_openai_dicts), and that conversion drops thinking blocks. On
 // Anthropic-direct + extended thinking, Claude does attend to those blocks,
-// so the panel underrepresents what the model sees. Fix: feed provider-native
+// so the panel underrepresents what the model sees. Fix: feed backend-native
 // payloads and handle typed-block arrays (text/thinking/tool_use/tool_result).
 function renderLlmPerspective(messages, systemPrompt) {
     llmMessages.innerHTML = "";
@@ -545,21 +537,17 @@ function renderLlmPerspective(messages, systemPrompt) {
 function updatePanelVisibility() {
     const showChat = toggleChat.checked;
     const showLlm = toggleLlm.checked;
-    const showGitTree = toggleGitTree ? toggleGitTree.checked : false;
 
     panelChat.style.display = showChat ? "flex" : "none";
     panelLlm.style.display = showLlm ? "flex" : "none";
-    if (panelGitTree) panelGitTree.style.display = showGitTree ? "flex" : "none";
 
     // Equal flex distribution
     if (showChat) panelChat.style.flex = "1";
     if (showLlm) panelLlm.style.flex = "1";
-    if (panelGitTree && showGitTree) panelGitTree.style.flex = "1";
 }
 
 toggleChat.addEventListener("change", updatePanelVisibility);
 toggleLlm.addEventListener("change", updatePanelVisibility);
-if (toggleGitTree) toggleGitTree.addEventListener("change", updatePanelVisibility);
 
 // ── UI helpers ─────────────────────────────────────────────────
 
@@ -670,59 +658,6 @@ async function loadSessionInfo() {
         // Ignore — session info is optional
     }
 }
-
-// ── Git Tree buttons ──────────────────────────────────────────
-// All buttons operate on the selected node (click a node first).
-
-const btnMoveTo = document.getElementById("btn-move-here");
-const btnRevertTo = document.getElementById("btn-revert-to");
-const btnConvRevertTo = document.getElementById("btn-conv-revert-to");
-const btnAllRevertTo = document.getElementById("btn-all-revert-to");
-
-if (btnMoveTo) {
-    btnMoveTo.addEventListener("click", () => {
-        if (!isAgentRunning && gtSelectedNode) {
-            sendInputResponse("/move " + gtSelectedNode);
-        }
-    });
-}
-
-if (btnRevertTo) {
-    btnRevertTo.addEventListener("click", () => {
-        if (!isAgentRunning && gtSelectedNode) {
-            if (confirm("Revert repo to selected commit? Commits after it will be destroyed.")) {
-                sendInputResponse("/revert " + gtSelectedNode);
-            }
-        }
-    });
-}
-
-if (btnConvRevertTo) {
-    btnConvRevertTo.addEventListener("click", () => {
-        if (!isAgentRunning && gtSelectedNode) {
-            if (confirm("Revert conversation to selected commit? The agent will forget everything after it.")) {
-                sendInputResponse("/convrevert " + gtSelectedNode);
-            }
-        }
-    });
-}
-
-if (btnAllRevertTo) {
-    btnAllRevertTo.addEventListener("click", () => {
-        if (!isAgentRunning && gtSelectedNode) {
-            if (confirm("Revert both repo and conversation to selected commit?")) {
-                sendInputResponse("/allrevert " + gtSelectedNode);
-            }
-        }
-    });
-}
-
-// Patch setAgentRunning to update GT buttons
-const _origSetAgentRunning = setAgentRunning;
-setAgentRunning = function(running) {
-    _origSetAgentRunning(running);
-    if (typeof _updateGitTreeButtons === "function") _updateGitTreeButtons();
-};
 
 // ── Start ──────────────────────────────────────────────────────
 

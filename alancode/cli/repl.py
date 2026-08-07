@@ -17,19 +17,10 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from alancode.agent import AlanCodeAgent
+from alancode.budget import resolve_context_budget
 from alancode.cli.display import display_welcome
 from alancode.cli.errors import classify_error
 from alancode.compact.compact_auto import compaction_auto
-from alancode.git_tree.layout import compute_layout
-from alancode.git_tree.memory_snapshots import get_memory_diff
-from alancode.git_tree.operations import (
-    agt_all_revert,
-    agt_conv_revert,
-    agt_move,
-    agt_revert,
-    agt_revert_to,
-)
-from alancode.git_tree.parser import parse_git_tree
 from alancode.gui.base import SessionUI
 from alancode.memory.memdir import (
     ALAN_MD,
@@ -64,11 +55,6 @@ SLASH_COMMANDS: dict[str, str] = {
     "/memory": "Show or change memory mode (on, off, intensive)",
     "/commit": "Stage and commit changes with an AI-generated commit message",
     "/name": "Set a name for this session (displayed in listings and GUI)",
-    "/revert": "Revert N commits back (default 1). Discards uncommitted changes.",
-    "/move": "Move agent to a commit SHA or branch name",
-    "/convrevert": "Revert N steps in conversation (agent forgets, repo unchanged)",
-    "/allrevert": "Revert both position and conversation by N steps",
-    "/memodiff": "Show memory diff with last commit",
     "/skill": "Invoke a skill: /skill <name> [args] | /skill list | /skill create",
 }
 
@@ -95,15 +81,13 @@ async def run_session(
             f"[dim]Session {label} resumed " f"({len(agent._messages)} messages)[/dim]"
         )
 
-    # Send initial data to GUI panels (so they're not empty before first turn)
-    _send_git_tree_update(agent, ui)
     if agent._messages:
         ui.on_initial_conversation(agent._messages)
     try:
         sp, _boundary = agent.build_system_prompt()
         ui.on_initial_system_prompt("\n\n".join(sp))
     except Exception:
-        pass
+        logger.warning("Could not render the initial system prompt", exc_info=True)
 
     while True:
         try:
@@ -171,13 +155,14 @@ async def _handle_prompt(
         try:
             # Conversation size = last call's authoritative usage
             # (input + output). Zero on a fresh session before any call
-            # completes, or when the provider didn't populate `usage`.
+            # completes, or when the backend didn't populate `usage`.
             lu = agent.last_usage
             conv_tokens = lu.input_tokens + lu.output_tokens
             try:
-                model_info = agent._provider.get_model_info(agent._model)
+                model_info = agent._backend.get_model_info(agent._model)
                 ctx_window = model_info.context_window
             except Exception:
+                logger.debug("Could not resolve context window for display", exc_info=True)
                 ctx_window = 0
             await ui.on_cost(
                 agent.usage,
@@ -187,71 +172,8 @@ async def _handle_prompt(
                 context_window=ctx_window,
             )
         except Exception:
-            pass
+            logger.debug("Could not update the usage display", exc_info=True)
         ui.on_agent_done()
-        _send_git_tree_update(agent, ui)
-
-
-def _send_git_tree_update(agent: AlanCodeAgent, ui: SessionUI) -> None:
-    """Send git tree layout to the UI (non-critical, errors ignored)."""
-    try:
-        if not _is_git_repo(agent.cwd):
-            return
-
-        # Sync agent_position with actual HEAD (defensive — catches missed updates)
-        _sync_agent_position(agent)
-
-        tree = parse_git_tree(
-            agent.cwd,
-            alan_commits=set(agent._session.alan_commits),
-        )
-        layout = compute_layout(
-            tree,
-            conv_path=agent._session.conv_path,
-            compaction_markers=agent._session.compaction_markers,
-            agent_position=agent._session.agent_position_sha,
-            session_root=agent._session.session_root_sha,
-        )
-        ui.on_git_tree_update(layout.to_json())
-    except Exception:
-        pass
-
-
-def _sync_agent_position(agent: AlanCodeAgent) -> None:
-    """Sync agent_position_sha with HEAD if an external change happened.
-
-    Only adds HEAD to conv_path when agent_position_sha is DIFFERENT
-    from HEAD (meaning something external moved it).  If they match
-    but HEAD isn't in conv_path, that's intentional (e.g., after
-    /convrevert) and we don't interfere.
-    """
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=agent.cwd,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return
-        head = result.stdout.strip()
-        state = agent._session
-
-        if state.agent_position_sha and state.agent_position_sha != head:
-            # HEAD changed externally — update position and conv_path
-            state.agent_position_sha = head
-            if head not in state.conv_path:
-                state.add_to_conv_path(head)
-        elif not state.agent_position_sha:
-            # No position set yet — initialize
-            state.agent_position_sha = head
-            if head not in state.conv_path:
-                state.add_to_conv_path(head)
-    except Exception:
-        pass
 
 
 def _display_error(error: Exception, console) -> None:
@@ -288,15 +210,14 @@ async def _handle_slash_command(
 
     if cmd == "/compact":
         await _handle_compact(agent, console, arg)
-        _send_git_tree_update(agent, ui)
         return False
 
     if cmd == "/model":
         _handle_model(agent, console, arg)
         return False
 
-    if cmd == "/backend" or cmd == "/provider":
-        _handle_backend(agent, console, arg, legacy_name=(cmd == "/provider"))
+    if cmd == "/backend":
+        _handle_backend(agent, console, arg)
         return False
 
     if cmd == "/init":
@@ -333,26 +254,6 @@ async def _handle_slash_command(
 
     if cmd == "/name":
         _handle_name(agent, console, arg)
-        return False
-
-    if cmd == "/revert":
-        await _handle_revert(agent, console, arg, ui)
-        return False
-
-    if cmd == "/move":
-        await _handle_move(agent, console, arg, ui)
-        return False
-
-    if cmd == "/convrevert":
-        await _handle_conv_revert(agent, console, arg, ui)
-        return False
-
-    if cmd == "/allrevert":
-        await _handle_all_revert(agent, console, arg, ui)
-        return False
-
-    if cmd == "/memodiff":
-        _handle_memodiff(agent, console, arg)
         return False
 
     if cmd == "/skill":
@@ -395,7 +296,7 @@ def _handle_clear(agent: AlanCodeAgent, console) -> None:
 
 
 async def _handle_compact(agent: AlanCodeAgent, console, arg: str = "") -> None:
-    """Manually trigger a Layer C (forked-agent) compaction.
+    """Manually trigger a Layer C summarization compaction.
 
     Args:
         arg: Optional extra instructions appended to the summarizer
@@ -414,18 +315,17 @@ async def _handle_compact(agent: AlanCodeAgent, console, arg: str = "") -> None:
     # Resolve the budget so the summarizer call is sized to the window
     # (without it, /compact near the limit is rejected on small models).
     try:
-        from alancode.budget import resolve_context_budget
-
         _budget = resolve_context_budget(
-            agent._provider.get_model_info(agent._model), agent._settings,
+            agent._backend.get_model_info(agent._model), agent._settings,
         )
     except Exception:
+        logger.debug("Could not resolve compaction budget", exc_info=True)
         _budget = None
 
     try:
         result = await compaction_auto(
             agent._messages,
-            agent._provider,
+            agent._backend,
             model=agent._model,
             custom_instructions=custom_instructions,
             session_id=agent.session_id,
@@ -436,9 +336,6 @@ async def _handle_compact(agent: AlanCodeAgent, console, arg: str = "") -> None:
         if result:
             agent._messages = [result.boundary_message] + result.summary_messages
             console.print("[green]Conversation compacted successfully.[/green]")
-            # AGT: record compaction marker
-            if _is_git_repo(agent.cwd) and agent._session.agent_position_sha:
-                agent._session.add_compaction_marker(agent._session.agent_position_sha)
         else:
             console.print("[red]Compaction failed.[/red]")
     except Exception as e:
@@ -450,7 +347,7 @@ def _handle_model(agent: AlanCodeAgent, console, arg: str) -> None:
     """Show or change the current model.
 
     With no argument, prints the current model. With an argument, validates
-    it against the settings validator, recreates the provider if the change
+    it against the settings validator, recreates the backend if the change
     is accepted, and injects a ``<system-reminder>`` so the agent knows
     later messages may have come from a different model.
     """
@@ -478,21 +375,13 @@ def _handle_model(agent: AlanCodeAgent, console, arg: str) -> None:
         console.print(f"Current model: [bold]{agent._model}[/bold]")
 
 
-def _handle_backend(
-    agent: AlanCodeAgent, console, arg: str, *, legacy_name: bool = False,
-) -> None:
+def _handle_backend(agent: AlanCodeAgent, console, arg: str) -> None:
     """Show or change the current transport backend.
 
     Unlike ``/model``, no ``<system-reminder>`` is injected — the backend
     is transport routing and doesn't affect what the model sees.
 
-    ``/provider`` is accepted as a deprecated alias; a one-line notice
-    is printed when it's used.
     """
-    if legacy_name:
-        console.print(
-            "[yellow]/provider is deprecated; use /backend.[/yellow]"
-        )
     current = agent._settings.get("backend")
     if arg:
         error = agent.update_session_setting("backend", arg)
@@ -615,7 +504,7 @@ def _handle_settings(agent: AlanCodeAgent, console, arg: str) -> None:
     With no argument, prints the effective settings dict as JSON. With
     ``key=value``, validates and applies the change. Backend-related
     keys (``backend``, ``model``, ``api_key``, ``base_url``) trigger a
-    fresh ``LLMProvider`` instance for the rest of the session.
+    fresh ``LLMBackend`` instance for the rest of the session.
     """
     if not arg:
         formatted = json.dumps(agent._settings, indent=2, default=str)
@@ -765,7 +654,8 @@ async def _handle_commit(
         if not result.stdout.strip():
             console.print("[dim]No changes to commit.[/dim]")
             return
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
+        logger.debug("Failed to check git status for /commit", exc_info=True)
         console.print("[red]Failed to check git status.[/red]")
         return
 
@@ -808,283 +698,6 @@ def _handle_name(agent: AlanCodeAgent, console, arg: str) -> None:
 
     agent._session.session_name = arg.strip()
     console.print(f"[green]Session named: {arg.strip()}[/green]")
-
-
-# ── AGT movement commands ────────────────────────────────────────────────────
-
-
-async def _handle_revert(
-    agent: AlanCodeAgent,
-    console,
-    arg: str = "",
-    ui: SessionUI | None = None,
-) -> None:
-    """Revert repo state.  Accepts N (integer steps) or a SHA/branch target."""
-    if not _is_git_repo(agent.cwd):
-        console.print("[yellow]Requires a git repository.[/yellow]")
-        return
-
-    arg = arg.strip()
-    if not arg:
-
-        result = agt_revert(agent.cwd, agent._session, 1)
-    elif arg.isdigit():
-        n = int(arg)
-        if n < 1:
-            console.print("[yellow]N must be at least 1.[/yellow]")
-            return
-
-        result = agt_revert(agent.cwd, agent._session, n)
-    else:
-        # SHA or branch target — destructive revert to that point
-        target_sha = _resolve_sha(agent.cwd, arg)
-        if not target_sha:
-            console.print(f"[red]Cannot resolve '{arg}'[/red]")
-            return
-
-        result = agt_revert_to(agent.cwd, agent._session, target_sha)
-
-    if result.success:
-        console.print(f"[green]{result.description}[/green]")
-        agent._messages.append(
-            create_user_message(
-                f"<system-reminder>User reverted repo. {result.description}\n"
-                "Re-read files before making assumptions about their current state.</system-reminder>",
-                hide_in_ui=True,
-            )
-        )
-        if ui:
-            _send_git_tree_update(agent, ui)
-    else:
-        console.print(f"[red]{result.description}[/red]")
-
-
-async def _handle_move(
-    agent: AlanCodeAgent,
-    console,
-    arg: str = "",
-    ui: SessionUI | None = None,
-) -> None:
-    """Move the agent to a different commit or branch.
-
-    Safe (non-destructive): checks out the target, updates the agent
-    position, and injects a ``<system-reminder>`` explaining what
-    happened so the model knows the working tree changed.
-
-    Args:
-        arg: Commit SHA or branch name.
-    """
-    if not _is_git_repo(agent.cwd):
-        console.print("[yellow]Requires a git repository.[/yellow]")
-        return
-
-    target = arg.strip()
-    if not target:
-        console.print("[yellow]Usage: /move <commit-sha-or-branch>[/yellow]")
-        return
-
-    # Resolve branch names to SHAs
-    import subprocess as _sp
-
-    result = _sp.run(
-        ["git", "rev-parse", target],
-        cwd=agent.cwd,
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    if result.returncode != 0:
-        console.print(f"[red]Cannot resolve '{target}': {result.stderr.strip()}[/red]")
-        return
-    target_sha = result.stdout.strip()
-
-
-    move = agt_move(agent.cwd, agent._session, target_sha)
-
-    if move.success:
-        console.print(f"[green]{move.description}[/green]")
-        short_sha = target_sha[:10]
-        ref_hint = (
-            f" (ref '{target}')" if target != target_sha else ""
-        )
-        agent._messages.append(
-            create_user_message(
-                f"<system-reminder>User ran /move, checking out commit "
-                f"{short_sha}{ref_hint}. The working tree now reflects that "
-                f"commit — files on disk may have changed compared to what "
-                f"you saw earlier. {move.description} Re-read files before "
-                f"making assumptions about their current state.</system-reminder>",
-                hide_in_ui=True,
-            )
-        )
-        if ui:
-            _send_git_tree_update(agent, ui)
-    else:
-        console.print(f"[red]{move.description}[/red]")
-
-
-async def _handle_conv_revert(
-    agent: AlanCodeAgent,
-    console,
-    arg: str = "",
-    ui: SessionUI | None = None,
-) -> None:
-    """Revert conversation to the state it was at a specific commit.
-
-    Accepts N (steps back in conv_path) or a SHA/branch target.
-    Truncates messages to exactly where they were when that commit was made.
-    """
-    if not _is_git_repo(agent.cwd):
-        console.print("[yellow]Requires a git repository.[/yellow]")
-        return
-
-    arg = arg.strip()
-    if not arg:
-        n = 1
-    elif arg.isdigit():
-        n = int(arg)
-    else:
-        # SHA target — compute N as steps from end of conv_path to this SHA
-        conv = agent._session.conv_path
-        target_sha = _resolve_sha(agent.cwd, arg)
-        if not target_sha:
-            console.print(f"[red]Cannot resolve '{arg}'[/red]")
-            return
-        if target_sha not in conv:
-            console.print(
-                f"[yellow]{arg[:7]} is not in the conversation path.[/yellow]"
-            )
-            return
-        idx = len(conv) - 1 - conv[::-1].index(target_sha)
-        n = len(conv) - 1 - idx
-        if n <= 0:
-            console.print("[dim]Already at that point in conversation.[/dim]")
-            return
-
-    # Find the target SHA we're reverting to
-    conv = agent._session.conv_path
-    target_idx = max(0, len(conv) - 1 - n)
-    target_sha = conv[target_idx] if target_idx < len(conv) else None
-
-
-    result = agt_conv_revert(agent.cwd, agent._session, n)
-
-    if result.success:
-        console.print(f"[green]{result.description}[/green]")
-        # Truncate messages precisely using commit_message_indices
-        if result.steps_reverted > 0 and target_sha:
-            _truncate_messages_to_commit(agent, target_sha)
-        agent._messages.append(
-            create_user_message(
-                f"<system-reminder>User ran /convrevert. {result.description} "
-                "The recent conversation history has been truncated and those "
-                "earlier messages are gone from your context. The working tree "
-                "is unchanged — this only affects the conversation.</system-reminder>",
-                hide_in_ui=True,
-            )
-        )
-        if ui:
-            _send_git_tree_update(agent, ui)
-    else:
-        console.print(f"[red]{result.description}[/red]")
-
-
-async def _handle_all_revert(
-    agent: AlanCodeAgent,
-    console,
-    arg: str = "",
-    ui: SessionUI | None = None,
-) -> None:
-    """Revert both repo and conversation.  Accepts N (steps) or SHA target."""
-    if not _is_git_repo(agent.cwd):
-        console.print("[yellow]Requires a git repository.[/yellow]")
-        return
-
-    arg = arg.strip()
-    if not arg:
-        n = 1
-    elif arg.isdigit():
-        n = int(arg)
-    else:
-        # SHA target — use /move for repo + convrevert for conv
-        target_sha = _resolve_sha(agent.cwd, arg)
-        if not target_sha:
-            console.print(f"[red]Cannot resolve '{arg}'[/red]")
-            return
-        # Move repo
-        await _handle_move(agent, console, target_sha, ui)
-        # Also revert conv to that point
-        await _handle_conv_revert(agent, console, target_sha, ui)
-        return
-
-
-    result = agt_all_revert(agent.cwd, agent._session, n)
-
-    if result.success:
-        console.print(f"[green]{result.description}[/green]")
-        # Truncate messages to the target commit
-        target_sha = result.new_sha
-        if target_sha:
-            _truncate_messages_to_commit(agent, target_sha)
-        agent._messages.append(
-            create_user_message(
-                f"<system-reminder>User ran /allrevert. {result.description} "
-                "Both the working tree and the conversation were reverted: "
-                "earlier messages are gone from your context, and the files "
-                "on disk now reflect the earlier commit. Re-read files if "
-                "you need them.</system-reminder>",
-                hide_in_ui=True,
-            )
-        )
-        if ui:
-            _send_git_tree_update(agent, ui)
-    else:
-        console.print(f"[red]{result.description}[/red]")
-
-
-def _truncate_messages_to_commit(agent: AlanCodeAgent, target_sha: str) -> None:
-    """Truncate messages to exactly where they were when *target_sha* was committed.
-
-    Uses ``commit_message_indices`` from session state for precision.
-    Falls back to heuristic if no index is recorded.
-    """
-    indices = agent._session.commit_message_indices
-    if target_sha in indices:
-        cutoff = indices[target_sha]
-        if 0 < cutoff < len(agent._messages):
-            agent._messages = agent._messages[:cutoff]
-            return
-
-    # Fallback: no index recorded — try to find the GitCommit tool result
-    # for target_sha in messages and truncate after it
-    for i in range(len(agent._messages) - 1, -1, -1):
-        msg = agent._messages[i]
-        if hasattr(msg, "content") and isinstance(msg.content, list):
-            for block in msg.content:
-                if hasattr(block, "name") and block.name == "GitCommit":
-                    # Check if this tool call produced the target commit
-                    if hasattr(block, "input") and isinstance(block.input, dict):
-                        # Can't reliably match — keep looking
-                        pass
-        # Check tool results mentioning the SHA
-        if hasattr(msg, "content") and isinstance(msg.content, str):
-            if target_sha[:7] in msg.content:
-                agent._messages = agent._messages[: i + 1]
-                return
-
-
-def _resolve_sha(cwd: str, target: str) -> str | None:
-    """Resolve a branch/tag/short-SHA to a full SHA."""
-    import subprocess as _sp
-
-    result = _sp.run(
-        ["git", "rev-parse", target],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
 
 
 async def _handle_skill(
@@ -1147,29 +760,3 @@ def _show_skills_list(agent: AlanCodeAgent, console) -> None:
         table.add_row(skill.name, skill.description, source)
     console.print(table)
     console.print("[dim]Invoke with: /skill <name> [args][/dim]")
-
-
-def _handle_memodiff(agent: AlanCodeAgent, console, arg: str = "") -> None:
-    if not _is_git_repo(agent.cwd):
-        console.print("[yellow]Requires a git repository.[/yellow]")
-        return
-
-
-    current = agent._session.agent_position_sha
-    if not current:
-        console.print("[dim]No AGT position tracked yet.[/dim]")
-        return
-
-    # Find the previous alan commit to diff against
-    prev_commits = agent._session.alan_commits
-    if len(prev_commits) < 2:
-        console.print("[dim]Not enough commits to show a memory diff.[/dim]")
-        return
-
-    prev = prev_commits[-2]
-    diff = get_memory_diff(agent.cwd, prev, current)
-    if diff:
-        console.print(f"[bold]Memory diff ({prev[:7]} → {current[:7]}):[/bold]")
-        console.print(diff)
-    else:
-        console.print("[dim]No memory differences found.[/dim]")

@@ -12,6 +12,7 @@ See docs/architecture/query-loop.md for the phase-by-phase walkthrough.
 
 import asyncio
 import logging
+import queue
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -39,8 +40,8 @@ from alancode.messages.factory import (
 )
 from alancode.messages.normalization import normalize_messages_for_api
 from alancode.messages.serialization import messages_to_openai_dicts
-from alancode.providers.base import (
-    LLMProvider,
+from alancode.backends.base import (
+    LLMBackend,
     StreamError,
     StreamMessageDelta,
     StreamMessageStart,
@@ -51,7 +52,11 @@ from alancode.providers.base import (
     StreamToolUseStop,
     ToolSchema,
 )
-from alancode.api.errors import is_prompt_too_long
+from alancode.api.errors import (
+    InvalidToolCallError,
+    ServerError,
+    is_prompt_too_long,
+)
 from alancode.api.retry import stream_with_retry
 from alancode.api.cost_tracker import CostTracker
 from alancode.budget import ConfigError, clamp_output_budget, resolve_context_budget
@@ -66,7 +71,11 @@ from alancode.compact.hard_truncate import (
     build_hard_truncation_result as _build_hard_truncation_result,
     hard_truncate_messages,
 )
-from alancode.tools.text_tool_parser import extract_tool_calls_from_text, MAX_TEXT_TOOL_RETRIES
+from alancode.tools.text_tool_parser import (
+    MAX_TEXT_TOOL_RETRIES,
+    _extract_thinking,
+    extract_tool_calls_from_text,
+)
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
 from alancode.skills.tool_filter import filter_tools_for_skill
@@ -75,6 +84,7 @@ from alancode.utils.tokens import predicted_next_call_tokens
 logger = logging.getLogger(__name__)
 
 _hard_truncate_fallback = hard_truncate_messages
+MAX_NATIVE_TOOL_RETRIES = 2
 
 
 # ---------------------------------------------------------------------------
@@ -105,18 +115,16 @@ def _drain_message_queue(msg_queue) -> list[UserMessage]:
     Accepts either a ``queue.SimpleQueue`` or a plain list.
     Messages are consumed and wrapped as user messages.
     """
-    import queue as _queue_mod
-
     if msg_queue is None:
         return []
 
     messages: list[UserMessage] = []
-    if isinstance(msg_queue, _queue_mod.SimpleQueue):
+    if isinstance(msg_queue, queue.SimpleQueue):
         while not msg_queue.empty():
             try:
                 text = msg_queue.get_nowait()
                 messages.append(create_user_message(text))
-            except _queue_mod.Empty:
+            except queue.Empty:
                 break
     elif isinstance(msg_queue, list):
         while msg_queue:
@@ -136,7 +144,7 @@ class QueryParams:
     """Parameters for the query loop."""
     messages: list[Message]
     system_prompt: list[str]
-    provider: LLMProvider
+    backend: LLMBackend
     tools: list[Tool]
     context: ToolUseContext
     cost_tracker: CostTracker
@@ -192,7 +200,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
     # Model geometry and settings are fixed for the whole turn, so every
     # derived limit (threshold, clear target, blocking, caps) is resolved
     # once here. See alancode/budget.py for the DAG.
-    model_info = params.provider.get_model_info(params.model)
+    model_info = params.backend.get_model_info(params.model)
     try:
         budget = resolve_context_budget(model_info, params.settings)
     except ConfigError as e:
@@ -327,7 +335,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 try:
                     result = await compaction_auto(
                         messages_for_query,
-                        params.provider,
+                        params.backend,
                         model=params.model,
                         memory_mode=params.memory_mode,
                         settings=params.settings,
@@ -445,7 +453,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 params.tools, params.context.active_skill_filter
             )
 
-        # Don't pass tool schemas to the provider when using text-based
+        # Don't pass tool schemas to the backend when using text-based
         # tool calling — tools are communicated via the system prompt instead.
         if params.settings.get("tool_call_format"):
             tool_schemas = []
@@ -471,7 +479,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         try:
             async for event in stream_with_retry(
-                params.provider,
+                params.backend,
                 api_messages_dicts,
                 params.system_prompt,
                 tool_schemas,
@@ -551,17 +559,61 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     )
                     return
 
+        except InvalidToolCallError as e:
+            if state.native_tool_retries < MAX_NATIVE_TOOL_RETRIES:
+                state.native_tool_retries += 1
+                logger.warning(
+                    "Malformed native tool call (retry %d/%d): %s",
+                    state.native_tool_retries,
+                    MAX_NATIVE_TOOL_RETRIES,
+                    e,
+                )
+                feedback = create_user_message(
+                    "Your previous native tool call could not be executed: "
+                    f"{e} Return the tool call again with a valid JSON object "
+                    "for its arguments.",
+                    hide_in_ui=False,
+                )
+                yield feedback
+                state.messages = list(messages_for_query) + [feedback]
+                state.transition = "native_tool_retry"
+                continue
+
+            logger.error(
+                "Native tool call retries exhausted (%d): %s",
+                MAX_NATIVE_TOOL_RETRIES,
+                e,
+            )
+            yield create_assistant_error_message(
+                str(e), api_error="invalid_tool_call"
+            )
+            return
+
         except Exception as e:
+            partial_response = bool(
+                getattr(e, "alan_response_content_yielded", False)
+            )
+            context_failure = (
+                is_prompt_too_long(str(e)) and not partial_response
+            )
+            opaque_server_failure = (
+                isinstance(e, ServerError) and not partial_response
+            )
             if (
-                is_prompt_too_long(str(e))
+                (context_failure or opaque_server_failure)
                 and not state.has_attempted_emergency_compact
             ):
-                logger.info("Emergency compaction triggered (prompt too long)")
+                reason = (
+                    "prompt too long"
+                    if context_failure
+                    else "persistent HTTP 5xx may hide a context overflow"
+                )
+                logger.info("Emergency compaction triggered (%s)", reason)
                 state.has_attempted_emergency_compact = True
                 try:
                     emergency_result = await compaction_auto(
                         messages_for_query,
-                        params.provider,
+                        params.backend,
                         model=params.model,
                         memory_mode=params.memory_mode,
                         settings=params.settings,
@@ -594,15 +646,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             return
 
         # -- Phase 5: Build final assistant message ----------------------
-        # Fix for thinking models: if all content is in
-        # ThinkingBlocks and no TextBlock exists, the model's answer is
-        # embedded at the end of the thinking. Mark thinking as the response.
-        has_text = any(isinstance(b, TextBlock) and b.text.strip() for b in assistant_content)
-        has_thinking = any(isinstance(b, ThinkingBlock) for b in assistant_content)
-        if has_thinking and not has_text and not tool_use_blocks:
-            # The thinking IS the response — add a note as text
-            logger.info("Thinking model returned empty content — using thinking as response")
-
         assistant_msg = AssistantMessage(
             content=assistant_content,
             model=current_model,
@@ -610,7 +653,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             usage=current_usage,
             request_id=request_id,
         )
-
         # -- Phase 5.25: Extract thinking from text -------------------------
         # Some models (e.g. Qwen3 thinking variants via Ollama/LiteLLM) embed
         # <think>...</think> in the text content instead of using separate
@@ -620,7 +662,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 b.text for b in assistant_content if isinstance(b, TextBlock)
             )
             if "<think>" in full_text_for_thinking or "</think>" in full_text_for_thinking:
-                from alancode.tools.text_tool_parser import _extract_thinking
                 thinking_text, remaining_text = _extract_thinking(full_text_for_thinking)
                 if thinking_text:
                     new_blocks: list[AssistantContentBlock] = [
@@ -653,21 +694,79 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             full_text = "".join(
                 b.text for b in assistant_content if isinstance(b, TextBlock)
             )
+            full_thinking = "".join(
+                b.thinking
+                for b in assistant_content
+                if isinstance(b, ThinkingBlock)
+            )
+            parse_source: str | None = None
+            parse_result = None
             if full_text:
+                parse_source = "text"
                 parse_result = extract_tool_calls_from_text(
                     full_text, format=tool_call_format,
                 )
 
+            # Some OpenAI-compatible reasoning models put their textual
+            # tool-call protocol in reasoning_content instead of content.
+            # Inspect thinking only when normal text did not already contain
+            # a call (or a malformed attempt), and keep it as ThinkingBlock
+            # content so private reasoning never leaks into the final answer.
+            if (
+                full_thinking
+                and (
+                    parse_result is None
+                    or (not parse_result.tool_calls and not parse_result.error)
+                )
+            ):
+                thinking_result = extract_tool_calls_from_text(
+                    full_thinking, format=tool_call_format,
+                )
+                if thinking_result.tool_calls or thinking_result.error:
+                    parse_source = "thinking"
+                    parse_result = thinking_result
+
+            if parse_result is not None:
+
                 if parse_result.tool_calls:
                     logger.info(
-                        "Extracted %d tool call(s) from text (format=%s)",
-                        len(parse_result.tool_calls), tool_call_format,
+                        "Extracted %d tool call(s) from %s (format=%s)",
+                        len(parse_result.tool_calls), parse_source,
+                        tool_call_format,
                     )
                     new_content: list[AssistantContentBlock] = []
-                    if parse_result.thinking:
-                        new_content.append(ThinkingBlock(thinking=parse_result.thinking))
-                    if parse_result.cleaned_text:
-                        new_content.append(TextBlock(text=parse_result.cleaned_text))
+                    if parse_source == "thinking":
+                        remaining_thinking = "\n\n".join(
+                            part
+                            for part in (
+                                parse_result.thinking,
+                                parse_result.cleaned_text,
+                            )
+                            if part
+                        )
+                        if remaining_thinking:
+                            new_content.append(
+                                ThinkingBlock(thinking=remaining_thinking)
+                            )
+                        new_content.extend(
+                            block
+                            for block in assistant_content
+                            if not isinstance(block, ThinkingBlock)
+                        )
+                    else:
+                        new_content.extend(
+                            block
+                            for block in assistant_content
+                            if not isinstance(block, TextBlock)
+                        )
+                        if parse_result.thinking:
+                            new_content.append(
+                                ThinkingBlock(thinking=parse_result.thinking)
+                            )
+                        if parse_result.cleaned_text:
+                            new_content.append(
+                                TextBlock(text=parse_result.cleaned_text)
+                            )
                     for pc in parse_result.tool_calls:
                         call_id = f"text_{uuid.uuid4().hex[:8]}"
                         block = ToolUseBlock(
@@ -710,9 +809,19 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     else:
                         logger.error("Text tool call retries exhausted (%d)", MAX_TEXT_TOOL_RETRIES)
 
-                elif parse_result.thinking or parse_result.cleaned_text != full_text:
+                elif (
+                    parse_source == "text"
+                    and (
+                        parse_result.thinking
+                        or parse_result.cleaned_text != full_text
+                    )
+                ):
                     # No tool calls but thinking was extracted or text changed — rebuild
-                    rebuilt_content: list[AssistantContentBlock] = []
+                    rebuilt_content: list[AssistantContentBlock] = [
+                        block
+                        for block in assistant_content
+                        if not isinstance(block, TextBlock)
+                    ]
                     if parse_result.thinking:
                         rebuilt_content.append(ThinkingBlock(thinking=parse_result.thinking))
                     if parse_result.cleaned_text:
@@ -724,6 +833,32 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         usage=current_usage,
                         request_id=request_id,
                     )
+
+        # A response containing only private reasoning (including reasoning
+        # extracted from inline <think> tags) must not look like successful
+        # empty completion to a caller. Run this after text-tool parsing so a
+        # tool call buried in reasoning still gets a chance to execute.
+        has_visible_text = any(
+            isinstance(block, TextBlock) and block.text.strip()
+            for block in assistant_msg.content
+        )
+        has_thinking = any(
+            isinstance(block, ThinkingBlock) for block in assistant_msg.content
+        )
+        if not has_visible_text and not tool_use_blocks:
+            detail = "reasoning but " if has_thinking else ""
+            logger.warning(
+                "Model returned %sno visible answer or tool call", detail
+            )
+            assistant_msg.content.append(
+                TextBlock(
+                    text=(
+                        f"Model returned {detail}no visible answer or tool call."
+                    )
+                )
+            )
+            assistant_msg.is_api_error_message = True
+            assistant_msg.api_error = "empty_response"
 
         # Yield the (possibly rebuilt) assistant message
         yield assistant_msg

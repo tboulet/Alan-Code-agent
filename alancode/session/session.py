@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from alancode.utils.atomic_io import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 # Fields that should NOT be written to session settings (ephemeral / per-invocation only)
@@ -117,13 +119,13 @@ def load_session_settings(cwd: str, session_id: str) -> dict[str, Any]:
     try:
         with open(path) as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read session settings %s: %s", path, exc)
         return {}
 
 
 def save_session_settings(cwd: str, session_id: str, settings: dict[str, Any]) -> None:
     """Save settings snapshot for a session atomically."""
-    from alancode.utils.atomic_io import atomic_write_json
     path = get_session_settings_path(cwd, session_id)
     to_write = {k: v for k, v in settings.items() if k not in _EPHEMERAL_FIELDS}
     atomic_write_json(path, to_write, indent=2)

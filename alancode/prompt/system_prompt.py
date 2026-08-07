@@ -1,37 +1,14 @@
 """System prompt construction.
 
 Assembles the 14-section system prompt (see
-docs/architecture/system-prompt.md). Static sections 1-8 are designed to
-be byte-identical across calls so providers with prompt caching can
-cache them; sections 9-14 are per-session / per-mode and intentionally
-sit at the end of the cache chain.
+docs/architecture/system-prompt.md). The built-in/environment/scratchpad
+prefix is stable for an agent's lifetime; skills, memory, and project or
+explicit append sections sit after its cache boundary.
 """
 
 from datetime import datetime, timezone
 
 from alancode.utils.env import get_cwd, get_os_version, get_platform, get_shell, is_git_repo
-
-_session_datetime_cache: str | None = None
-
-
-def get_session_datetime() -> str:
-    """Return the session start time, cached on first call.
-
-    Unlike a module-level constant, this is safe for long-lived processes
-    hosting multiple sessions — each process restart gets a new timestamp.
-    For truly multi-session processes, call ``reset_session_datetime()``
-    between sessions.
-    """
-    global _session_datetime_cache
-    if _session_datetime_cache is None:
-        _session_datetime_cache = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
-    return _session_datetime_cache
-
-
-def reset_session_datetime() -> None:
-    """Reset the cached session datetime. Call between sessions in long-lived processes."""
-    global _session_datetime_cache
-    _session_datetime_cache = None
 
 
 # ── Static sections (globally cacheable) ───────────────────────────────────
@@ -348,10 +325,15 @@ def get_environment_section(
     *,
     model: str = "",
     cwd: str | None = None,
+    session_started_at: str | None = None,
 ) -> str:
     """Environment info that's stable for the lifetime of the session.
     """
     effective_cwd = cwd or get_cwd()
+    if session_started_at is None:
+        session_started_at = (
+            datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
+        )
     lines = [
         "# Environment",
         "You have been invoked in the following environment:",
@@ -360,8 +342,9 @@ def get_environment_section(
         f" - Platform: {get_platform()}",
         f" - Shell: {get_shell()}",
         f" - OS Version: {get_os_version()}",
-        f" - Session started: {get_session_datetime()}",
     ]
+    if session_started_at:
+        lines.append(f" - Session started: {session_started_at}")
     if model:
         lines.append(f" - Model: {model}")
 
@@ -422,6 +405,7 @@ def get_system_prompt(
     append_prompt: str | None = None,
     memory_section: str | None = None,
     scratchpad_dir: str | None = None,
+    session_started_at: str | None = None,
 ) -> tuple[list[str], int]:
     """Build the complete system prompt as a list of sections.
 
@@ -433,6 +417,8 @@ def get_system_prompt(
     """
     if custom_prompt is not None:
         sections: list[str] = [custom_prompt]
+        if append_prompt:
+            sections.append(append_prompt)
         return sections, 1
 
     # ── Static block: byte-identical for the whole session ──────────────
@@ -445,7 +431,11 @@ def get_system_prompt(
         get_tone_section(),
         get_communication_section(),
         get_session_guidance_section(),
-        get_environment_section(model=model, cwd=cwd),
+        get_environment_section(
+            model=model,
+            cwd=cwd,
+            session_started_at=session_started_at,
+        ),
     ]
     if scratchpad_dir:
         sections.append(get_scratchpad_section(scratchpad_dir))

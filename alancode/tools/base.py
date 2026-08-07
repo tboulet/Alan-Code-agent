@@ -30,7 +30,6 @@ class ToolUseContext:
     agent_id: str | None = None  # Non-null for subagents
     verbose: bool = False
     ask_user_callback: Callable[[str, list[str]], Awaitable[str]] | None = None
-    session_state: Any = None  # SessionState instance (for AGT tools)
     active_skill_filter: list[str] | None = None  # allowed-tools set by SkillTool, enforced by the query loop
 
 

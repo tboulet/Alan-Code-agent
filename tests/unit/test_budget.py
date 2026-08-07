@@ -19,7 +19,7 @@ from alancode.budget import (
     clamp_output_budget,
     resolve_context_budget,
 )
-from alancode.providers.base import ModelInfo
+from alancode.backends.base import ModelInfo
 
 
 def info(cw: int = 200_000, max_out: int = 8_192) -> ModelInfo:

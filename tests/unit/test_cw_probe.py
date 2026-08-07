@@ -2,7 +2,7 @@
 
 Covers: the descending probe ladder (success, refinement, ceiling
 distrust, fatal errors, floor rejection), the probe cache roundtrip, the
-LiteLLMProvider resolution rungs (fallback + warning, cache hit), and the
+LiteLLMBackend resolution rungs (fallback + warning, cache hit), and the
 fixed Ollama /api/show parsing.
 """
 
@@ -12,14 +12,14 @@ from types import SimpleNamespace
 
 import pytest
 
-import alancode.providers.cw_probe as cw_probe
-from alancode.providers.cw_probe import (
+import alancode.backends.cw_probe as cw_probe
+from alancode.backends.cw_probe import (
     ProbeResult,
     load_cached_context_window,
     probe_context_window,
     save_cached_context_window,
 )
-from alancode.providers.litellm_provider import LiteLLMProvider
+from alancode.backends.litellm_backend import LiteLLMBackend
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ class TestProbeLadder:
         def behavior(n):
             if n > 200_000:
                 return ("too_long", 0)
-            return ("ok", n)  # provider reports the accepted size
+            return ("ok", n)  # backend reports the accepted size
 
         calls = script_attempts(monkeypatch, behavior)
         result = await probe_context_window("some/model")
@@ -76,7 +76,7 @@ class TestProbeLadder:
 
     @pytest.mark.asyncio
     async def test_uses_reported_usage_not_nominal(self, monkeypatch):
-        # The provider's own token count (71% of our nominal padding) is
+        # The backend's own token count (71% of our nominal padding) is
         # the measurement, not the nominal probe size. First success at
         # 65_536, refinement at 98_304 -> int(98_304 * 0.71) = 69_795.
         def behavior(n):
@@ -161,7 +161,7 @@ class TestProbeCache:
 
 
 # ---------------------------------------------------------------------------
-# Resolution chain in LiteLLMProvider.get_model_info
+# Resolution chain in LiteLLMBackend.get_model_info
 # ---------------------------------------------------------------------------
 
 
@@ -172,13 +172,13 @@ class TestResolutionChain:
         monkeypatch.setattr(cw_probe, "_cache_file", lambda: cache)
 
     def test_override_wins(self):
-        p = LiteLLMProvider(model="unknown-xyz-model", context_window=99_000)
+        p = LiteLLMBackend(model="unknown-xyz-model", context_window=99_000)
         info = p.get_model_info()
         assert info.context_window == 99_000
         assert info.cw_source == "override"
 
     def test_registry_hit(self):
-        p = LiteLLMProvider(model="gpt-4o")
+        p = LiteLLMBackend(model="gpt-4o")
         info = p.get_model_info()
         assert info.cw_source == "registry"
         assert info.context_window >= 100_000
@@ -186,13 +186,13 @@ class TestResolutionChain:
     def test_known_table_hit(self):
         # Not in litellm's registry under this exact name, but matches
         # the built-in table by substring.
-        p = LiteLLMProvider(model="myserver/llama3.1-custom")
+        p = LiteLLMBackend(model="myserver/llama3.1-custom")
         info = p.get_model_info()
         assert info.cw_source == "known_table"
         assert info.context_window == 128_000
 
     def test_fallback_is_conservative_and_warns_once(self, caplog):
-        p = LiteLLMProvider(model="totally-unknown-xyz")
+        p = LiteLLMBackend(model="totally-unknown-xyz")
         with caplog.at_level(logging.WARNING):
             info1 = p.get_model_info()
             info2 = p.get_model_info()
@@ -204,7 +204,7 @@ class TestResolutionChain:
 
     def test_cache_rung_before_fallback(self):
         save_cached_context_window("totally-unknown-xyz", None, 131_072, "probed")
-        p = LiteLLMProvider(model="totally-unknown-xyz")
+        p = LiteLLMBackend(model="totally-unknown-xyz")
         info = p.get_model_info()
         assert info.context_window == 131_072
         assert info.cw_source == "cache"
@@ -215,7 +215,7 @@ class TestResolutionChain:
             return ProbeResult(65_536, "probed")
 
         monkeypatch.setattr(cw_probe, "probe_context_window", fake_probe)
-        p = LiteLLMProvider(model="totally-unknown-xyz")
+        p = LiteLLMBackend(model="totally-unknown-xyz")
         assert p.get_model_info().cw_source == "fallback"
 
         detected = await p.probe_and_cache_context_window()
@@ -233,7 +233,7 @@ class TestResolutionChain:
             return ProbeResult(None, "ceiling_distrust", "silent truncator")
 
         monkeypatch.setattr(cw_probe, "probe_context_window", fake_probe)
-        p = LiteLLMProvider(model="totally-unknown-xyz")
+        p = LiteLLMBackend(model="totally-unknown-xyz")
         assert await p.probe_and_cache_context_window() is None
         assert p.get_model_info().cw_source == "fallback"
 
@@ -253,8 +253,8 @@ class _FakeResponse:
 
 
 class TestOllamaShow:
-    def _provider(self):
-        return LiteLLMProvider(
+    def _backend(self):
+        return LiteLLMBackend(
             model="ollama/llama-custom", api_base="http://localhost:11434/v1"
         )
 
@@ -272,7 +272,7 @@ class TestOllamaShow:
 
         monkeypatch.setattr("requests.get", fake_get)
         monkeypatch.setattr("requests.post", fake_post)
-        assert self._provider()._query_server_context_window(
+        assert self._backend()._query_server_context_window(
             "ollama/llama-custom"
         ) == 131_072
 
@@ -289,6 +289,6 @@ class TestOllamaShow:
 
         monkeypatch.setattr("requests.get", fake_get)
         monkeypatch.setattr("requests.post", fake_post)
-        assert self._provider()._query_server_context_window(
+        assert self._backend()._query_server_context_window(
             "ollama/llama-custom"
         ) == 4_096

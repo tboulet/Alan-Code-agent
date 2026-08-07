@@ -2,10 +2,10 @@
 
 Two serialization targets:
 - **OpenAI format** (``messages_to_openai_dicts``) — the universal default.
-  Used by LiteLLM and any OpenAI-compatible provider.
-- **Anthropic format** (``message_to_anthropic_dict``) — used by AnthropicProvider.
+  Used by LiteLLM and any OpenAI-compatible backend.
+- **Anthropic format** (``message_to_anthropic_dict``) — used by AnthropicBackend.
 
-The query loop and compaction produce OpenAI-format dicts. Each provider
+The query loop and compaction produce OpenAI-format dicts. Each backend
 translates if needed.
 """
 
@@ -26,7 +26,7 @@ from alancode.messages.types import (
 )
 
 
-# ── Anthropic format (used by AnthropicProvider) ────────────────────────────
+# ── Anthropic format (used by AnthropicBackend) ────────────────────────────
 
 
 def block_to_anthropic_dict(block: Any) -> dict[str, Any]:

@@ -1,11 +1,11 @@
-"""Scripted LLM provider for testing.
+"""Scripted LLM backend for testing.
 
-``ScriptedProvider`` is the single test provider for Alan Code.  It supports
+``ScriptedBackend`` is the single test backend for Alan Code.  It supports
 two modes of operation:
 
 **Sequential** — responses consumed in FIFO order (simple tests)::
 
-    provider = ScriptedProvider.from_responses([
+    backend = ScriptedBackend.from_responses([
         text("Hello!"),
         tool_call("Bash", {"command": "ls"}),
         text("Done."),
@@ -13,7 +13,7 @@ two modes of operation:
 
 **Reactive** — responses chosen by rules that inspect the conversation::
 
-    provider = ScriptedProvider(rules=[
+    backend = ScriptedBackend(rules=[
         rule(turn=0, respond=tool_call("Bash", {"command": "ls"})),
         rule(condition=lambda ctx: ctx.last_tool_result_contains("error"),
              respond=text("Something went wrong.")),
@@ -31,10 +31,10 @@ import uuid as _uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Callable
 
-from alancode.providers.base import (
-    LLMProvider,
+from alancode.backends.base import (
+    LLMBackend,
     ModelInfo,
-    ProviderStreamEvent,
+    BackendStreamEvent,
     StreamError,
     StreamMessageDelta,
     StreamMessageStart,
@@ -55,7 +55,7 @@ from alancode.providers.base import (
 
 @dataclass
 class ScriptedResponse:
-    """What the provider should respond with."""
+    """What the backend should respond with."""
 
     text: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
@@ -268,12 +268,12 @@ def rule(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Provider
+# Backend
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class ScriptedProvider(LLMProvider):
-    """Test provider with scripted responses — sequential or reactive.
+class ScriptedBackend(LLMBackend):
+    """Test backend with scripted responses — sequential or reactive.
 
     Every call to ``stream()`` is recorded in ``call_log`` for assertions.
     """
@@ -291,8 +291,8 @@ class ScriptedProvider(LLMProvider):
         responses: list[ScriptedResponse],
         *,
         fallback: ScriptedResponse | None = None,
-    ) -> ScriptedProvider:
-        """Create a provider with FIFO responses (and optional fallback).
+    ) -> ScriptedBackend:
+        """Create a backend with FIFO responses (and optional fallback).
 
         Each response is consumed in order.  If a fallback is provided,
         it's used when the queue is exhausted.  Otherwise, an error is
@@ -309,7 +309,7 @@ class ScriptedProvider(LLMProvider):
         """Append a rule."""
         self._rules.append(r)
 
-    # ── LLMProvider interface ─────────────────────────────────────────
+    # ── LLMBackend interface ─────────────────────────────────────────
 
     async def stream(
         self,
@@ -322,7 +322,7 @@ class ScriptedProvider(LLMProvider):
         thinking: ThinkingConfig | None = None,
         stop_sequences: list[str] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[ProviderStreamEvent, None]:
+    ) -> AsyncGenerator[BackendStreamEvent, None]:
         """Evaluate rules and yield the matching response."""
 
         turn = self._call_count
@@ -348,7 +348,7 @@ class ScriptedProvider(LLMProvider):
 
         if resp is None:
             yield StreamError(
-                error="ScriptedProvider: no matching rule for this conversation state",
+                error="ScriptedBackend: no matching rule for this conversation state",
                 error_type="api_error",
             )
             return

@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from alancode.providers.base import ModelInfo
+from alancode.backends.base import ModelInfo
 
 logger = logging.getLogger(__name__)
 

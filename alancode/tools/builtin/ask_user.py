@@ -5,6 +5,7 @@ The user selects one option, or chooses "Other" to type a custom response.
 The selected answer is returned to the model as the tool result.
 """
 
+import asyncio
 from typing import Any
 
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
@@ -64,8 +65,6 @@ class AskUserQuestionTool(Tool):
         return None
 
     async def call(self, args: dict[str, Any], context: ToolUseContext) -> ToolResult:
-        import asyncio
-
         question: str = args["question"]
         options: list[str] = args["options"]
 

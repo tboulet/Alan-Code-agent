@@ -1,6 +1,6 @@
 """ScriptedUI — test SessionUI implementation with scripted inputs.
 
-``ScriptedUI`` mirrors the ``ScriptedProvider`` pattern: it supports
+``ScriptedUI`` mirrors the ``ScriptedBackend`` pattern: it supports
 sequential and reactive modes for scripting user interactions in tests.
 
 **Sequential** — inputs consumed in FIFO order::
@@ -177,7 +177,6 @@ class ScriptedUI(SessionUI):
         self.cost_log: list[dict[str, Any]] = []
         self.console_log: list[str] = []
         self.lifecycle_log: list[str] = []  # "agent_start", "agent_done", "reset_stream"
-        self.tree_update_log: list[dict[str, Any]] = []  # AGT tree updates
 
         # ── Console ──────────────────────────────────────────────────
         self._buf = io.StringIO()
@@ -318,12 +317,6 @@ class ScriptedUI(SessionUI):
 
     def reset_stream_state(self) -> None:
         self.lifecycle_log.append("reset_stream()")
-
-    # ── SessionUI: Git Tree ──────────────────────────────────────────
-
-    def on_git_tree_update(self, tree_data: dict) -> None:
-        """Log tree updates for test assertions."""
-        self.tree_update_log.append(tree_data)
 
     # ── SessionUI: Console ───────────────────────────────────────────
 

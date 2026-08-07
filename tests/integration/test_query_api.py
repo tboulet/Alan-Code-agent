@@ -4,8 +4,8 @@ import pytest
 
 from alancode.agent import AlanCodeAgent, AgentState
 from alancode.messages.types import AssistantMessage, RequestStartEvent, UserMessage
-from alancode.providers.scripted_provider import (
-    ScriptedProvider,
+from alancode.backends.scripted_backend import (
+    ScriptedBackend,
     ScriptedResponse,
     rule,
     text,
@@ -15,8 +15,8 @@ from alancode.providers.scripted_provider import (
 
 def _make_agent(*responses, **kwargs):
     """Create an agent with scripted responses."""
-    provider = ScriptedProvider.from_responses(list(responses))
-    return AlanCodeAgent(backend=provider, cwd="/tmp/test", permission_mode="yolo", **kwargs)
+    backend = ScriptedBackend.from_responses(list(responses))
+    return AlanCodeAgent(backend=backend, cwd="/tmp/test", permission_mode="yolo", **kwargs)
 
 
 # ── query() — sync, returns str ──────────────────────────────────────────────
@@ -180,7 +180,7 @@ class TestCrossCutting:
     def test_cost_tracked(self):
         agent = _make_agent(text("ok"))
         agent.query("Hi")
-        # ScriptedProvider reports usage in StreamMessageDelta
+        # ScriptedBackend reports usage in StreamMessageDelta
         assert agent.usage.input_tokens > 0 or agent.usage.output_tokens > 0
 
     def test_session_id_stable(self):
@@ -192,13 +192,13 @@ class TestCrossCutting:
 
     def test_max_iterations_per_turn_respected(self):
         """query_events should stop at max_iterations_per_turn even with infinite tool calls."""
-        provider = ScriptedProvider(rules=[
+        backend = ScriptedBackend(rules=[
             rule(respond=tool_call("Bash", {"command": "echo loop"})),
         ])
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test", permission_mode="yolo", max_iterations_per_turn=2)
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test", permission_mode="yolo", max_iterations_per_turn=2)
         events = agent.query_events("Loop forever")
         # Should not run forever
-        assert provider._call_count <= 4
+        assert backend._call_count <= 4
 
     def test_inject_message(self):
         """inject_message queues a message (doesn't crash)."""

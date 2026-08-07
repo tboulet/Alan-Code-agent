@@ -4,7 +4,7 @@ Recreates the reproduction of GitHub issue #2 (tool-result flooding on small
 context windows crashing the session) and locks in the redesign's guarantees:
 
 - I1 (call legality): no constructed call violates input + max_tokens <= CW,
-  asserted at the provider boundary for every call including summarizer and
+  asserted at the backend boundary for every call including summarizer and
   escalated ones. The audit estimate is a deliberate UNDERestimate (chars/4)
   so a flagged violation is real, never estimator noise.
 - Compaction reachability: Layer C is attempted whenever the flood crosses
@@ -22,18 +22,18 @@ import pytest
 
 from alancode.agent import AlanCodeAgent
 from alancode.messages.types import AssistantMessage, UserMessage
-from alancode.providers.base import (
-    LLMProvider,
+from alancode.backends.base import (
+    LLMBackend,
     ModelInfo,
-    ProviderStreamEvent,
+    BackendStreamEvent,
     StreamError,
     StreamMessageStop,
     StreamTextDelta,
     ThinkingConfig,
     ToolSchema,
 )
-from alancode.providers.scripted_provider import (
-    ScriptedProvider,
+from alancode.backends.scripted_backend import (
+    ScriptedBackend,
     ScriptedResponse,
     text,
     tool_call,
@@ -71,8 +71,8 @@ class DummyTool(Tool):
         return "read"
 
 
-class AuditedProvider(LLMProvider):
-    """Wraps a ScriptedProvider, asserting invariant I1 at the boundary.
+class AuditedBackend(LLMBackend):
+    """Wraps a ScriptedBackend, asserting invariant I1 at the boundary.
 
     - Every stream() call is recorded with an input estimate and its
       max_tokens; ``est + max_tokens > CW`` lands in ``violations``.
@@ -85,7 +85,7 @@ class AuditedProvider(LLMProvider):
 
     def __init__(
         self,
-        inner: ScriptedProvider,
+        inner: ScriptedBackend,
         context_window: int,
         *,
         fail_summarizer: bool = False,
@@ -117,7 +117,7 @@ class AuditedProvider(LLMProvider):
         thinking: ThinkingConfig | None = None,
         stop_sequences: list[str] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[ProviderStreamEvent, None]:
+    ) -> AsyncGenerator[BackendStreamEvent, None]:
         est = self._estimate(messages, system)
         is_summarizer = bool(system) and "summariz" in system[0].lower()
         kind = "summarizer" if is_summarizer else "main"
@@ -161,9 +161,9 @@ def flood_payload(n_chars: int) -> str:
     return " ".join(words)
 
 
-def make_agent(tmp_path, provider, payload_chars=9_000, **kwargs):
+def make_agent(tmp_path, backend, payload_chars=9_000, **kwargs):
     return AlanCodeAgent(
-        backend=provider,
+        backend=backend,
         cwd=str(tmp_path),
         programmatic=True,
         permission_mode="yolo",
@@ -186,9 +186,9 @@ def final_text(events) -> str:
     return texts[-1] if texts else ""
 
 
-def assert_survived(provider, events, exc=None):
+def assert_survived(backend, events, exc=None):
     assert exc is None, f"unhandled exception escaped the loop: {exc!r}"
-    assert provider.violations == [], f"I1 violated: {provider.violations}"
+    assert backend.violations == [], f"I1 violated: {backend.violations}"
     assert events, "turn produced no events"
 
 
@@ -208,30 +208,30 @@ class TestToolResultFlooding:
         issue #2 crash. Must never produce an illegal call, must attempt
         Layer C when over the threshold, and the session must keep working."""
         n_calls = 12
-        inner = ScriptedProvider.from_responses(
+        inner = ScriptedBackend.from_responses(
             [tool_call("Dummy", {}) for _ in range(n_calls)],
             fallback=text("All done."),
         )
-        provider = AuditedProvider(inner, context_window=cw)
-        agent = make_agent(tmp_path, provider)
+        backend = AuditedBackend(inner, context_window=cw)
+        agent = make_agent(tmp_path, backend)
 
         events = await run_turn(agent, "flood me")
-        assert_survived(provider, events)
+        assert_survived(backend, events)
 
         # 12 results x ~9k chars ~= 27k+ tokens: crosses T on every small
         # window. On 200k (T ~= 151k tokens) no compaction is expected.
         if cw <= 32_768:
-            assert provider.summarizer_calls >= 1, (
+            assert backend.summarizer_calls >= 1, (
                 "Layer C was never attempted despite crossing the threshold"
             )
         else:
-            assert provider.summarizer_calls == 0
+            assert backend.summarizer_calls == 0
 
         assert final_text(events) == "All done."
 
         # Liveness: the next turn still works.
         events2 = await run_turn(agent, "still there?")
-        assert provider.violations == []
+        assert backend.violations == []
         assert final_text(events2) == "All done."
 
 
@@ -247,20 +247,20 @@ class TestGiantResult:
         """One result far above the cap: Layer A truncates it middle-out
         before the next call; the payload the model sees is bounded and
         carries the sentinel."""
-        inner = ScriptedProvider.from_responses(
+        inner = ScriptedBackend.from_responses(
             [tool_call("Dummy", {}), tool_call("Dummy", {})],
             fallback=text("All done."),
         )
-        provider = AuditedProvider(inner, context_window=cw)
-        agent = make_agent(tmp_path, provider, payload_chars=200_000)
+        backend = AuditedBackend(inner, context_window=cw)
+        agent = make_agent(tmp_path, backend, payload_chars=200_000)
 
         events = await run_turn(agent, "read the big thing")
-        assert_survived(provider, events)
+        assert_survived(backend, events)
         assert final_text(events) == "All done."
 
         # From the second main call on, the tool result in the payload must
         # be the truncated version.
-        later_main = [c for c in provider.calls if c["kind"] == "main"][1:]
+        later_main = [c for c in backend.calls if c["kind"] == "main"][1:]
         assert later_main, "expected at least two main calls"
         for call in later_main:
             serialized = str(call["messages"])
@@ -280,21 +280,21 @@ class TestEscalationClamp:
         """A max_tokens truncation triggers the 64k escalation retry; on a
         window smaller than 64k the retried call must be clamped, and it
         must still grant MORE than the default budget."""
-        inner = ScriptedProvider.from_responses(
+        inner = ScriptedBackend.from_responses(
             [
                 ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
                 text("recovered fully"),
             ],
             fallback=text("All done."),
         )
-        provider = AuditedProvider(inner, context_window=cw)
-        agent = make_agent(tmp_path, provider)
+        backend = AuditedBackend(inner, context_window=cw)
+        agent = make_agent(tmp_path, backend)
 
         events = await run_turn(agent, "write something long")
-        assert_survived(provider, events)
+        assert_survived(backend, events)
         assert final_text(events) == "recovered fully"
 
-        main_calls = [c for c in provider.calls if c["kind"] == "main"]
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
         assert len(main_calls) == 2
         retry = main_calls[1]
         # Escalated beyond the default budget, but legal for the window.
@@ -311,9 +311,9 @@ class TestConfigErrorGraceful:
     @pytest.mark.asyncio
     async def test_output_budget_eats_window(self, tmp_path):
         cw = 32_768
-        inner = ScriptedProvider.from_responses([], fallback=text("unreachable"))
-        provider = AuditedProvider(inner, context_window=cw)
-        agent = make_agent(tmp_path, provider, max_output_tokens=cw)
+        inner = ScriptedBackend.from_responses([], fallback=text("unreachable"))
+        backend = AuditedBackend(inner, context_window=cw)
+        agent = make_agent(tmp_path, backend, max_output_tokens=cw)
 
         events = await run_turn(agent, "hello")
         errors = [
@@ -323,7 +323,7 @@ class TestConfigErrorGraceful:
         assert errors, "expected a graceful config-error message"
         assert "configuration" in errors[-1].text.lower()
         # No API call was ever attempted with the impossible config.
-        assert all(c["kind"] != "main" for c in provider.calls)
+        assert all(c["kind"] != "main" for c in backend.calls)
 
 
 # ---------------------------------------------------------------------------
@@ -339,21 +339,21 @@ class TestBreakerFallbackLiveness:
         finishes the turn AND answers the next one."""
         cw = 32_768
         n_calls = 14
-        inner = ScriptedProvider.from_responses(
+        inner = ScriptedBackend.from_responses(
             [tool_call("Dummy", {}) for _ in range(n_calls)],
             fallback=text("All done."),
         )
-        provider = AuditedProvider(inner, context_window=cw, fail_summarizer=True)
-        agent = make_agent(tmp_path, provider)
+        backend = AuditedBackend(inner, context_window=cw, fail_summarizer=True)
+        agent = make_agent(tmp_path, backend)
 
         events = await run_turn(agent, "flood me")
-        assert_survived(provider, events)
+        assert_survived(backend, events)
 
         # Exactly 3 compaction invocations, then the breaker path (no 4th).
         # Each failed invocation makes (1 + max_compact_ptl_retries) = 4
-        # provider calls internally (the retry loop also consumes generic
+        # backend calls internally (the retry loop also consumes generic
         # stream errors), so 3 invocations = 12 summarizer calls.
-        assert provider.summarizer_calls == 12
+        assert backend.summarizer_calls == 12
 
         notices = [
             e for e in events
@@ -366,5 +366,5 @@ class TestBreakerFallbackLiveness:
         assert final_text(events) == "All done."
 
         events2 = await run_turn(agent, "still there?")
-        assert provider.violations == []
+        assert backend.violations == []
         assert final_text(events2) == "All done."

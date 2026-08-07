@@ -7,16 +7,22 @@ and API duration are kept in-memory (display-only, not persisted).
 
 from __future__ import annotations
 
+import contextlib
+import io
+import logging
+import os
 from typing import TYPE_CHECKING
 
 from alancode.messages.types import Usage
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from alancode.session.state import SessionState
 
 # Pricing per million tokens for Anthropic models (hardcoded).
 # Source: Anthropic pricing page + litellm registry cross-check.
-# These are used by AnthropicProvider. LiteLLMProvider uses litellm's registry.
+# These are used by AnthropicBackend. LiteLLMBackend uses litellm's registry.
 ANTHROPIC_PRICING: dict[str, dict[str, float]] = {
     # Current generation
     "claude-sonnet-4-6": {
@@ -103,7 +109,7 @@ def _anthropic_cost(usage: Usage, model: str) -> float | None:
 
 
 _SENTINEL_NON_PRICED_MODELS = frozenset({
-    # Names used by ScriptedProvider / RemoteScriptedProvider; not real models,
+    # Names used by ScriptedBackend / RemoteScriptedBackend; not real models,
     # litellm has no pricing for them and emits a noisy stdout banner if asked.
     "remote", "scripted-model",
 })
@@ -113,15 +119,14 @@ def _litellm_cost(usage: Usage, model: str) -> float | None:
     """Calculate cost using litellm's model pricing registry.
 
     Returns None if litellm doesn't know the model or isn't available.
-    litellm prints a "Provider List: ..." banner to stdout when it can't
+    litellm prints a "Backend List: ..." banner to stdout when it can't
     resolve a model; we suppress that and also short-circuit known
     test-only model names.
     """
     if not model or model.lower() in _SENTINEL_NON_PRICED_MODELS:
         return None
-    import contextlib
-    import io
     try:
+        os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
         import litellm
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -134,6 +139,7 @@ def _litellm_cost(usage: Usage, model: str) -> float | None:
             )
         return prompt_cost + completion_cost
     except Exception:
+        logger.debug("Could not resolve LiteLLM cost for model %s", model, exc_info=True)
         return None
 
 

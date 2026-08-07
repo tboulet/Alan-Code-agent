@@ -20,9 +20,9 @@ A 10-000-ft view of how Alan Code is put together. Read this first if you're abo
 │  Loop layer           query_loop (alancode/query/loop.py)       │
 │                               │ phases 1–10 per iteration       │
 ├───────────────────────────────┼─────────────────────────────────┤
-│  Support          providers   tools   compact   hooks           │
+│  Support          backends   tools   compact   hooks           │
 │  subsystems       messages    permissions   memory   skills     │
-│                   session     git_tree                          │
+│                   session                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -30,8 +30,8 @@ Each layer has one job:
 
 - **UI layer** presents events to the user (terminal, browser, test harness). All three implement `SessionUI` (`alancode/gui/base.py`).
 - **Session layer** is the REPL driver. Handles slash commands, displays events to the UI, runs `run_session` in a loop.
-- **Agent layer** is the public API. `AlanCodeAgent` owns the messages list, session state, and provider; exposes `query`/`query_async`/`query_events`/`query_events_async`.
-- **Loop layer** is the inner engine. `query_loop` is an async generator that runs one "turn" — repeatedly calling the provider and executing tools.
+- **Agent layer** is the public API. `AlanCodeAgent` owns the messages list, session state, and backend; exposes `query`/`query_async`/`query_events`/`query_events_async`.
+- **Loop layer** is the inner engine. `query_loop` is an async generator that runs one "turn" — repeatedly calling the backend and executing tools.
 - **Support subsystems** are everything else, grouped by concern.
 
 ## Data flow for one turn
@@ -49,7 +49,7 @@ user types "fix this bug"
         ▼
   AlanCodeAgent.query_events_async:
       - appends UserMessage to self._messages
-      - builds QueryParams with the provider, tools, settings, abort event
+      - builds QueryParams with the backend, tools, settings, abort event
       - calls query_loop(params)
         │
         ▼
@@ -58,8 +58,8 @@ user types "fix this bug"
      phase 1.5: inject date/time system-reminder
      phase 2: compaction pre-check (truncate → clear → auto)
      phase 3: blocking-limit check and deterministic fallback if needed
-     phase 4: provider.stream() — streams response
-     phase 5: collect content blocks into AssistantMessage
+     phase 4: backend.stream() — streams response
+     phase 5: collect content, parse reasoning/text tool calls, build AssistantMessage
      phase 6: yield AssistantMessage to caller
      phase 7: abort check
      phase 8: execute tools (orchestration.py runs them concurrent/serial)
@@ -91,19 +91,21 @@ user types "fix this bug"
 - `loop.py` — `query_loop` async generator, the beating heart.
 - `state.py` — `LoopState` dataclass, mutable state between iterations.
 
-### `alancode.providers`
-- `base.py` — `LLMProvider` ABC, `StreamEvent` types.
-- `anthropic_provider.py` — direct Anthropic SDK wrapper.
-- `litellm_provider.py` — LiteLLM adapter.
-- `scripted_provider.py` — deterministic test provider.
+### `alancode.backends`
+- `base.py` — `LLMBackend` ABC and `BackendStreamEvent` types.
+- `anthropic_backend.py` — direct Anthropic SDK wrapper.
+- `litellm_backend.py` — LiteLLM adapter.
+- `scripted_backend.py` — deterministic test backend.
+- `remote_scripted_backend.py` — HTTP-controlled test backend.
+- `cw_probe.py` — last-resort context-window probing and shared cache.
 
 ### `alancode.tools`
 - `base.py` — `Tool` ABC and `ToolUseContext`.
 - `registry.py` — enumerate built-ins, convert to API schemas.
 - `execution.py` — `run_tool_use` — validate + permission + call + hooks.
 - `orchestration.py` — batch tool calls (concurrent for reads, serial for writes).
-- `builtin/*.py` — the 10 built-in tools.
-- `text_tool_parser.py` — hermes/glm/alan formats for non-native models.
+- `builtin/*.py` — built-in tool implementations.
+- `text_tool_parser.py` — hermes/hermes_xml/glm/alan/meta_json formats for non-native models.
 
 ### `alancode.messages`
 - `types.py` — all message dataclasses (UserMessage, AssistantMessage, blocks).
@@ -124,7 +126,7 @@ user types "fix this bug"
 ### `alancode.compact`
 - `compact_truncate.py` — Layer A (per-tool-result truncation).
 - `compact_clear.py` — Layer B (old tool result clearing).
-- `compact_auto.py` — Layer C (forked-agent summarization).
+- `compact_auto.py` — Layer C (tool-less summarization request).
 - `hard_truncate.py` - deterministic fallback when summarization cannot recover.
 - `prompt.py` — the 9-section summarization template.
 
@@ -140,12 +142,6 @@ user types "fix this bug"
 - `registry.py` — discover skills from `.alan/skills/`.
 - `parser.py` — YAML-frontmatter parser.
 - `tool_filter.py` — scope tool access when a skill is active.
-
-### `alancode.git_tree`
-- `parser.py` — parse git log into the AGT model.
-- `layout.py` — assign (x, y) coords for the GUI tree.
-- `operations.py` — `agt_move`, `agt_revert`, etc.
-- `memory_snapshots.py` — save/restore `.alan/memory/` across moves.
 
 ### `alancode.cli`
 - `main.py` — argparse entry point.
@@ -163,13 +159,13 @@ user types "fix this bug"
 - `serialization.py` — convert agent events to wire-format dicts.
 
 ### `alancode.api`
-- `retry.py` — `with_retry` wrapper around provider streams.
+- `retry.py` — `stream_with_retry` wrapper around backend streams.
 - `cost_tracker.py` — per-session cost accounting + Anthropic pricing.
 
 ### `alancode.utils`
 - `tokens.py` — tokenizer-backed count for compaction pre-check.
-- `atomic_io.py` — `atomic_write_json` / `atomic_write_text` (tmp + rename).
-- `env.py` — `get_cwd`, `get_git_status`, `is_git_repo`, etc.
+- `atomic_io.py` — atomic writes and adjacent-file interprocess locks.
+- `env.py` — `get_cwd`, platform/shell helpers, and `is_git_repo`.
 
 ## The public API surface
 
@@ -185,11 +181,11 @@ Nothing else is currently a stable public export. Internal modules can and do ch
 
 If you want to understand how Alan works:
 
-1. **[`alancode/query/loop.py`](https://github.com/example/alan-code/blob/main/alancode/query/loop.py)** — the whole loop fits in one file. Start at `query_loop` and read the phases.
-2. **[`alancode/agent.py`](https://github.com/example/alan-code/blob/main/alancode/agent.py)** — see how `query_events_async` wires up `query_loop`.
-3. **[`alancode/prompt/system_prompt.py`](https://github.com/example/alan-code/blob/main/alancode/prompt/system_prompt.py)** — the system prompt sections.
-4. **[`alancode/messages/normalization.py`](https://github.com/example/alan-code/blob/main/alancode/messages/normalization.py)** — how internal messages become the API payload.
-5. **[`alancode/tools/execution.py`](https://github.com/example/alan-code/blob/main/alancode/tools/execution.py)** — the per-tool execution path.
+1. **[`alancode/query/loop.py`](../../alancode/query/loop.py)** — the whole loop fits in one file. Start at `query_loop` and read the phases.
+2. **[`alancode/agent.py`](../../alancode/agent.py)** — see how `query_events_async` wires up `query_loop`.
+3. **[`alancode/prompt/system_prompt.py`](../../alancode/prompt/system_prompt.py)** — the system prompt sections.
+4. **[`alancode/messages/normalization.py`](../../alancode/messages/normalization.py)** — how internal messages become the API payload.
+5. **[`alancode/tools/execution.py`](../../alancode/tools/execution.py)** — the per-tool execution path.
 
 ## Related
 

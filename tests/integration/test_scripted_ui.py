@@ -2,10 +2,10 @@
 
 Validates:
 1. ScriptedUI sequential and reactive modes
-2. ScriptedUI + ScriptedProvider + agent integration
+2. ScriptedUI + ScriptedBackend + agent integration
 3. ScriptedUI + run_session full loop
 4. Git test repo helpers
-5. Combined: ScriptedUI + agent + git repo (AGT test foundation)
+5. Combined: ScriptedUI + agent + git repo
 """
 
 import asyncio
@@ -15,8 +15,8 @@ from alancode.agent import AlanCodeAgent
 from alancode.cli.repl import run_session
 from alancode.gui.scripted_ui import ScriptedUI, UIContext, UIRule, ui_rule
 from alancode.messages.types import AssistantMessage, RequestStartEvent, Usage
-from alancode.providers.scripted_provider import (
-    ScriptedProvider,
+from alancode.backends.scripted_backend import (
+    ScriptedBackend,
     rule,
     text,
     tool_call,
@@ -174,13 +174,13 @@ class TestScriptedUILogging:
 
 
 class TestScriptedUIWithAgent:
-    """Test ScriptedUI driving an actual agent with ScriptedProvider."""
+    """Test ScriptedUI driving an actual agent with ScriptedBackend."""
 
     @pytest.mark.asyncio
     async def test_single_turn(self, tmp_path):
-        provider = ScriptedProvider.from_responses([text("Hello!")])
+        backend = ScriptedBackend.from_responses([text("Hello!")])
         ui = ScriptedUI.from_inputs(["Hi there", EOFError])
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
 
         # Simulate one turn
         user_input = await ui.get_input()
@@ -204,25 +204,25 @@ class TestScriptedUIWithAgent:
 
     @pytest.mark.asyncio
     async def test_multi_turn(self, tmp_path):
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             text("First response."),
             text("Second response."),
         ])
         ui = ScriptedUI.from_inputs(["Turn 1", "Turn 2", EOFError])
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
 
         for _ in range(2):
             user_input = await ui.get_input()
             async for event in agent.query_events_async(user_input):
                 await ui.on_agent_event(event)
 
-        assert provider._call_count == 2
+        assert backend._call_count == 2
         assert len(ui.input_log) == 2  # Two prompts consumed
 
     @pytest.mark.asyncio
     async def test_with_tool_call(self, tmp_path):
         """Agent makes a tool call, ScriptedUI logs all events."""
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             tool_call("Read", {"file_path": str(tmp_path / "test.txt")}),
             text("I read the file."),
         ])
@@ -231,14 +231,14 @@ class TestScriptedUIWithAgent:
         # Create the file so Read tool works
         (tmp_path / "test.txt").write_text("hello")
 
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
         user_input = await ui.get_input()
         async for event in agent.query_events_async(user_input):
             await ui.on_agent_event(event)
 
         # Should have multiple events (request start, user msg, assistant msg, etc.)
         assert len(ui.event_log) >= 3
-        assert provider._call_count == 2  # Two LLM calls (tool_call + final)
+        assert backend._call_count == 2  # Two LLM calls (tool_call + final)
 
     @pytest.mark.asyncio
     async def test_ask_callback_integration(self, tmp_path):
@@ -249,9 +249,9 @@ class TestScriptedUIWithAgent:
             ui_rule(EOFError, input_type="prompt"),
         ])
 
-        provider = ScriptedProvider.from_responses([text("Done.")])
+        backend = ScriptedBackend.from_responses([text("Done.")])
         agent = AlanCodeAgent(
-            backend=provider,
+            backend=backend,
             cwd=str(tmp_path),
             ask_callback=ui.ask_user,
         )
@@ -272,14 +272,14 @@ class TestRunSessionWithScriptedUI:
 
     @pytest.mark.asyncio
     async def test_single_prompt_then_exit(self, tmp_path):
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             text("I'll help you fix that bug."),
         ])
         ui = ScriptedUI.from_inputs([
             "Fix the bug",
             EOFError,
         ])
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
@@ -300,52 +300,52 @@ class TestRunSessionWithScriptedUI:
 
     @pytest.mark.asyncio
     async def test_slash_exit(self, tmp_path):
-        provider = ScriptedProvider.from_responses([])
+        backend = ScriptedBackend.from_responses([])
         ui = ScriptedUI.from_inputs(["/exit"])
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
         # /exit should not trigger an LLM call
-        assert provider._call_count == 0
+        assert backend._call_count == 0
         assert ui.input_log[0]["response"] == "/exit"
 
     @pytest.mark.asyncio
     async def test_slash_help(self, tmp_path):
-        provider = ScriptedProvider.from_responses([])
+        backend = ScriptedBackend.from_responses([])
         ui = ScriptedUI.from_inputs(["/help", EOFError])
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
         # /help should produce console output
-        assert provider._call_count == 0
+        assert backend._call_count == 0
         assert any("help" in line.lower() or "exit" in line.lower()
                     for line in ui.console_log)
 
     @pytest.mark.asyncio
     async def test_empty_input_skipped(self, tmp_path):
-        provider = ScriptedProvider.from_responses([text("Response.")])
+        backend = ScriptedBackend.from_responses([text("Response.")])
         ui = ScriptedUI.from_inputs(["", "", "actual prompt", EOFError])
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
         # Empty inputs should be skipped, only one LLM call
-        assert provider._call_count == 1
+        assert backend._call_count == 1
 
     @pytest.mark.asyncio
     async def test_multiple_turns(self, tmp_path):
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             text("First answer."),
             text("Second answer."),
         ])
         ui = ScriptedUI.from_inputs(["Question 1", "Question 2", EOFError])
-        agent = AlanCodeAgent(backend=provider, cwd=str(tmp_path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
 
         await run_session(agent, ui)
 
-        assert provider._call_count == 2
+        assert backend._call_count == 2
         assert len(ui.cost_log) == 2
 
 
@@ -441,12 +441,12 @@ class TestGitTestRepo:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Combined: ScriptedUI + Agent + Git Repo
+# ScriptedUI + Agent + Git Repo
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestScriptedUIWithGitRepo:
-    """Foundation tests for AGT: ScriptedUI + agent in a real git repo."""
+    """ScriptedUI + agent in a real git repo."""
 
     @pytest.mark.asyncio
     async def test_agent_in_git_repo(self, git_repo: GitTestRepo):
@@ -454,23 +454,23 @@ class TestScriptedUIWithGitRepo:
         git_repo.write_file("main.py", "print('hello')")
         git_repo.commit("Add main.py")
 
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             tool_call("Read", {"file_path": str(git_repo.path / "main.py")}),
             text("The file prints hello."),
         ])
         ui = ScriptedUI.from_inputs(["What does main.py do?", EOFError])
 
-        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
-        assert provider._call_count == 2
+        assert backend._call_count == 2
         event_types = [e["type"] for e in ui.event_log]
         assert "AssistantMessage" in event_types
 
     @pytest.mark.asyncio
     async def test_agent_modifies_git_repo(self, git_repo: GitTestRepo):
         """Agent writes a file in the git repo, we verify git sees it."""
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             tool_call("Write", {
                 "file_path": str(git_repo.path / "output.txt"),
                 "content": "generated content",
@@ -479,7 +479,7 @@ class TestScriptedUIWithGitRepo:
         ])
         ui = ScriptedUI.from_inputs(["Create output.txt", EOFError])
 
-        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
         # Verify the file was created
@@ -495,32 +495,32 @@ class TestScriptedUIWithGitRepo:
         """Agent runs in a repo with existing commit history."""
         shas = git_repo.build_linear_history(3)
 
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             tool_call("Bash", {"command": f"cd {git_repo.path} && git log --oneline -5"}),
             text("I see 3 commits."),
         ])
         ui = ScriptedUI.from_inputs(["Show git history", EOFError])
 
-        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
-        assert provider._call_count == 2
+        assert backend._call_count == 2
 
     @pytest.mark.asyncio
     async def test_run_session_in_branched_repo(self, git_repo: GitTestRepo):
-        """Full session in a repo with branches — the AGT foundation scenario."""
+        """Full session in a repo with branches."""
         result = git_repo.build_branching_history()
 
-        provider = ScriptedProvider.from_responses([
+        backend = ScriptedBackend.from_responses([
             text("I see a repo with main and feature branches."),
         ])
         ui = ScriptedUI.from_inputs(["Describe the repo", EOFError])
 
-        agent = AlanCodeAgent(backend=provider, cwd=str(git_repo.path))
+        agent = AlanCodeAgent(backend=backend, cwd=str(git_repo.path))
         await run_session(agent, ui)
 
         # Session completes cleanly in a branched repo
-        assert provider._call_count == 1
+        assert backend._call_count == 1
         assert len(ui.cost_log) == 1
 
         # Git state unchanged

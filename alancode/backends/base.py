@@ -1,6 +1,6 @@
-"""LLM Provider abstraction layer.
+"""LLM Backend abstraction layer.
 
-The agentic loop only interacts with LLMProvider.
+The agentic loop only interacts with LLMBackend.
 Each implementation translates its native API format into StreamEvents.
 """
 
@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import AsyncGenerator, Any
 
 
-# ── Stream events — yielded by LLMProvider.stream() ─────────────────────────
+# ── Stream events — yielded by LLMBackend.stream() ─────────────────────────
 
 
 @dataclass
@@ -78,13 +78,13 @@ class StreamMessageStop:
 class StreamError:
     """An error during streaming."""
     error: str
-    error_type: str = "api_error"  # 'api_error', 'overloaded', 'invalid_request'
+    error_type: str = "api_error"
     status_code: int | None = None
     type: str = "error"
 
 
 # Union of all stream events
-ProviderStreamEvent = (
+BackendStreamEvent = (
     StreamTextDelta
     | StreamToolUseStart
     | StreamToolUseInputDelta
@@ -119,7 +119,7 @@ class ModelInfo:
 
 @dataclass
 class ToolSchema:
-    """Tool definition sent to the provider."""
+    """Tool definition sent to the backend."""
     name: str
     description: str
     input_schema: dict[str, Any]
@@ -135,12 +135,12 @@ class ThinkingConfig:
 # ── Abstract base class ─────────────────────────────────────────────────────
 
 
-class LLMProvider(ABC):
+class LLMBackend(ABC):
     """Abstract interface for any LLM backend.
 
     Implementations must translate their native streaming API into a sequence
-    of ``ProviderStreamEvent`` dataclasses so the agentic loop can remain
-    provider-agnostic.
+    of ``BackendStreamEvent`` dataclasses so the agentic loop can remain
+    backend-agnostic.
     """
 
     @abstractmethod
@@ -155,10 +155,10 @@ class LLMProvider(ABC):
         thinking: ThinkingConfig | None = None,
         stop_sequences: list[str] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[ProviderStreamEvent, None]:
+    ) -> AsyncGenerator[BackendStreamEvent, None]:
         """Stream a response from the LLM.
 
-        Yields ``ProviderStreamEvent`` instances in the following order::
+        Yields ``BackendStreamEvent`` instances in the following order::
 
             StreamMessageStart          # always first: model name, request ID
             StreamTextDelta*            # zero or more text chunks
@@ -173,10 +173,10 @@ class LLMProvider(ABC):
         On error at any point, yields ``StreamError`` and returns.
 
         Args:
-            messages: Conversation history as dicts (format depends on provider).
-            system: System prompt sections (joined by provider as needed).
+            messages: Conversation history as dicts (format depends on backend).
+            system: System prompt sections (joined by backend as needed).
             tools: Tool definitions the model can call.
-            model: Override the provider's default model.
+            model: Override the backend's default model.
             max_tokens: Maximum output tokens for this request.
             thinking: Extended thinking configuration.
             stop_sequences: Custom stop sequences.
@@ -188,3 +188,9 @@ class LLMProvider(ABC):
         """Return information about the model's capabilities."""
         ...  # pragma: no cover
 
+    async def close(self) -> None:
+        """Release resources owned by the backend.
+
+        Stateless backends can use this no-op default. Backends that own
+        clients, sockets, threads, or subprocesses should override it.
+        """

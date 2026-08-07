@@ -18,12 +18,14 @@ import concurrent.futures
 import logging
 import os
 import queue
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncGenerator, Callable
 from uuid import uuid4
 
 from alancode.api.cost_tracker import CostTracker
+from alancode.budget import resolve_context_budget
 from alancode.memory.memdir import (
     cleanup_old_scratchpads,
     ensure_memory_structure,
@@ -45,10 +47,20 @@ from alancode.messages.types import (
     Usage,
     UserMessage,
 )
-from alancode.permissions.context import PermissionBehavior, PermissionMode, PermissionResult, ToolPermissionContext
+from alancode.permissions.context import (
+    PermissionBehavior,
+    PermissionMode,
+    PermissionResult,
+    PermissionRule,
+    ToolPermissionContext,
+)
 from alancode.permissions.pipeline import check_permissions
+from alancode.permissions.project_rules import (
+    add_project_allow_rule,
+    load_project_allow_rules,
+)
 from alancode.prompt.system_prompt import get_system_prompt
-from alancode.providers.base import LLMProvider
+from alancode.backends.base import LLMBackend
 from alancode.session.state import SessionState
 from alancode.session.session import (
     load_session_settings,
@@ -62,8 +74,10 @@ from alancode.session.transcript import (
 from alancode.hooks.handlers import on_session_start, on_session_end
 from alancode.query.loop import QueryParams, query_loop
 from alancode.settings import (
+    BACKEND_SETTINGS,
     SETTINGS_DEFAULTS,
     infer_backend,
+    get_settings_path,
     load_projects_settings_and_maybe_init,
     validate_setting,
     load_settings,
@@ -71,10 +85,28 @@ from alancode.settings import (
 )
 from alancode.skills.registry import SkillRegistry
 from alancode.tools.base import ToolUseContext
-from alancode.tools.registry import get_enabled_tools
+from alancode.tools.builtin.skill_tool import SkillTool
+from alancode.tools.registry import get_enabled_tools, get_programmatic_tool_set
 from alancode.tools.text_tool_parser import get_tool_format_system_prompt
+from alancode.utils.atomic_io import interprocess_lock
 
 logger = logging.getLogger(__name__)
+
+
+def _close_backend_soon(backend: LLMBackend) -> None:
+    """Close a replaced backend from synchronous settings APIs."""
+    async def close_and_log() -> None:
+        try:
+            await backend.close()
+        except Exception:
+            logger.warning("Failed to close replaced backend", exc_info=True)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(close_and_log())
+    else:
+        loop.create_task(close_and_log())
 
 
 class AgentState(str, Enum):
@@ -85,52 +117,30 @@ class AgentState(str, Enum):
     ERROR = "error"
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _ensure_alan_gitignored(cwd: str) -> None:
-    """Ensure ``.alan/`` is listed in ``.gitignore``.
-
-    Critical for ``git clean -fd`` safety during AGT operations.
-    Without this, ``git clean`` would delete session state.
-    """
-    gitignore = Path(cwd) / ".gitignore"
-    if gitignore.exists():
-        content = gitignore.read_text()
-        if ".alan" in content:
-            return  # Already there
-        # Append
-        if not content.endswith("\n"):
-            content += "\n"
-        content += ".alan/\n"
-        gitignore.write_text(content)
-    else:
-        gitignore.write_text(".alan/\n")
-
-
 # ── Backend resolution ──────────────────────────────────────────────────────
 
 
 def _resolve_backend(
-    backend: str | LLMProvider,
+    backend: str | LLMBackend,
     *,
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
+    request_timeout: int | str | None = None,
     **kwargs: Any,
-) -> LLMProvider:
-    """Resolve a backend string (or pre-built ``LLMProvider``) into an
-    ``LLMProvider`` instance the agent can stream against.
+) -> LLMBackend:
+    """Resolve a backend string (or pre-built ``LLMBackend``) into an
+    ``LLMBackend`` instance the agent can stream against.
 
-    If *backend* is already an ``LLMProvider``, return it unchanged — this
+    If *backend* is already an ``LLMBackend``, return it unchanged — this
     is the escape hatch for users who want to wire their own transport.
     Otherwise, look up the backend name in the registry:
 
-    - ``"auto"``             → ``LiteLLMProvider`` (universal, prefix-routed).
-    - ``"anthropic-native"`` → ``AnthropicProvider`` (direct SDK).
-    - ``"scripted"``         → ``ScriptedProvider`` (tests).
+    - ``"auto"``             → ``LiteLLMBackend`` (universal, prefix-routed).
+    - ``"anthropic-native"`` → ``AnthropicBackend`` (direct SDK).
+    - ``"scripted"``         → ``ScriptedBackend`` (tests).
     """
-    if isinstance(backend, LLMProvider):
+    if isinstance(backend, LLMBackend):
         return backend
 
     if model is None:
@@ -144,41 +154,48 @@ def _resolve_backend(
     name = backend.lower() if isinstance(backend, str) else backend
 
     if name == "auto":
-        from alancode.providers.litellm_provider import LiteLLMProvider
+        from alancode.backends.litellm_backend import LiteLLMBackend
 
-        return LiteLLMProvider(
+        return LiteLLMBackend(
             model=model,
             api_key=api_key,
             api_base=base_url,
+            request_timeout=request_timeout,
             **kwargs,
         )
 
     if name == "anthropic-native":
-        from alancode.providers.anthropic_provider import AnthropicProvider
+        from alancode.backends.anthropic_backend import AnthropicBackend
 
-        return AnthropicProvider(api_key=api_key, model=model, base_url=base_url, **kwargs)
+        return AnthropicBackend(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            request_timeout=request_timeout,
+            **kwargs,
+        )
 
     if name == "scripted":
         # ``model="remote"`` selects the HTTP-driven impersonation backend;
-        # any other model name (or None) uses the in-memory ScriptedProvider.
+        # any other model name (or None) uses the in-memory ScriptedBackend.
         if isinstance(model, str) and model.lower() == "remote":
-            from alancode.providers.remote_scripted_provider import (
-                RemoteScriptedProvider,
+            from alancode.backends.remote_scripted_backend import (
+                RemoteScriptedBackend,
             )
-            return RemoteScriptedProvider(**kwargs)
-        from alancode.providers.scripted_provider import ScriptedProvider
+            return RemoteScriptedBackend(**kwargs)
+        from alancode.backends.scripted_backend import ScriptedBackend
 
-        return ScriptedProvider(**kwargs)
+        return ScriptedBackend(**kwargs)
 
     raise ValueError(
         f"Unknown backend '{backend}'. "
         f"Supported: 'auto', 'anthropic-native', 'scripted', "
-        f"or pass an LLMProvider instance."
+        f"or pass an LLMBackend instance."
     )
 
 
-def _create_provider_from_settings(settings: dict[str, Any], **extra) -> LLMProvider:
-    """Create the ``LLMProvider`` instance described by *settings*.
+def _create_backend_from_settings(settings: dict[str, Any], **extra) -> LLMBackend:
+    """Create the ``LLMBackend`` instance described by *settings*.
 
     Used by ``__init__`` and by ``update_session_setting`` when a
     backend-related key changes mid-session.
@@ -188,6 +205,7 @@ def _create_provider_from_settings(settings: dict[str, Any], **extra) -> LLMProv
         model=settings.get("model"),
         api_key=settings.get("api_key"),
         base_url=settings.get("base_url"),
+        request_timeout=settings.get("request_timeout"),
         **extra,
     )
 
@@ -202,12 +220,12 @@ class AlanCodeAgent:
 
     Parameters
     ----------
-    backend : str or LLMProvider, optional
+    backend : str or LLMBackend, optional
         Transport backend (advanced). Either a string
         (``"auto"`` — universal LiteLLM transport;
         ``"anthropic-native"`` — direct Anthropic SDK with cache_control,
         thinking, and native tool_use; ``"scripted"`` — internal/tests)
-        or a pre-built ``LLMProvider`` instance. When not set, the
+        or a pre-built ``LLMBackend`` instance. When not set, the
         backend is inferred from *model* (bare ``claude-*`` →
         ``"anthropic-native"``, anything else → ``"auto"``).
     model : str, optional
@@ -217,6 +235,12 @@ class AlanCodeAgent:
         ``"openrouter/google/gemini-2.5-pro"``).
     api_key : str, optional
         API key. If None, read from environment variables.
+    base_url : str, optional
+        Custom API endpoint, typically an OpenAI-compatible local server.
+    request_timeout : int or "auto", optional
+        Model request timeout. Custom endpoints use one hour in auto mode.
+    context_window : int or "auto", optional
+        Override the model/server context-window resolution.
     cwd : str, optional
         Working directory. Defaults to ``os.getcwd()``.
     permission_mode : str
@@ -225,6 +249,10 @@ class AlanCodeAgent:
         Maximum agentic iterations per turn.
     max_output_tokens : int, optional
         Max tokens per LLM response.
+    custom_system_prompt : str, optional
+        Replace Alan's normal system prompt.
+    append_system_prompt : str, optional
+        Add library/framework instructions after the normal system prompt.
     session_id : str, optional
         Explicit session ID (pre-resolved by CLI or caller). Auto-generated if None.
     ask_callback : callable, optional
@@ -233,23 +261,20 @@ class AlanCodeAgent:
         If None, permission prompts default to DENY.
     verbose : bool
         Enable debug logging.
-    provider : str or LLMProvider, optional
-        Deprecated alias for *backend*. Old values are translated:
-        ``"litellm"`` → ``"auto"``, ``"anthropic"`` →
-        ``"anthropic-native"``, ``"scripted"`` → ``"scripted"``.
-        Emits ``DeprecationWarning``; will be removed in a future release.
-    **provider_kwargs
+    **backend_kwargs
         Extra keyword arguments passed to the backend constructor
         (only when *backend* is a string).
     """
 
     def __init__(
         self,
-        backend: str | LLMProvider | None = None,
+        backend: str | LLMBackend | None = None,
         *,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        request_timeout: int | str | None = None,
+        context_window: int | str | None = None,
         cwd: str | None = None,
         permission_mode: str | None = None,
         max_iterations_per_turn: int | None = None,
@@ -261,38 +286,19 @@ class AlanCodeAgent:
         verbose: bool = False,
         extra_tools: list | None = None,
         custom_system_prompt: str | None = None,
+        append_system_prompt: str | None = None,
         gui_label: str | None = None,
         programmatic: bool = False,
         tools: list | None = None,
         disabled_tools: list[str] | None = None,
-        provider: str | LLMProvider | None = None,  # deprecated alias for ``backend``
-        **provider_kwargs: Any,
+        **backend_kwargs: Any,
     ) -> None:
-        # Honor the deprecated ``provider=`` kwarg.
-        if provider is not None:
-            import warnings
-
-            if backend is not None:
-                raise TypeError(
-                    "Pass either 'backend=' or the deprecated 'provider='; "
-                    "not both."
-                )
-            warnings.warn(
-                "AlanCodeAgent(provider=...) is deprecated; "
-                "use backend=... instead. Values map as: "
-                "'litellm' -> 'auto', 'anthropic' -> 'anthropic-native', "
-                "'scripted' -> 'scripted'.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if isinstance(provider, str):
-                from alancode.settings import _LEGACY_PROVIDER_MAP
-
-                backend = _LEGACY_PROVIDER_MAP.get(provider.lower(), provider)
-            else:
-                backend = provider
         self._gui_label = gui_label
         self._programmatic = programmatic
+        self._closed = False
+        self._session_started_at = (
+            datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
+        )
 
         self._cwd = cwd or os.getcwd()
 
@@ -314,12 +320,12 @@ class AlanCodeAgent:
         self._settings: dict[str, Any] = dict(SETTINGS_DEFAULTS)
         self._settings.update({k: v for k, v in settings_base.items()})
 
-        # The constructor accepts an ``LLMProvider`` instance under ``backend``.
+        # The constructor accepts an ``LLMBackend`` instance under ``backend``.
         # That instance can't be JSON-serialized into settings, so we
         # keep it aside and pass it directly to ``_resolve_backend`` later.
-        backend_instance: LLMProvider | None = None
+        backend_instance: LLMBackend | None = None
         backend_setting: str | None = None
-        if isinstance(backend, LLMProvider):
+        if isinstance(backend, LLMBackend):
             backend_instance = backend
         elif backend is not None:
             backend_setting = backend
@@ -329,11 +335,15 @@ class AlanCodeAgent:
             "model": model,
             "api_key": api_key,
             "base_url": base_url,
+            "request_timeout": request_timeout,
+            "context_window": context_window,
             "permission_mode": permission_mode,
             "max_iterations_per_turn": max_iterations_per_turn,
             "max_output_tokens": max_output_tokens,
             "memory": memory,
             "tool_call_format": tool_call_format,
+            "custom_system_prompt": custom_system_prompt,
+            "append_system_prompt": append_system_prompt,
         }
         backend_explicit = backend_setting is not None or backend_instance is not None
         for k, v in constructor_overrides.items():
@@ -342,7 +352,7 @@ class AlanCodeAgent:
 
         # Inference: if the caller set ``model`` but not ``backend``, pick
         # the right backend for that model (bare claude-* → native; else auto).
-        # Skip when an LLMProvider instance was passed — the user already
+        # Skip when an LLMBackend instance was passed — the user already
         # decided what transport to use.
         if backend_instance is None and not backend_explicit and model is not None:
             self._settings["backend"] = infer_backend(model)
@@ -352,9 +362,9 @@ class AlanCodeAgent:
 
         # Resolve key fields
         if backend_instance is not None:
-            self._provider = backend_instance
+            self._backend = backend_instance
         else:
-            self._provider = _create_provider_from_settings(self._settings, **provider_kwargs)
+            self._backend = _create_backend_from_settings(self._settings, **backend_kwargs)
         self._model = self._settings.get("model")
         self._permission_mode = self._settings.get("permission_mode", "edit")
         self._max_iterations_per_turn = self._settings.get("max_iterations_per_turn")
@@ -368,12 +378,12 @@ class AlanCodeAgent:
             cwd=self._cwd,
         )
 
-        # Optional opt-in hook: providers that want to know the session id
+        # Optional opt-in hook: backends that want to know the session id
         # and cwd (e.g. the remote-scripted backend, which mirrors its
         # pending payload to the session directory) can implement
         # ``set_session_context(session_id, cwd)``.
-        if hasattr(self._provider, "set_session_context"):
-            self._provider.set_session_context(
+        if hasattr(self._backend, "set_session_context"):
+            self._backend.set_session_context(
                 session_id=self._session_id, cwd=self._cwd,
             )
 
@@ -403,9 +413,6 @@ class AlanCodeAgent:
         # Tools, abort, message queue
         self._state = AgentState.WAITING
         self._messages: list[Message] = []
-        from alancode.tools.builtin.skill_tool import SkillTool
-        from alancode.tools.registry import get_programmatic_tool_set
-
         if tools is not None:
             base = list(tools)
         elif programmatic:
@@ -419,7 +426,8 @@ class AlanCodeAgent:
         if extra_tools:
             base.extend(extra_tools)
         self._tools = base
-        self._custom_system_prompt = custom_system_prompt
+        self._custom_system_prompt = self._settings.get("custom_system_prompt")
+        self._append_system_prompt = self._settings.get("append_system_prompt")
         self._abort_event = asyncio.Event()
         self._message_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         self._permission_context = ToolPermissionContext(
@@ -549,10 +557,6 @@ class AlanCodeAgent:
             except Exception:
                 logger.debug("SessionStart hook error (ignored)", exc_info=True)
 
-            # Initialize AGT session root (once, on first turn)
-            if not self._programmatic:
-                self._init_agt_root()
-
         try:
             # --- context-window probe (unknown local models, one-time) ---
             # When get_model_info could not resolve the context window
@@ -561,18 +565,18 @@ class AlanCodeAgent:
             # value being real. Best-effort: a failed probe leaves the
             # conservative fallback in effect.
             try:
-                _mi = self._provider.get_model_info(self._model)
+                _mi = self._backend.get_model_info(self._model)
                 if (
                     getattr(_mi, "cw_source", "registry") == "fallback"
                     and not isinstance(self._settings.get("context_window"), int)
-                    and hasattr(self._provider, "probe_and_cache_context_window")
-                    and not getattr(self._provider, "_cw_probe_attempted", False)
+                    and hasattr(self._backend, "probe_and_cache_context_window")
+                    and not getattr(self._backend, "_cw_probe_attempted", False)
                 ):
                     yield create_system_message(
                         "Context window unknown for this model - probing the "
                         "server (one-time, cached afterwards)..."
                     )
-                    _detected = await self._provider.probe_and_cache_context_window(
+                    _detected = await self._backend.probe_and_cache_context_window(
                         self._model
                     )
                     if _detected:
@@ -605,7 +609,6 @@ class AlanCodeAgent:
                 settings=self._settings,
                 abort_signal=self._abort_event,
                 ask_user_callback=self._ask_callback,
-                session_state=self._session,
             )
 
             # --- permission callback ---
@@ -656,7 +659,6 @@ class AlanCodeAgent:
                     return PermissionBehavior.DENY
                 if answer == allow_always_label and allow_always_pattern:
                     # Add a session-scoped allow rule for this command prefix
-                    from alancode.permissions.context import PermissionRule
                     rule = PermissionRule(
                         tool_name="Bash",
                         rule_content=f"{allow_always_pattern} *",
@@ -665,7 +667,6 @@ class AlanCodeAgent:
                     )
                     _perm_ctx.allow_rules.append(rule)
                     # Persist to project-level store (survives across sessions)
-                    from alancode.permissions.project_rules import add_project_allow_rule
                     add_project_allow_rule({
                         "tool_name": rule.tool_name,
                         "rule_content": rule.rule_content,
@@ -693,14 +694,13 @@ class AlanCodeAgent:
             # Apply skill tool filter if active
             effective_tools = self._tools
             if self._active_skill_filter is not None:
-                from alancode.skills.tool_filter import filter_tools_for_skill
                 effective_tools = filter_tools_for_skill(self._tools, self._active_skill_filter)
 
             params = QueryParams(
                 messages=self._messages,
                 system_prompt=system_prompt,
                 system_static_boundary=system_static_boundary,
-                provider=self._provider,
+                backend=self._backend,
                 tools=effective_tools,
                 context=context,
                 cost_tracker=self._cost_tracker,
@@ -816,8 +816,16 @@ class AlanCodeAgent:
         else:
             global_instructions = load_global_project_instructions()
             project_instructions = load_project_instructions(self._cwd)
-        # Combine global + project instructions (project wins on conflicts)
-        append_parts = [p for p in (global_instructions, project_instructions) if p]
+        # A custom prompt is a full replacement for Alan's prompt and project
+        # context. The explicit append setting remains additive in either mode.
+        inherited_parts = (
+            []
+            if self._custom_system_prompt is not None
+            else [global_instructions, project_instructions]
+        )
+        append_parts = [
+            p for p in (*inherited_parts, self._append_system_prompt) if p
+        ]
         append_prompt = "\n\n".join(append_parts) if append_parts else None
         system_prompt, system_static_boundary = get_system_prompt(
             tools=self._tools,
@@ -828,6 +836,7 @@ class AlanCodeAgent:
             append_prompt=append_prompt,
             memory_section=memory_section_text,
             scratchpad_dir=str(self._scratchpad_dir),
+            session_started_at=self._session_started_at,
         )
 
         # Text-based tool calling instructions (models without native
@@ -858,7 +867,10 @@ class AlanCodeAgent:
         return system_prompt, system_static_boundary
 
     async def close(self) -> None:
-        """Fire SessionEnd hooks. Call once when the session is over."""
+        """Fire SessionEnd hooks and release backend/session resources."""
+        if self._closed:
+            return
+        self._closed = True
         try:
             await on_session_end(
                 session_id=self._session.session_id,
@@ -868,14 +880,17 @@ class AlanCodeAgent:
             )
         except Exception:
             logger.debug("SessionEnd hook error (ignored)", exc_info=True)
-        self._session.close()
+        try:
+            await self._backend.close()
+        except Exception:
+            logger.warning("Backend shutdown failed", exc_info=True)
+        finally:
+            self._session.close()
 
     # ── Allow rules persistence ──────────────────────────────────────────────
 
     def _load_project_allow_rules(self) -> None:
         """Load project-level allow rules from ``.alan/allow_rules.json``."""
-        from alancode.permissions.context import PermissionRule
-        from alancode.permissions.project_rules import load_project_allow_rules
         rules = load_project_allow_rules(self._cwd)
         for rule_data in rules:
             self._permission_context.allow_rules.append(
@@ -888,43 +903,6 @@ class AlanCodeAgent:
             )
         if rules:
             logger.info("Loaded %d project allow rules", len(rules))
-
-    def _init_agt_root(self) -> None:
-        """Initialize AGT session root SHA (once, on session start).
-
-        If we're in a git repo and session_root_sha is not yet set,
-        record HEAD as the starting point for this session.
-        Also ensures ``.alan/`` is gitignored (critical for ``git clean``
-        safety during AGT move operations).
-        """
-        if self._session.session_root_sha:
-            return  # Already initialized (resumed session)
-        try:
-            from alancode.utils.env import is_git_repo
-            if not is_git_repo(self._cwd):
-                return
-
-            # Ensure .alan is gitignored (prevents git clean from nuking session data)
-            _ensure_alan_gitignored(self._cwd)
-
-            import subprocess
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=self._cwd,
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
-                sha = result.stdout.strip()
-                with self._session.batch():
-                    self._session.session_root_sha = sha
-                    self._session.agent_position_sha = sha
-                    self._session.add_to_conv_path(sha)
-                    self._session.record_commit_message_index(
-                        sha, len(self._messages),
-                    )
-                logger.debug("AGT root initialized: %s", sha[:7])
-        except Exception:
-            logger.debug("AGT root init failed (non-critical)", exc_info=True)
 
     # ── Control API ────────────────────────────────────────────────────────────
 
@@ -1024,12 +1002,18 @@ class AlanCodeAgent:
         """Number of user messages processed in this session."""
         return self._session.turn_count
 
+    @property
+    def context_window(self) -> int:
+        """Resolved context window used by the current model and settings."""
+        model_info = self._backend.get_model_info(self._model)
+        return resolve_context_budget(model_info, self._settings).context_window
+
     def update_session_setting(self, key: str, value: Any) -> str | None:
         """Validate, update a setting for this session in-memory + on disk.
 
         All settings can be changed mid-session. Backend-related settings
         (``backend``, ``model``, ``api_key``, ``base_url``) trigger a
-        fresh ``LLMProvider`` instance. All others take effect on the
+        fresh ``LLMBackend`` instance. All others take effect on the
         next turn.
 
         Updating ``model`` alone also re-infers ``backend`` (a bare Claude
@@ -1039,18 +1023,6 @@ class AlanCodeAgent:
 
         Returns an error message string if validation fails, or None on success.
         """
-        from alancode.settings import BACKEND_SETTINGS
-
-        # Accept the legacy ``provider`` key as an alias for ``backend``,
-        # translating its old values. The /provider slash command and any
-        # external callers depending on the old name keep working.
-        if key == "provider":
-            key = "backend"
-            if isinstance(value, str):
-                from alancode.settings import _LEGACY_PROVIDER_MAP
-
-                value = _LEGACY_PROVIDER_MAP.get(value.lower(), value)
-
         if key not in SETTINGS_DEFAULTS:
             return f"Unknown setting '{key}'."
 
@@ -1058,20 +1030,8 @@ class AlanCodeAgent:
         if error:
             return error
 
-        self._settings[key] = value
-
-        # Sync the corresponding self._* field
-        field_map = {
-            "model": "_model",
-            "permission_mode": "_permission_mode",
-            "max_iterations_per_turn": "_max_iterations_per_turn",
-            "max_output_tokens": "_max_output_tokens",
-            "memory": "_memory_mode",
-            "verbose": "_verbose",
-        }
-        attr = field_map.get(key)
-        if attr:
-            setattr(self, attr, value)
+        candidate_settings = dict(self._settings)
+        candidate_settings[key] = value
 
         # Re-infer the backend when only the model changed. The new
         # backend may be the same as the old one (in which case this is
@@ -1079,17 +1039,51 @@ class AlanCodeAgent:
         # claude-sonnet-4-6 promotes auto → anthropic-native.
         if key == "model":
             inferred = infer_backend(value)
-            if inferred != self._settings.get("backend"):
-                self._settings["backend"] = inferred
+            if inferred != candidate_settings.get("backend"):
+                candidate_settings["backend"] = inferred
 
-        # Recreate the underlying LLMProvider if a backend-related setting changed
+        # Recreate the underlying LLMBackend if a backend-related setting changed
+        candidate_backend: LLMBackend | None = None
         if key in BACKEND_SETTINGS:
             try:
-                self._provider = _create_provider_from_settings(self._settings)
-                logger.info("Backend recreated: %s / %s",
-                           self._settings.get("backend"), self._settings.get("model"))
+                candidate_backend = _create_backend_from_settings(candidate_settings)
+                if hasattr(candidate_backend, "set_session_context"):
+                    candidate_backend.set_session_context(
+                        session_id=self._session_id,
+                        cwd=self._cwd,
+                    )
             except Exception as e:
+                if candidate_backend is not None:
+                    _close_backend_soon(candidate_backend)
                 return f"Failed to create backend: {e}"
+
+        old_backend = self._backend
+        self._settings = candidate_settings
+
+        # Sync the corresponding self._* field only after backend creation
+        # succeeds, so failed updates cannot leave a half-applied session.
+        field_map = {
+            "model": "_model",
+            "permission_mode": "_permission_mode",
+            "max_iterations_per_turn": "_max_iterations_per_turn",
+            "max_output_tokens": "_max_output_tokens",
+            "memory": "_memory_mode",
+            "verbose": "_verbose",
+            "custom_system_prompt": "_custom_system_prompt",
+            "append_system_prompt": "_append_system_prompt",
+        }
+        attr = field_map.get(key)
+        if attr:
+            setattr(self, attr, value)
+
+        if candidate_backend is not None:
+            self._backend = candidate_backend
+            _close_backend_soon(old_backend)
+            logger.info(
+                "Backend recreated: %s / %s",
+                self._settings.get("backend"),
+                self._settings.get("model"),
+            )
 
         save_session_settings(self._cwd, self._session_id, self._settings)
         return None
@@ -1101,14 +1095,6 @@ class AlanCodeAgent:
 
         Returns an error message string if validation fails, or None on success.
         """
-        # Translate the legacy ``provider`` key into ``backend``.
-        if key == "provider":
-            key = "backend"
-            if isinstance(value, str):
-                from alancode.settings import _LEGACY_PROVIDER_MAP
-
-                value = _LEGACY_PROVIDER_MAP.get(value.lower(), value)
-
         if key not in SETTINGS_DEFAULTS:
             return f"Unknown setting '{key}'."
 
@@ -1116,9 +1102,10 @@ class AlanCodeAgent:
         if error:
             return error
 
-        settings = load_settings(self._cwd)
-        settings[key] = value
-        save_settings(settings, self._cwd)
+        with interprocess_lock(get_settings_path(self._cwd)):
+            settings = load_settings(self._cwd)
+            settings[key] = value
+            save_settings(settings, self._cwd)
         return None
 
 

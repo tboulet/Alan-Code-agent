@@ -10,7 +10,8 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `model` | string | `claude-sonnet-4-6` | Backend |
 | `api_key` | string \| null | `null` (from env) | Backend — ephemeral, not persisted |
 | `base_url` | string \| null | `null` | Backend |
-| `tool_call_format` | string \| null | `null` | Backend — `hermes`, `glm`, `alan` |
+| `request_timeout` | int \| `"auto"` | `"auto"` | Backend request timeout |
+| `tool_call_format` | string \| null | `null` | Backend text-tool protocol |
 | `permission_mode` | string | `edit` | Session |
 | `max_iterations_per_turn` | int \| null | `null` (unlimited) | Session |
 | `max_output_tokens` | int \| null | `null` | Session |
@@ -50,21 +51,22 @@ Transport (advanced — inferred from `model` when not set explicitly).
 - `"auto"` — universal LiteLLM transport (OpenAI, OpenRouter, Gemini, Vertex, Bedrock, Ollama, vLLM, SGLang, local servers). Default for everything else.
 - `"scripted"` — deterministic test backend. See [reference/python-api.md](python-api.md).
 
-The legacy `provider` key (`"litellm"` / `"anthropic"` / `"scripted"`) is auto-migrated to `backend` on first read.
-
 ### `model`
 Model identifier. Bare names (`claude-sonnet-4-6`, `gpt-4o`) or LiteLLM-style `provider/model` prefixes (`openrouter/google/gemini-2.5-pro`, `ollama/llama3.1`, `anthropic/claude-sonnet-4-6`).
 
 Changing `model` mid-session also re-infers `backend` (bare `claude-*` → `anthropic-native`, anything else → `auto`).
 
 ### `api_key`
-If `null`, read from the provider's environment variable at init time. **Never persisted to disk** (flagged ephemeral).
+If `null`, read from the model provider's environment variable at init time. **Never persisted to disk** (flagged ephemeral).
 
 ### `base_url`
 Override the API endpoint. Set for local servers (`http://localhost:8000/v1`).
 
+### `request_timeout`
+Model-request timeout in seconds. `"auto"` uses the SDK default for normal cloud routes and 3,600 seconds for a custom `base_url`, which accommodates slow local inference. An explicit positive integer overrides either behavior.
+
 ### `tool_call_format`
-Text-based tool-call protocol for models without native function calling. Options: `"hermes"`, `"glm"`, `"alan"`. When set, tool definitions are injected into the system prompt instead of being passed as API tool schemas, and the model's text output is parsed for tool calls. `null` (default) means use the model's native function calling.
+Text-based tool-call protocol for models without reliable native function calling. Options: `"hermes"`, `"hermes_xml"`, `"glm"`, `"alan"`, and `"meta_json"`. When set, tool definitions are injected into the system prompt instead of being passed as API tool schemas. Alan parses both visible text and reasoning/thinking output, because some reasoning models place the call there. `null` (default) means use native structured tool calls.
 
 ---
 
@@ -79,17 +81,17 @@ Text-based tool-call protocol for models without native function calling. Option
 Hard cap on API calls per user message. `null` = unlimited. Prevents runaway loops; ignores reasoning-loops that should stop naturally.
 
 ### `max_output_tokens`
-Ceiling on output tokens per call. Internally escalated up to `escalated_max_tokens` on recovery.
+Explicit ceiling on output tokens per call. Alan honors an explicit value; automatic first-retry escalation applies only when this setting is `null` or `"auto"`. Every request is still clamped so input, output, and safety margin fit the context window.
 
 ---
 
 ## System prompt
 
 ### `custom_system_prompt`
-Replaces Alan's built-in system prompt entirely (sections 1–9). Sections 10–14 (skills, memory, scratchpad, ALAN.md, tool format) still append. Use with care — you lose all the tool-use guidance and safety instructions baked in.
+Replaces Alan's built-in prompt, skills, memory, scratchpad, and `ALAN.md` context. Required text-tool schemas still append when `tool_call_format` is set. Use with care: you lose Alan's normal tool guidance and safety instructions.
 
 ### `append_system_prompt`
-Appended to Alan's built-in system prompt. Safer way to inject project-specific nudges beyond what `ALAN.md` offers. Not cacheable by Anthropic (changes per session).
+Appended after the normal built-in/project prompt. If `custom_system_prompt` is also set, it appends directly after that replacement instead. This is the safer way to add a focused instruction without discarding Alan's defaults.
 
 ---
 
@@ -108,7 +110,11 @@ In `intensive` mode, iterations between memory-save reminders. Default 10.
 ## Logging
 
 ### `verbose`
-If `true`, debug-level logging to stderr. Same effect as `--verbose` flag.
+If `true`, debug-level logging to stderr. Same effect as `--verbose`; it changes the level, not the format. CLI records always use:
+
+```text
+2026-08-08 14:32:10,123 [Alan Code] alancode.query.loop DEBUG: message
+```
 
 ---
 
@@ -122,7 +128,7 @@ Dict mapping hook-type name to list of hook configs. See [guides/hooks.md](../gu
 ## Compaction
 
 ### `context_window`
-Overrides the model's detected context window. `"auto"` (default) resolves it from the model registry, the serving endpoint's metadata, or a one-time probe (see `alancode/budget.py` and `alancode/providers/cw_probe.py`). Set an integer only when detection is wrong.
+Overrides the model's detected context window. `"auto"` (default) resolves it from the model registry, the serving endpoint's metadata, or a one-time probe (see `alancode/budget.py` and `alancode/backends/cw_probe.py`). Set an integer only when detection is wrong.
 
 ### `compaction_threshold_percent`
 When Layer C (auto-compact) kicks in, as a percentage of the *usable input budget* (context window minus output reservation and margin). `"auto"` = 80.
@@ -163,7 +169,7 @@ Retry budget after the capped default is hit mid-generation. Default 64 000 — 
 ## Error recovery
 
 ### `max_output_tokens_recovery_limit`
-When the model keeps getting cut off at `max_tokens`, how many "Resume directly" injections to try before giving up. Default 3.
+When the model keeps getting cut off at `max_tokens`, how many "Resume directly" continuation turns to try before giving up. With automatic output sizing, Alan first retries the original request with `escalated_max_tokens`; continuation turns begin only if that retry is also cut off. Default 3.
 
 ---
 
@@ -192,7 +198,7 @@ How many scratchpad directories to keep. Older ones are GC'd. Default 5.
 
 Invalid values at load-time (wrong type, out-of-enum string, negative integer where positive required) fall back to the default with a WARNING logged to stderr. Settings are never silently dropped — bad values are visible.
 
-Validators live in `alancode/settings.py::_VALIDATORS`.
+Validators live in `alancode/settings.py::SETTING_VALIDATORS`.
 
 ## Related
 

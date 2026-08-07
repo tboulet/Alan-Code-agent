@@ -1,4 +1,4 @@
-"""Remote-controlled scripted provider.
+"""Remote-controlled scripted backend.
 
 A test/impersonation backend that hosts a small HTTP server and waits for an
 external caller (human or another agent) to post the assistant response.
@@ -37,10 +37,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from alancode.providers.base import (
-    LLMProvider,
+from alancode.backends.base import (
+    LLMBackend,
     ModelInfo,
-    ProviderStreamEvent,
+    BackendStreamEvent,
     StreamError,
     StreamMessageDelta,
     StreamMessageStart,
@@ -89,16 +89,17 @@ def _serialize_thinking(t: ThinkingConfig | None) -> dict[str, Any] | None:
     return {"type": t.type, "budget_tokens": t.budget_tokens}
 
 
-class RemoteScriptedProvider(LLMProvider):
-    """Provider that delegates every LLM call to an external HTTP caller.
+class RemoteScriptedBackend(LLMBackend):
+    """Backend that delegates every LLM call to an external HTTP caller.
 
     On each ``stream()``, the call payload is exposed via ``GET /api/pending``
     and the method blocks until ``POST /api/respond`` is received. The response
-    JSON is translated into the same provider-stream-event sequence the
-    regular ``ScriptedProvider`` emits.
+    JSON is translated into the same backend-stream-event sequence the
+    regular ``ScriptedBackend`` emits.
     """
 
     def __init__(self, *, port: int | None = None) -> None:
+        self._shutdown = False
         self._port = port if port is not None else _find_available_port()
         self._session_id: str | None = None
         self._cwd: str | None = None
@@ -119,7 +120,7 @@ class RemoteScriptedProvider(LLMProvider):
         )
         self._server_thread.start()
         logger.info(
-            "remote-scripted provider listening at http://127.0.0.1:%d", self._port,
+            "remote-scripted backend listening at http://127.0.0.1:%d", self._port,
         )
         print(
             f"[remote-scripted] LLM endpoint: http://127.0.0.1:{self._port}",
@@ -129,7 +130,7 @@ class RemoteScriptedProvider(LLMProvider):
     # ── Public bind hook (called by AlanCodeAgent after session init) ───
 
     def set_session_context(self, *, session_id: str, cwd: str) -> None:
-        """Bind the provider to the agent's session for the on-disk mirror."""
+        """Bind the backend to the agent's session for the on-disk mirror."""
         self._session_id = session_id
         self._cwd = cwd
         print(
@@ -137,7 +138,7 @@ class RemoteScriptedProvider(LLMProvider):
             flush=True,
         )
 
-    # ── LLMProvider interface ─────────────────────────────────────────────
+    # ── LLMBackend interface ─────────────────────────────────────────────
 
     async def stream(
         self,
@@ -150,7 +151,7 @@ class RemoteScriptedProvider(LLMProvider):
         thinking: ThinkingConfig | None = None,
         stop_sequences: list[str] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[ProviderStreamEvent, None]:
+    ) -> AsyncGenerator[BackendStreamEvent, None]:
         turn = self._call_count
         self._call_count += 1
         self._model = model
@@ -233,20 +234,32 @@ class RemoteScriptedProvider(LLMProvider):
 
     def shutdown(self) -> None:
         """Stop the HTTP server and join its thread."""
+        if self._shutdown:
+            return
+        server = getattr(self, "_server", None)
+        if server is None:
+            return
+        self._shutdown = True
         try:
-            self._server.shutdown()
+            server.shutdown()
         except Exception:
-            pass
+            logger.warning("Could not stop remote-scripted server", exc_info=True)
         try:
-            self._server.server_close()
+            server.server_close()
         except Exception:
-            pass
+            logger.warning("Could not close remote-scripted server", exc_info=True)
+
+    async def close(self) -> None:
+        """Release the local HTTP server owned by this backend."""
+        self.shutdown()
 
     def __del__(self) -> None:
         try:
             self.shutdown()
         except Exception:
-            pass
+            logger.debug(
+                "Could not finalize remote-scripted backend", exc_info=True
+            )
 
     # ── Internals ─────────────────────────────────────────────────────────
 
@@ -266,7 +279,7 @@ class RemoteScriptedProvider(LLMProvider):
             logger.warning("Could not mirror pending payload to %s: %s", target, exc)
 
     def _build_server(self) -> ThreadingHTTPServer:
-        provider = self
+        backend = self
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt: str, *args: Any) -> None:
@@ -291,16 +304,16 @@ class RemoteScriptedProvider(LLMProvider):
                     return
                 if self.path == "/api/session":
                     self._send_json(200, {
-                        "session_id": provider._session_id,
-                        "cwd": provider._cwd,
-                        "model": provider._model,
-                        "port": provider._port,
-                        "calls_served": provider._call_count,
+                        "session_id": backend._session_id,
+                        "cwd": backend._cwd,
+                        "model": backend._model,
+                        "port": backend._port,
+                        "calls_served": backend._call_count,
                     })
                     return
                 if self.path == "/api/pending":
-                    with provider._pending_lock:
-                        payload = provider._pending_payload
+                    with backend._pending_lock:
+                        payload = backend._pending_payload
                     if payload is None:
                         self._send_empty(204)
                     else:
@@ -319,8 +332,8 @@ class RemoteScriptedProvider(LLMProvider):
                 except json.JSONDecodeError as e:
                     self._send_json(400, {"error": f"invalid JSON: {e}"})
                     return
-                with provider._pending_lock:
-                    fut = provider._pending_future
+                with backend._pending_lock:
+                    fut = backend._pending_future
                 if fut is None or fut.done():
                     self._send_json(409, {"error": "no pending call to respond to"})
                     return

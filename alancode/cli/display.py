@@ -7,6 +7,7 @@ and tool results using the Rich library.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -472,7 +473,6 @@ def _render_diff_lines(lines: list[str]) -> Text:
 
 def _parse_hunk_header(header: str) -> tuple[int, int]:
     """Extract (old_start, new_start) from ``@@ -a,b +c,d @@``."""
-    import re
     m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", header)
     if not m:
         return (1, 1)

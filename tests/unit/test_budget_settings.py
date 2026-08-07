@@ -99,6 +99,7 @@ class TestBudgetSettingsSurface:
 
     def test_budget_keys_default_to_auto(self):
         assert SETTINGS_DEFAULTS["context_window"] == "auto"
+        assert SETTINGS_DEFAULTS["request_timeout"] == "auto"
         assert SETTINGS_DEFAULTS["tool_result_max_chars"] == "auto"
         assert SETTINGS_DEFAULTS["compact_max_output_tokens"] == "auto"
         assert SETTINGS_DEFAULTS["compaction_threshold_percent"] == "auto"
@@ -106,6 +107,7 @@ class TestBudgetSettingsSurface:
     def test_auto_accepted_by_validators(self):
         for key in (
             "context_window",
+            "request_timeout",
             "max_output_tokens",
             "tool_result_max_chars",
             "compact_max_output_tokens",
@@ -116,6 +118,7 @@ class TestBudgetSettingsSurface:
 
     def test_explicit_ints_accepted(self):
         assert validate_setting("context_window", 32_768) is None
+        assert validate_setting("request_timeout", 90) is None
         assert validate_setting("tool_result_max_chars", 5_000) is None
         assert validate_setting("compaction_threshold_percent", 75) is None
 
@@ -123,6 +126,8 @@ class TestBudgetSettingsSurface:
         assert validate_setting("context_window", 0) is not None
         assert validate_setting("context_window", -5) is not None
         assert validate_setting("context_window", "large") is not None
+        assert validate_setting("request_timeout", 0) is not None
+        assert validate_setting("request_timeout", True) is not None
         assert validate_setting("compaction_threshold_percent", 100) is not None
         assert validate_setting("compaction_threshold_percent", 0) is not None
         assert validate_setting("tool_result_max_chars", True) is not None

@@ -24,6 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from alancode.permissions.project_rules import (
+    add_project_allow_rule,
+    load_project_allow_rules,
+    save_project_allow_rules,
+)
 from alancode.utils.atomic_io import atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -119,18 +124,22 @@ class SessionState:
         try:
             fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
         except OSError:
-            pass
+            logger.debug("Could not unlock session %s", self.session_id, exc_info=True)
         try:
             os.close(self._lock_fd)
         except OSError:
-            pass
+            logger.debug(
+                "Could not close the lock for session %s",
+                self.session_id,
+                exc_info=True,
+            )
         self._lock_fd = None
 
     def __del__(self) -> None:
         try:
             self.close()
         except Exception:
-            pass
+            logger.debug("Could not finalize session %s", self.session_id, exc_info=True)
 
     # ── Disk I/O ──────────────────────────────────────────────────────────
 
@@ -312,116 +321,26 @@ class SessionState:
             List of rule dicts (``tool_name``, ``rule_content``,
             ``source``). See :mod:`alancode.permissions.project_rules`.
         """
-        from alancode.permissions.project_rules import load_project_allow_rules
         # One-time migration: if an older session had rules in state.json,
         # move them into the project file, then drop the session field.
         legacy = self._cache.get("allow_rules")
         if legacy:
-            from alancode.permissions.project_rules import (
-                load_project_allow_rules as _load,
-                save_project_allow_rules as _save,
-            )
-            existing = _load(self.cwd)
+            existing = load_project_allow_rules(self.cwd)
             seen = {(r.get("tool_name"), r.get("rule_content")) for r in existing}
             for r in legacy:
                 key = (r.get("tool_name"), r.get("rule_content"))
                 if key not in seen:
                     existing.append(r)
                     seen.add(key)
-            _save(existing, self.cwd)
+            save_project_allow_rules(existing, self.cwd)
             self._cache.pop("allow_rules", None)
             self._flush()
         return load_project_allow_rules(self.cwd)
 
     @allow_rules.setter
     def allow_rules(self, value: list[dict[str, Any]]) -> None:
-        from alancode.permissions.project_rules import save_project_allow_rules
         save_project_allow_rules(value, self.cwd)
 
     def add_allow_rule(self, rule_dict: dict[str, Any]) -> None:
         """Append a single allow rule to the project-level store."""
-        from alancode.permissions.project_rules import add_project_allow_rule
         add_project_allow_rule(rule_dict, self.cwd)
-
-    # ── AGT (Agentic Git Tree) properties ────────────────────────────────
-
-    @property
-    def alan_commits(self) -> list[str]:
-        """SHAs of commits made by the agent via GitCommit tool."""
-        return list(self._get("alan_commits", []))
-
-    @alan_commits.setter
-    def alan_commits(self, value: list[str]) -> None:
-        self._set("alan_commits", value)
-
-    def add_alan_commit(self, sha: str) -> None:
-        """Append a commit SHA and flush to disk."""
-        commits = self._cache.get("alan_commits", [])
-        commits.append(sha)
-        self._set("alan_commits", commits)
-
-    @property
-    def conv_path(self) -> list[str]:
-        """Ordered list of commit SHAs the agent visited (conversation path)."""
-        return list(self._get("conv_path", []))
-
-    @conv_path.setter
-    def conv_path(self, value: list[str]) -> None:
-        self._set("conv_path", value)
-
-    def add_to_conv_path(self, sha: str) -> None:
-        """Append a SHA to the conversation path and flush."""
-        path = self._cache.get("conv_path", [])
-        path.append(sha)
-        self._set("conv_path", path)
-
-    @property
-    def compaction_markers(self) -> list[str]:
-        """SHAs of HEAD at the time of each compaction."""
-        return list(self._get("compaction_markers", []))
-
-    @compaction_markers.setter
-    def compaction_markers(self, value: list[str]) -> None:
-        self._set("compaction_markers", value)
-
-    def add_compaction_marker(self, sha: str) -> None:
-        """Record that compaction happened at this commit."""
-        markers = self._cache.get("compaction_markers", [])
-        markers.append(sha)
-        self._set("compaction_markers", markers)
-
-    @property
-    def session_root_sha(self) -> str:
-        """SHA of HEAD when the session started."""
-        return self._get("session_root_sha", "")
-
-    @session_root_sha.setter
-    def session_root_sha(self, value: str) -> None:
-        self._set("session_root_sha", value)
-
-    @property
-    def agent_position_sha(self) -> str:
-        """SHA of the commit the agent is currently on."""
-        return self._get("agent_position_sha", "")
-
-    @agent_position_sha.setter
-    def agent_position_sha(self, value: str) -> None:
-        self._set("agent_position_sha", value)
-
-    @property
-    def commit_message_indices(self) -> dict[str, int]:
-        """Maps commit SHA → message list length at time of commit.
-
-        Used by /convrevert to know exactly where to truncate messages.
-        """
-        return dict(self._get("commit_message_indices", {}))
-
-    @commit_message_indices.setter
-    def commit_message_indices(self, value: dict[str, int]) -> None:
-        self._set("commit_message_indices", value)
-
-    def record_commit_message_index(self, sha: str, message_count: int) -> None:
-        """Record how many messages existed when this commit was made."""
-        indices = self._cache.get("commit_message_indices", {})
-        indices[sha] = message_count
-        self._set("commit_message_indices", indices)

@@ -91,22 +91,22 @@ class TestInjectMessageIntegration:
     @pytest.mark.asyncio
     async def test_injected_message_reaches_model(self):
         from alancode.agent import AlanCodeAgent
-        from alancode.providers.scripted_provider import (
-            ScriptedProvider, rule, text, tool_call,
+        from alancode.backends.scripted_backend import (
+            ScriptedBackend, rule, text, tool_call,
         )
 
-        provider = ScriptedProvider(rules=[
+        backend = ScriptedBackend(rules=[
             rule(turn=0, respond=tool_call("Bash", {"command": "echo hi"})),
             rule(turn=1, respond=text("I see your injected message.")),
         ])
 
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test", permission_mode="yolo")
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test", permission_mode="yolo")
         agent.inject_message("Extra context from the user")
 
         events = agent.query_events("Do something")
-        assert provider._call_count == 2
+        assert backend._call_count == 2
 
-        second_call_msgs = provider.call_log[1]["messages"]
+        second_call_msgs = backend.call_log[1]["messages"]
         all_content = str(second_call_msgs)
         assert "Extra context from the user" in all_content
 

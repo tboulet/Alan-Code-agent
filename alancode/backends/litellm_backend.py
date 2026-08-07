@@ -1,38 +1,40 @@
-"""LiteLLM provider — supports 100+ LLM providers through a unified API.
+"""LiteLLM backend — supports 100+ LLM backends through a unified API.
 
 Works with OpenRouter, OpenAI, Anthropic, local models (Ollama, vLLM),
-and any provider supported by litellm.
+and any backend supported by litellm.
 
 Usage::
 
-    from alancode.providers.litellm_provider import LiteLLMProvider
+    from alancode.backends.litellm_backend import LiteLLMBackend
 
     # OpenRouter (free model)
-    provider = LiteLLMProvider(model="openrouter/mistralai/devstral-2512:free")
+    backend = LiteLLMBackend(model="openrouter/mistralai/devstral-2512:free")
 
     # OpenRouter (paid model, needs OPENROUTER_API_KEY env var)
-    provider = LiteLLMProvider(model="openrouter/anthropic/claude-sonnet-4")
+    backend = LiteLLMBackend(model="openrouter/anthropic/claude-sonnet-4")
 
     # Local Ollama
-    provider = LiteLLMProvider(model="ollama/llama3.1")
+    backend = LiteLLMBackend(model="ollama/llama3.1")
 
     # OpenAI
-    provider = LiteLLMProvider(model="gpt-4o")
+    backend = LiteLLMBackend(model="gpt-4o")
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+import os
+import re
 from typing import Any, AsyncGenerator
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from alancode.api.errors import is_prompt_too_long
-from alancode.providers.base import (
-    LLMProvider,
+from alancode.backends.base import (
+    LLMBackend,
     ModelInfo,
-    ProviderStreamEvent,
+    BackendStreamEvent,
     StreamError,
     StreamMessageDelta,
     StreamMessageStart,
@@ -45,24 +47,82 @@ from alancode.providers.base import (
     ThinkingConfig,
     ToolSchema,
 )
+from alancode.backends import cw_probe
 
 logger = logging.getLogger(__name__)
 
 
-# Suppress litellm's verbose debug logging
-def _quiet_litellm() -> None:
-    try:
-        import litellm
-        litellm.suppress_debug_info = True
-        litellm.print_verbose = lambda *args, **kwargs: None
-        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-        logging.getLogger("LiteLLM Router").setLevel(logging.WARNING)
-        logging.getLogger("LiteLLM Proxy").setLevel(logging.WARNING)
-    except ImportError:
-        pass
+DEFAULT_LOCAL_REQUEST_TIMEOUT_SECONDS = 3_600
 
 
-_quiet_litellm()
+def _load_litellm():
+    """Import LiteLLM without its startup-time network cost-map fetch."""
+    # Alan does not need a fresh pricing download to make a model request.
+    # Respect an explicit user override, but default to the packaged map so
+    # importing Alan remains deterministic on offline compute nodes.
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    import litellm
+
+    litellm.suppress_debug_info = True
+    litellm.print_verbose = lambda *args, **kwargs: None
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("LiteLLM Router").setLevel(logging.WARNING)
+    logging.getLogger("LiteLLM Proxy").setLevel(logging.WARNING)
+    return litellm
+
+
+def _resolve_request_timeout(
+    configured: int | str | None,
+    api_base: str | None,
+) -> int | None:
+    """Resolve ``auto`` to a slow-local-server-friendly timeout."""
+    if isinstance(configured, int) and not isinstance(configured, bool):
+        if configured > 0:
+            return configured
+        raise ValueError("request_timeout must be a positive integer or 'auto'")
+    if isinstance(configured, str) and configured.lower() == "auto":
+        configured = "auto"
+    if configured not in (None, "auto"):
+        raise ValueError("request_timeout must be a positive integer or 'auto'")
+    if api_base:
+        return DEFAULT_LOCAL_REQUEST_TIMEOUT_SECONDS
+    return None
+
+
+def _finalize_tool_calls(
+    current_tool_calls: dict[int, dict[str, Any]],
+) -> tuple[list[StreamToolUseStop], str | None]:
+    """Validate and finalize accumulated OpenAI streaming tool calls."""
+    events: list[StreamToolUseStop] = []
+    for index in sorted(current_tool_calls):
+        call = current_tool_calls[index]
+        name = call["name"]
+        if not name:
+            return [], f"Tool call at index {index} completed without a name."
+        raw_input = call["arguments_json"]
+        try:
+            parsed_input = json.loads(raw_input) if raw_input else {}
+        except json.JSONDecodeError as exc:
+            return [], f"Tool call '{name}' returned invalid JSON arguments: {exc}."
+        if not isinstance(parsed_input, dict):
+            return [], f"Tool call '{name}' arguments must decode to an object."
+        events.append(
+            StreamToolUseStop(
+                id=call["id"],
+                name=name,
+                input=parsed_input,
+            )
+        )
+    return events, None
+
+
+def _exception_status_code(exc: Exception) -> int | None:
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
 
 # Known context windows for common models (litellm handles most, this is fallback)
 _KNOWN_CONTEXT_WINDOWS: dict[str, int] = {
@@ -79,8 +139,8 @@ _KNOWN_CONTEXT_WINDOWS: dict[str, int] = {
 }
 
 
-class LiteLLMProvider(LLMProvider):
-    """LLM provider using litellm for multi-provider support.
+class LiteLLMBackend(LLMBackend):
+    """LLM backend using litellm for multi-backend support.
 
     Supports any model string that litellm understands, including:
     - ``openrouter/anthropic/claude-sonnet-4``
@@ -102,6 +162,7 @@ class LiteLLMProvider(LLMProvider):
         api_base: str | None = None,
         context_window: int | None = None,
         max_output_tokens: int | None = None,
+        request_timeout: int | str | None = "auto",
         extra_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ):
@@ -110,7 +171,11 @@ class LiteLLMProvider(LLMProvider):
         self._api_base = api_base
         self._context_window_override = context_window
         self._max_output_override = max_output_tokens
-        self._extra_kwargs = extra_kwargs or {}
+        self._request_timeout = _resolve_request_timeout(
+            request_timeout, api_base,
+        )
+        self._extra_kwargs = dict(extra_kwargs or {})
+        self._extra_kwargs.update(kwargs)
         self._cw_probe_attempted = False
         self._cw_fallback_warned: set[str] = set()
 
@@ -135,7 +200,7 @@ class LiteLLMProvider(LLMProvider):
         # Rung 2: litellm's registry (covers hundreds of cloud models).
         # Also the source of max_output/thinking regardless of the CW rung.
         try:
-            import litellm
+            litellm = _load_litellm()
             info = litellm.get_model_info(m)
             if ctx is None:
                 ctx = info.get("max_input_tokens") or info.get("max_tokens")
@@ -143,8 +208,13 @@ class LiteLLMProvider(LLMProvider):
             if max_out is None:
                 max_out = info.get("max_output_tokens")
             supports_thinking = info.get("supports_thinking", False)
-        except Exception:
-            logger.debug(f"Model '{m}' not found in litellm registry, trying server fallbacks")
+        except Exception as exc:
+            logger.debug(
+                "Model '%s' not found in LiteLLM registry, trying server "
+                "fallbacks: %s",
+                m,
+                exc,
+            )
 
         # Rung 3: the serving endpoint's own metadata (local servers).
         if ctx is None and self._api_base:
@@ -161,8 +231,7 @@ class LiteLLMProvider(LLMProvider):
 
         # Rung 5: a previously probed value.
         if ctx is None:
-            from alancode.providers.cw_probe import load_cached_context_window
-            ctx = load_cached_context_window(m, self._api_base)
+            ctx = cw_probe.load_cached_context_window(m, self._api_base)
             source = "cache" if ctx is not None else None
 
         # Rung 6: conservative fallback - loudly, and only once per model.
@@ -199,17 +268,14 @@ class LiteLLMProvider(LLMProvider):
             return None
         self._cw_probe_attempted = True
 
-        from alancode.providers.cw_probe import (
-            probe_context_window,
-            save_cached_context_window,
-        )
-
         m = model or self._model
-        result = await probe_context_window(
+        result = await cw_probe.probe_context_window(
             m, api_key=self._api_key, api_base=self._api_base,
         )
         if result.value:
-            save_cached_context_window(m, self._api_base, result.value, result.method)
+            cw_probe.save_cached_context_window(
+                m, self._api_base, result.value, result.method
+            )
             logger.info(
                 "Context window of '%s' probed: %d tokens (cached).",
                 m, result.value,
@@ -227,28 +293,61 @@ class LiteLLMProvider(LLMProvider):
         import requests as http_requests
 
         base = self._api_base.rstrip("/")
+        parsed = urlsplit(base)
+        base_path = parsed.path.rstrip("/")
+        if base_path.endswith("/v1"):
+            root_path = base_path[:-3]
+            root = parsed._replace(path=root_path, query="", fragment="").geturl().rstrip("/")
+            openai_endpoints = [f"{base}/models"]
+        else:
+            root = base
+            openai_endpoints = [f"{base}/v1/models", f"{base}/models"]
 
         # Try OpenAI-compatible /v1/models (vLLM, SGLang)
-        for endpoint in [f"{base}/models", f"{base.rstrip('/v1')}/v1/models"]:
+        requested_names = {model, model.split("/", 1)[-1], model.rsplit("/", 1)[-1]}
+        for endpoint in openai_endpoints:
             try:
                 resp = http_requests.get(endpoint, timeout=5)
                 if resp.status_code == 200:
                     data = resp.json()
-                    for m_info in data.get("data", []):
-                        max_len = m_info.get("max_model_len")
+                    model_entries = [
+                        item for item in data.get("data", [])
+                        if isinstance(item, dict)
+                    ]
+                    matches = [
+                        item for item in model_entries
+                        if str(item.get("id") or item.get("name") or "")
+                        in requested_names
+                    ]
+                    candidates = matches or (
+                        model_entries if len(model_entries) == 1 else []
+                    )
+                    for m_info in candidates:
+                        max_len = (
+                            m_info.get("max_model_len")
+                            or m_info.get("context_window")
+                            or m_info.get("max_context_length")
+                        )
                         if max_len:
-                            logger.info("Got context window %d from server %s", max_len, endpoint)
-                            return max_len
-            except Exception:
+                            value = int(max_len)
+                            logger.info(
+                                "Got context window %d for model %s from server %s",
+                                value,
+                                model,
+                                endpoint,
+                            )
+                            return value
+            except (OSError, ValueError, TypeError, http_requests.RequestException) as exc:
+                logger.debug(
+                    "Context metadata request failed for %s: %s", endpoint, exc,
+                )
                 continue
 
         # Try Ollama /api/show (POST with the model name). Note /api/tags
         # does NOT expose context_length - it lives in /api/show's
         # model_info under "<architecture>.context_length".
         try:
-            import re as _re
-
-            ollama_base = base.replace("/v1", "")
+            ollama_base = root
             # "ollama/llama3.1" -> the server knows it as "llama3.1"
             server_model = model.split("/", 1)[1] if "/" in model else model
             resp = http_requests.post(
@@ -265,15 +364,15 @@ class LiteLLMProvider(LLMProvider):
                 # runs with num_ctx (and silently truncates beyond it). If
                 # the modelfile sets one, that is the real limit.
                 params_str = data.get("parameters") or ""
-                num_ctx_match = _re.search(r"num_ctx\s+(\d+)", params_str)
+                num_ctx_match = re.search(r"num_ctx\s+(\d+)", params_str)
                 if num_ctx_match:
                     num_ctx = int(num_ctx_match.group(1))
                     ctx = min(ctx, num_ctx) if ctx else num_ctx
                 if ctx:
                     logger.info("Got context window %d from Ollama /api/show", ctx)
                     return ctx
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, http_requests.RequestException) as exc:
+            logger.debug("Ollama context metadata request failed: %s", exc)
 
         return None
 
@@ -288,10 +387,10 @@ class LiteLLMProvider(LLMProvider):
         thinking: ThinkingConfig | None = None,
         stop_sequences: list[str] | None = None,
         **kwargs,
-    ) -> AsyncGenerator[ProviderStreamEvent, None]:
-        """Stream from any litellm-supported provider."""
+    ) -> AsyncGenerator[BackendStreamEvent, None]:
+        """Stream from any litellm-supported backend."""
         try:
-            import litellm
+            litellm = _load_litellm()
         except ImportError:
             yield StreamError(
                 error="litellm is not installed. Run: pip install litellm",
@@ -308,9 +407,9 @@ class LiteLLMProvider(LLMProvider):
         litellm_messages: list[dict[str, Any]] = []
         if system:
             # Use structured content blocks so we can place cache_control
-            # markers. LiteLLM passes cache_control through to providers
+            # markers. LiteLLM passes cache_control through to backends
             # that support it (Anthropic, OpenRouter/Anthropic) and strips
-            # it for providers that don't.
+            # it for backends that don't.
             blocks: list[dict[str, Any]] = []
             for i, s in enumerate(system):
                 if not s:
@@ -368,6 +467,8 @@ class LiteLLMProvider(LLMProvider):
             completion_kwargs["api_key"] = self._api_key
         if self._api_base:
             completion_kwargs["api_base"] = self._api_base
+        if self._request_timeout is not None:
+            completion_kwargs["timeout"] = self._request_timeout
 
         # OpenRouter-specific: use max_completion_tokens instead of max_tokens
         if "openrouter" in resolved_model:
@@ -375,12 +476,14 @@ class LiteLLMProvider(LLMProvider):
             # Drop unsupported params
             completion_kwargs.setdefault("drop_params", True)
 
-        # Yield message start
         request_id = str(uuid4())
-        yield StreamMessageStart(model=resolved_model, request_id=request_id)
 
         try:
             response = await litellm.acompletion(**completion_kwargs)
+            # Do not announce a started message until the request has
+            # successfully returned a stream. This keeps pre-stream failures
+            # safe to retry without exposing partial response state.
+            yield StreamMessageStart(model=resolved_model, request_id=request_id)
 
             # Track state for tool calls and usage
             current_tool_calls: dict[int, dict[str, Any]] = {}  # index → {id, name, arguments_json}
@@ -417,20 +520,23 @@ class LiteLLMProvider(LLMProvider):
                 if delta.content:
                     yield StreamTextDelta(text=delta.content)
 
-                # Thinking/reasoning (some providers support this)
+                # Thinking/reasoning (some backends support this)
                 reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
                 if reasoning:
                     yield StreamThinkingDelta(thinking=reasoning)
 
                 # Tool calls (OpenAI format: delta.tool_calls is a list)
-                if delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index if hasattr(tc, "index") else 0
+                tool_call_deltas = getattr(delta, "tool_calls", None)
+                if tool_call_deltas:
+                    for position, tc in enumerate(tool_call_deltas):
+                        raw_index = getattr(tc, "index", None)
+                        idx = raw_index if isinstance(raw_index, int) else position
+                        function = getattr(tc, "function", None)
 
                         if idx not in current_tool_calls:
                             # New tool call starting
-                            tool_id = tc.id or f"call_{uuid4().hex[:8]}"
-                            tool_name = (tc.function.name if tc.function else None) or ""
+                            tool_id = getattr(tc, "id", None) or f"call_{uuid4().hex[:8]}"
+                            tool_name = getattr(function, "name", None) or ""
                             current_tool_calls[idx] = {
                                 "id": tool_id,
                                 "name": tool_name,
@@ -442,37 +548,60 @@ class LiteLLMProvider(LLMProvider):
                                 current_tool_calls[idx]["start_emitted"] = True
                         else:
                             # Update name if we get it later
-                            if tc.function and tc.function.name and not current_tool_calls[idx]["start_emitted"]:
-                                current_tool_calls[idx]["name"] = tc.function.name
+                            tool_name = getattr(function, "name", None)
+                            if tool_name and not current_tool_calls[idx]["start_emitted"]:
+                                current_tool_calls[idx]["name"] = tool_name
                                 yield StreamToolUseStart(
                                     id=current_tool_calls[idx]["id"],
-                                    name=tc.function.name,
+                                    name=tool_name,
                                 )
                                 current_tool_calls[idx]["start_emitted"] = True
 
                         # Accumulate arguments
-                        if tc.function and tc.function.arguments:
-                            current_tool_calls[idx]["arguments_json"] += tc.function.arguments
+                        arguments = getattr(function, "arguments", None)
+                        if arguments:
+                            if not isinstance(arguments, str):
+                                arguments = json.dumps(arguments)
+                            current_tool_calls[idx]["arguments_json"] += arguments
                             yield StreamToolUseInputDelta(
                                 id=current_tool_calls[idx]["id"],
-                                partial_json=tc.function.arguments,
+                                partial_json=arguments,
                             )
 
                 # Check for finish — finalize pending tool calls
                 if finish_reason and not stop_emitted:
-                    for tc_info in current_tool_calls.values():
-                        try:
-                            parsed_input = json.loads(tc_info["arguments_json"]) if tc_info["arguments_json"] else {}
-                        except json.JSONDecodeError:
-                            parsed_input = {}
-                        yield StreamToolUseStop(
-                            id=tc_info["id"],
-                            name=tc_info["name"],
-                            input=parsed_input,
+                    final_events, tool_error = _finalize_tool_calls(
+                        current_tool_calls,
+                    )
+                    if tool_error:
+                        yield StreamError(
+                            error=tool_error,
+                            error_type="invalid_tool_call",
                         )
+                        return
+                    for final_event in final_events:
+                        yield final_event
                     current_tool_calls.clear()
                     mapped_stop_reason = _map_finish_reason(finish_reason)
                     stop_emitted = True
+
+            # Some OpenAI-compatible servers close the stream without a
+            # finish_reason. Preserve complete accumulated tool calls instead
+            # of silently dropping them.
+            if current_tool_calls and not stop_emitted:
+                final_events, tool_error = _finalize_tool_calls(
+                    current_tool_calls,
+                )
+                if tool_error:
+                    yield StreamError(
+                        error=tool_error,
+                        error_type="invalid_tool_call",
+                    )
+                    return
+                for final_event in final_events:
+                    yield final_event
+                mapped_stop_reason = "tool_use"
+                stop_emitted = True
 
             # Emit final delta with stop reason and usage AFTER the loop,
             # so we capture usage regardless of chunk ordering.
@@ -486,16 +615,21 @@ class LiteLLMProvider(LLMProvider):
         except Exception as e:
             error_str = str(e)
             error_type = "api_error"
+            status_code = _exception_status_code(e)
 
             # Classify common litellm exceptions
             if "AuthenticationError" in type(e).__name__ or "401" in error_str:
                 error_type = "authentication_error"
-            elif "RateLimitError" in type(e).__name__ or "429" in error_str:
+            elif (
+                "RateLimitError" in type(e).__name__
+                or status_code == 429
+                or "429" in error_str
+            ):
                 error_type = "rate_limit"
             elif (
                 "ContextWindowExceededError" in type(e).__name__
                 # Centralised matcher — covers OpenAI, vLLM, SGLang, TGI,
-                # Anthropic, Ollama, Mistral and any other provider whose
+                # Anthropic, Ollama, Mistral and any other backend whose
                 # context-overflow error phrasing we have seen in the wild.
                 # Edit the pattern list in alancode/api/errors.py, not here.
                 or is_prompt_too_long(error_str)
@@ -503,13 +637,26 @@ class LiteLLMProvider(LLMProvider):
                 error_type = "prompt_too_long"
             elif "Timeout" in type(e).__name__:
                 error_type = "timeout"
+            elif "Connection" in type(e).__name__:
+                error_type = "connection_error"
+            elif status_code is not None and 500 <= status_code <= 599:
+                error_type = "server_error"
 
-            logger.error(f"LiteLLM error (identified as {error_type}): {error_str}")
-            yield StreamError(error=error_str, error_type=error_type)
+            logger.error(
+                "LiteLLM error (identified as %s, status=%s): %s",
+                error_type,
+                status_code,
+                error_str,
+            )
+            yield StreamError(
+                error=error_str,
+                error_type=error_type,
+                status_code=status_code,
+            )
 
 
 def _map_finish_reason(reason: str | None) -> str:
-    """Map provider-specific finish reasons to our standard reasons."""
+    """Map backend-specific finish reasons to our standard reasons."""
     if reason is None:
         return "end_turn"
     mapping = {

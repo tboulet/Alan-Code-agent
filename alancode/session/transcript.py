@@ -33,6 +33,7 @@ from alancode.messages.types import (
     MessageOrigin,
 )
 from alancode.session.session import get_session_dir
+from alancode.utils.atomic_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,6 @@ def record_transcript(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        from alancode.utils.atomic_io import atomic_write_text
         metadata = {
             "_metadata": {
                 "cwd": cwd or "",
@@ -349,7 +349,6 @@ def dict_to_message(d: dict) -> Message:
         origin_d = d.get("origin")
         origin_obj = None
         if isinstance(origin_d, dict) and "kind" in origin_d:
-            from alancode.messages.types import MessageOrigin
             origin_obj = MessageOrigin(
                 kind=origin_d["kind"], source=origin_d.get("source"),
             )

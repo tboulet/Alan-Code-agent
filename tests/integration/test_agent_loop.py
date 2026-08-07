@@ -1,10 +1,10 @@
-"""Integration tests for the full agentic loop with ScriptedProvider."""
+"""Integration tests for the full agentic loop with ScriptedBackend."""
 
 import pytest
 
 from alancode.agent import AlanCodeAgent
 
-from alancode.providers.scripted_provider import ScriptedProvider, ScriptedResponse, text, tool_call
+from alancode.backends.scripted_backend import ScriptedBackend, ScriptedResponse, text, tool_call
 from alancode.messages.types import (
     AssistantMessage,
     AttachmentMessage,
@@ -24,8 +24,8 @@ class TestTextOnlyResponse:
 
     @pytest.mark.asyncio
     async def test_simple_text_response(self):
-        provider = ScriptedProvider.from_responses([ScriptedResponse(text="Hello, I can help!")])
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        backend = ScriptedBackend.from_responses([ScriptedResponse(text="Hello, I can help!")])
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Hello"):
@@ -41,19 +41,19 @@ class TestTextOnlyResponse:
         assert "Hello, I can help!" in assistant_msgs[-1].text
 
     @pytest.mark.asyncio
-    async def test_provider_called_once_for_text(self):
-        provider = ScriptedProvider.from_responses([ScriptedResponse(text="Done")])
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+    async def test_backend_called_once_for_text(self):
+        backend = ScriptedBackend.from_responses([ScriptedResponse(text="Done")])
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         async for _ in agent.query_events_async("Hi"):
             pass
 
-        assert provider._call_count == 1
+        assert backend._call_count == 1
 
     @pytest.mark.asyncio
     async def test_events_include_request_start(self):
-        provider = ScriptedProvider.from_responses([ScriptedResponse(text="ok")])
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        backend = ScriptedBackend.from_responses([ScriptedResponse(text="ok")])
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Test"):
@@ -76,7 +76,7 @@ class TestToolUseResponse:
     async def test_tool_call_and_result(self):
         # First response: model calls a tool
         # Second response: model produces final text after seeing tool result
-        provider = ScriptedProvider.from_responses(
+        backend = ScriptedBackend.from_responses(
             [
                 ScriptedResponse(
                     tool_calls=[
@@ -91,18 +91,18 @@ class TestToolUseResponse:
                 ScriptedResponse(text="I read the file. Here's what I found..."),
             ]
         )
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Read test.txt"):
             events.append(event)
 
-        # Verify provider was called twice (once for tool call, once for final)
-        assert provider._call_count == 2
+        # Verify backend was called twice (once for tool call, once for final)
+        assert backend._call_count == 2
 
     @pytest.mark.asyncio
     async def test_tool_result_appears_in_events(self):
-        provider = ScriptedProvider.from_responses(
+        backend = ScriptedBackend.from_responses(
             [
                 ScriptedResponse(
                     tool_calls=[
@@ -117,7 +117,7 @@ class TestToolUseResponse:
                 ScriptedResponse(text="Command output was: hello"),
             ]
         )
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("Run echo hello"):
@@ -144,13 +144,13 @@ class TestMultiTurn:
 
     @pytest.mark.asyncio
     async def test_second_turn_sees_history(self):
-        provider = ScriptedProvider.from_responses(
+        backend = ScriptedBackend.from_responses(
             [
                 ScriptedResponse(text="First response"),
                 ScriptedResponse(text="Second response, I remember the first"),
             ]
         )
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         async for _ in agent.query_events_async("First message"):
             pass
@@ -158,8 +158,8 @@ class TestMultiTurn:
             pass
 
         # Second call should have seen previous messages in the conversation
-        assert len(provider.call_log) == 2
-        second_call_messages = provider.call_log[1]["messages"]
+        assert len(backend.call_log) == 2
+        second_call_messages = backend.call_log[1]["messages"]
         # Should include: first user message, first assistant response,
         # second user message -> at least 3 messages
         assert len(second_call_messages) >= 3
@@ -168,8 +168,8 @@ class TestMultiTurn:
     async def test_agent_state_returns_to_waiting(self):
         from alancode.agent import AgentState
 
-        provider = ScriptedProvider.from_responses([ScriptedResponse(text="done")])
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        backend = ScriptedBackend.from_responses([ScriptedResponse(text="done")])
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         assert agent.state == AgentState.WAITING
         async for _ in agent.query_events_async("Hello"):
@@ -188,7 +188,7 @@ class TestMaxTurns:
     @pytest.mark.asyncio
     async def test_stops_at_max_iterations_per_turn(self):
         # Create tool calls that would loop forever
-        provider = ScriptedProvider.from_responses(
+        backend = ScriptedBackend.from_responses(
             [
                 ScriptedResponse(
                     tool_calls=[
@@ -203,7 +203,7 @@ class TestMaxTurns:
                 for i in range(20)
             ]
         )
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test", max_iterations_per_turn=3)
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test", max_iterations_per_turn=3)
 
         events = []
         async for event in agent.query_events_async("Loop forever"):
@@ -211,7 +211,7 @@ class TestMaxTurns:
 
         # Should have stopped before using all 20 responses.
         # max_iterations_per_turn=3 means 3 tool-execution turns, plus the initial call.
-        assert provider._call_count <= 5
+        assert backend._call_count <= 5
 
         # Should have a max_iterations_per_turn_reached attachment message
         attachment_msgs = [
@@ -229,14 +229,14 @@ class TestMaxTurns:
 
 
 class TestErrorHandling:
-    """Provider error -- verify graceful handling."""
+    """Backend error -- verify graceful handling."""
 
     @pytest.mark.asyncio
     async def test_stream_error_yields_error_message(self):
-        provider = ScriptedProvider.from_responses(
+        backend = ScriptedBackend.from_responses(
             [ScriptedResponse(error="Service unavailable")]
         )
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         events = []
         async for event in agent.query_events_async("This will fail"):
@@ -261,8 +261,8 @@ class TestConversationHistory:
 
     @pytest.mark.asyncio
     async def test_messages_list_grows(self):
-        provider = ScriptedProvider.from_responses([ScriptedResponse(text="response")])
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        backend = ScriptedBackend.from_responses([ScriptedResponse(text="response")])
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
 
         assert len(agent.messages) == 0
 
@@ -274,7 +274,7 @@ class TestConversationHistory:
 
     @pytest.mark.asyncio
     async def test_session_id_is_set(self):
-        provider = ScriptedProvider.from_responses([ScriptedResponse(text="ok")])
-        agent = AlanCodeAgent(backend=provider, cwd="/tmp/test")
+        backend = ScriptedBackend.from_responses([ScriptedResponse(text="ok")])
+        agent = AlanCodeAgent(backend=backend, cwd="/tmp/test")
         assert agent.session_id is not None
         assert len(agent.session_id) > 0

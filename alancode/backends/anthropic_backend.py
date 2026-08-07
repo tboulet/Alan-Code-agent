@@ -1,18 +1,19 @@
-"""Anthropic provider — wraps the official anthropic Python SDK.
+"""Anthropic backend — wraps the official anthropic Python SDK.
 
-Translates anthropic SDK stream events into Alan Code's ProviderStreamEvent types.
+Translates anthropic SDK stream events into Alan Code's BackendStreamEvent types.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any, AsyncGenerator
 
-from alancode.providers.base import (
-    LLMProvider,
+from alancode.backends.base import (
+    LLMBackend,
     ModelInfo,
-    ProviderStreamEvent,
+    BackendStreamEvent,
     StreamError,
     StreamMessageDelta,
     StreamMessageStart,
@@ -28,9 +29,11 @@ from alancode.providers.base import (
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CUSTOM_ENDPOINT_REQUEST_TIMEOUT_SECONDS = 3_600
+
 # ── Model capabilities lookup ─────────────────────────────────────────────────
 
-from alancode.providers.anthropic_models import lookup_anthropic_model
+from alancode.backends.anthropic_models import lookup_anthropic_model
 
 _CACHE_MARKER = {"type": "ephemeral"}
 
@@ -74,8 +77,8 @@ def _inject_cache_breakpoints(
             break
 
 
-class AnthropicProvider(LLMProvider):
-    """LLM provider using the official Anthropic Python SDK.
+class AnthropicBackend(LLMBackend):
+    """LLM backend using the official Anthropic Python SDK.
 
     Parameters
     ----------
@@ -94,18 +97,44 @@ class AnthropicProvider(LLMProvider):
         api_key: str | None = None,
         base_url: str | None = None,
         model: str = "claude-sonnet-4-6",
+        request_timeout: int | str | None = None,
         **client_kwargs: Any,
     ) -> None:
         import anthropic
 
         self._model = model
+        resolved_timeout: int | None = None
+        if isinstance(request_timeout, int) and not isinstance(request_timeout, bool):
+            if request_timeout <= 0:
+                raise ValueError(
+                    "request_timeout must be a positive integer or 'auto'"
+                )
+            resolved_timeout = request_timeout
+        elif (
+            isinstance(request_timeout, str)
+            and request_timeout.lower() == "auto"
+        ):
+            if base_url:
+                resolved_timeout = DEFAULT_CUSTOM_ENDPOINT_REQUEST_TIMEOUT_SECONDS
+        elif request_timeout not in (None, "auto"):
+            raise ValueError("request_timeout must be a positive integer or 'auto'")
+        elif base_url:
+            resolved_timeout = DEFAULT_CUSTOM_ENDPOINT_REQUEST_TIMEOUT_SECONDS
+        if resolved_timeout is not None:
+            client_kwargs["timeout"] = resolved_timeout
         self._client = anthropic.AsyncAnthropic(
             api_key=api_key,
             base_url=base_url,
             **client_kwargs,
         )
 
-    # ── LLMProvider interface ──────────────────────────────────────────────────
+    async def close(self) -> None:
+        """Close the Anthropic HTTP client."""
+        result = self._client.close()
+        if inspect.isawaitable(result):
+            await result
+
+    # ── LLMBackend interface ──────────────────────────────────────────────────
 
     def get_model_info(self, model: str | None = None) -> ModelInfo:
         return lookup_anthropic_model(model or self._model)
@@ -121,7 +150,7 @@ class AnthropicProvider(LLMProvider):
         thinking: ThinkingConfig | None = None,
         stop_sequences: list[str] | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[ProviderStreamEvent, None]:
+    ) -> AsyncGenerator[BackendStreamEvent, None]:
         """Stream from the Anthropic API, translating raw events.
 
         Uses ``self._client.messages.stream()`` with raw event iteration so we
@@ -271,10 +300,26 @@ class AnthropicProvider(LLMProvider):
                                         accumulated_tool_json,
                                     )
                                     yield StreamError(
-                                        error=f"Malformed tool input JSON for {current_tool_name}: {accumulated_tool_json[:200]}",
-                                        error_type="api_error",
+                                        error=(
+                                            "Malformed tool input JSON for "
+                                            f"{current_tool_name}: "
+                                            f"{accumulated_tool_json[:200]}"
+                                        ),
+                                        error_type="invalid_tool_call",
                                         status_code=None,
                                     )
+                                    return
+                                if not isinstance(parsed_input, dict):
+                                    yield StreamError(
+                                        error=(
+                                            "Tool input for "
+                                            f"{current_tool_name} must be a "
+                                            "JSON object."
+                                        ),
+                                        error_type="invalid_tool_call",
+                                        status_code=None,
+                                    )
+                                    return
                             # Guard against empty id/name — emitting one
                             # would produce orphan tool_results downstream
                             # (the next turn's API call rejects with 400).

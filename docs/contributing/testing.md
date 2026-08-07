@@ -25,9 +25,9 @@ pytest --cov=alancode --cov-report=term-missing
 
 ```
 tests/
-├── conftest.py         # shared fixtures (tmp session dirs, scripted providers, etc.)
+├── conftest.py         # shared fixtures (tmp session dirs, scripted backends, etc.)
 ├── unit/               # fast, local, no-network
-├── integration/        # full agent turns against the scripted provider
+├── integration/        # full agent turns against the scripted backend
 └── testing_*/          # adversarial and regression scenario suites
 ```
 
@@ -39,29 +39,29 @@ Key files:
 - `test_compaction.py` — layers A, B, C logic.
 - `test_permissions_extended.py` — permission pipeline, allow rules, modes.
 - `test_messages.py` — message types, serialization, normalization.
-- `test_session.py`, `test_session_listing.py` — `SessionState`, transcript roundtrip, `find_session_by_prefix`.
+- `test_session.py` — `SessionState`, transcript roundtrip, locking, and session lookup.
 - `test_settings.py` — defaults, validators, save/load.
 - `test_tools.py` — tool input validation, schemas.
-- `test_text_tool_parser.py` — hermes/glm/alan format parsers.
+- `test_text_tool_parser.py` — hermes/hermes_xml/glm/alan/meta_json format parsers.
 - `test_hooks.py` — pre/post hook execution, timeout, action fallback.
 - `test_skills.py` — frontmatter parser, registry, validation.
-- `test_agt_operations.py` — AGT move/revert primitives.
 - `test_compaction_upgrade.py` — format_compact_summary, the 9-section prompt.
 - `test_thinking_extraction.py` — ThinkingBlock extraction in text-based parsers.
+- `test_litellm_backend.py`, `test_retry.py` — stream translation and retry safety.
+- `test_backend_lifecycle.py`, `test_concurrent_shared_state.py` — cleanup and multi-session shared-state regressions.
 
 ### `integration/`
 
-Tests that exercise the full agent loop through `AlanCodeAgent.query_events_async`, backed by the `ScriptedProvider` to stay deterministic.
+Tests that exercise the full agent loop through `AlanCodeAgent.query_events_async`, backed by the `ScriptedBackend` to stay deterministic.
 
 - `test_agent_loop.py` — happy path + max_iterations_per_turn + early exit.
 - `test_reactive_scenarios.py` — error recovery, multi-tool scenarios.
 - `test_query_api.py` — the 2×2 matrix (sync/async × text/events).
 - `test_scripted_ui.py` — the scripted UI fixture.
-- `test_agt_edge_cases.py` — AGT operations against a real git repo fixture.
-- `test_gui_phase2.py` — GUI event flow with a scripted UI.
 - `test_budget_regression.py` - full-loop context-budget and compaction regressions across small and large windows.
+- `test_reasoning_tool_calls.py`, `test_thinking_only_response.py` - reasoning-stream tool parsing and empty-response handling.
 
-The `testing_*` directories contain adversarial scenario suites used to challenge invariants such as legal request sizes, conversation liveness, and tool-history validity. They use deterministic providers and are safe to run with the rest of the suite. Accepted limitations remain as strict expected failures, so an unexpected pass prompts a review.
+The `testing_*` directories contain adversarial scenario suites used to challenge invariants such as legal request sizes, conversation liveness, and tool-history validity. They use deterministic backends and are safe to run with the rest of the suite. Accepted limitations remain as strict expected failures, so an unexpected pass prompts a review.
 
 ## Writing new tests
 
@@ -89,15 +89,18 @@ def test_truncates_oversized_result():
 ```python
 import pytest
 from alancode import AlanCodeAgent
-from alancode.providers.scripted_provider import ScriptedProvider, text
+from alancode.backends.scripted_backend import ScriptedBackend, text
 
 
 @pytest.mark.asyncio
 async def test_simple_turn():
-    provider = ScriptedProvider.from_responses([text("Hello!")])
-    agent = AlanCodeAgent(backend=provider, permission_mode="yolo")
-    answer = await agent.query_async("ping")
-    assert answer == "Hello!"
+    backend = ScriptedBackend.from_responses([text("Hello!")])
+    agent = AlanCodeAgent(backend=backend, permission_mode="yolo")
+    try:
+        answer = await agent.query_async("ping")
+        assert answer == "Hello!"
+    finally:
+        await agent.close()
 ```
 
 `asyncio_mode = "auto"` is set in `pyproject.toml`, so async tests just need `@pytest.mark.asyncio`.
@@ -107,14 +110,13 @@ async def test_simple_turn():
 In `tests/conftest.py`:
 
 - `tmp_cwd` — temporary directory for session state.
-- `tmp_git_repo` — initialised git repo (for AGT tests).
-- `scripted_agent` — pre-built `AlanCodeAgent` with a `ScriptedProvider`.
+- `scripted_agent` — pre-built `AlanCodeAgent` with a `ScriptedBackend`.
 
 Check `conftest.py` for the current list.
 
 ## What NOT to test
 
-- Real API calls. Use `ScriptedProvider`. If you genuinely need to verify behaviour against a real model, do it manually before pushing — don't add it to CI.
+- Real API calls. Use `ScriptedBackend`. If you genuinely need to verify behaviour against a real model, do it manually before pushing — don't add it to CI.
 - Display formatting beyond a smoke test. Rich's output is implementation detail; over-specifying it creates brittle tests.
 - Private method internals when the public behaviour covers it. Prefer black-box tests.
 

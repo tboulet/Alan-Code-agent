@@ -1,12 +1,12 @@
 # Remote-scripted backend — be the model
 
-The `RemoteScriptedProvider` lets an external caller act as Alan's LLM over HTTP. Use it to:
+The `RemoteScriptedBackend` lets an external caller act as Alan's LLM over HTTP. Use it to:
 
 - Drive an agent step-by-step by hand to debug a system prompt, tool wiring, or framework integration.
 - Have a second program impersonate the model deterministically without writing scripted rules ahead of time.
 - Smoke-test embedding setups (GameAgents, custom orchestrators) without paying for tokens.
 
-The backend lives in `alancode/providers/remote_scripted_provider.py`. Selected via:
+The backend lives in `alancode/backends/remote_scripted_backend.py`. Selected via:
 
 ```bash
 alancode --backend scripted --model remote
@@ -25,7 +25,7 @@ When the agent starts you'll see two lines on stdout:
 [remote-scripted] bound to session <sid8> (cwd=...)
 ```
 
-Port `8430` is the default; if it's taken the provider scans upward (up to `8450`).
+Port `8430` is the default; if it's taken the backend scans upward (up to `8450`).
 
 ## Endpoints
 
@@ -93,7 +93,7 @@ Errors:
 {"error": "rate limit hit", "error_type": "overloaded", "status_code": 529}
 ```
 
-Produces a `StreamError` event for the agent, exactly like a real provider failure.
+Produces a `StreamError` event for the agent, exactly like a real backend failure.
 
 ## Shell macros
 
@@ -144,7 +144,7 @@ done
 
 ## Session shutdown
 
-The provider's HTTP server lives on a daemon thread. It shuts down when:
+The backend's HTTP server lives on a daemon thread. It shuts down when:
 
 - The agent calls `agent.close()` (normal lifecycle).
 - The process exits.
@@ -157,12 +157,12 @@ If two agents both ask for the same port, the second picks the next free one (84
 
 ## Inside Python
 
-The provider can also be inspected and driven directly without HTTP:
+The backend can also be inspected and driven directly without HTTP:
 
 ```python
 agent = AlanCodeAgent(backend="scripted", model="remote", ...)
-provider = agent._provider  # RemoteScriptedProvider instance
-print(provider._port)
+backend = agent._backend  # RemoteScriptedBackend instance
+print(backend._port)
 ```
 
 …but the HTTP API is the supported surface and what tooling should target.

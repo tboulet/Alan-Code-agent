@@ -118,15 +118,6 @@ class SessionUI(ABC):
         GUI displays it. CLI is a no-op.
         """
 
-    # ── Git Tree (AGT) ──────────────────────────────────────────────────────
-
-    def on_git_tree_update(self, tree_data: dict) -> None:
-        """Called when the git tree layout should be refreshed.
-
-        GUI sends the data to the browser via WebSocket.
-        CLI and ScriptedUI are no-ops.
-        """
-
     # ── Console (for slash commands) ──────────────────────────────────────
 
     @property

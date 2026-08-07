@@ -1,20 +1,20 @@
 """Shared test fixtures."""
 
 import pytest
-from alancode.providers.scripted_provider import ScriptedProvider, ScriptedResponse, text, tool_call
+from alancode.backends.scripted_backend import ScriptedBackend, ScriptedResponse, text, tool_call
 
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
 
 
 @pytest.fixture
-def scripted_provider():
-    return ScriptedProvider.from_responses([])
+def scripted_backend():
+    return ScriptedBackend.from_responses([])
 
 
 @pytest.fixture
-def agent(scripted_provider):
+def agent(scripted_backend):
     from alancode.agent import AlanCodeAgent
-    return AlanCodeAgent(backend=scripted_provider, cwd="/tmp/test")
+    return AlanCodeAgent(backend=scripted_backend, cwd="/tmp/test")
 
 
 # ── Git test repo fixture ───────────────────────────────────────────────────

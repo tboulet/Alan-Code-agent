@@ -6,11 +6,11 @@ Each test asserts the design-intent behaviour and fails on current code.
 
 from typing import Any
 
-from alancode.providers.base import StreamError
-from alancode.providers.scripted_provider import ScriptedProvider, text, tool_call
+from alancode.backends.base import StreamError
+from alancode.backends.scripted_backend import ScriptedBackend, text, tool_call
 
-from harness import (
-    AuditedProvider,
+from .harness import (
+    AuditedBackend,
     FloodTool,
     error_messages,
     final_text,
@@ -24,22 +24,22 @@ from harness import (
 
 class TestF01EmergencyCompactionDead:
     async def test_main_ptl_triggers_emergency_compaction(self, tmp_path):
-        """A provider prompt-too-long on the main call must trigger ONE
+        """A backend prompt-too-long on the main call must trigger ONE
         emergency compaction and a retry (design: query loop Phase 7 +
         decision plan D6). Currently the PTL exception path returns before
         the emergency branch: summarizer_calls stays 0 and the turn ends
         with a raw error."""
-        provider = AuditedProvider(
-            ScriptedProvider.from_responses(
+        backend = AuditedBackend(
+            ScriptedBackend.from_responses(
                 [text("after ptl")], fallback=text("All done."),
             ),
             context_window=32_768,
             main_ptl_first_n=1,
         )
-        agent = make_agent(tmp_path, provider)
+        agent = make_agent(tmp_path, backend)
 
         events = await run_turn(agent, "hello")
-        assert provider.summarizer_calls >= 1, (
+        assert backend.summarizer_calls >= 1, (
             "prompt-too-long on the main call never reached emergency "
             "compaction (dead code path in loop Phase 7)"
         )
@@ -56,11 +56,11 @@ class TestF02DeadSessionSmallCW:
         forever ends with 'Conversation too long'."""
         cw = 16_384
         responses = [tool_call("Dummy", {}) for _ in range(18)]
-        inner = ScriptedProvider.from_responses(
+        inner = ScriptedBackend.from_responses(
             responses, fallback=text("All done."),
         )
-        provider = AuditedProvider(inner, context_window=cw, summarizer_mode="error")
-        agent = make_agent(tmp_path, provider, payload_chars=12_000)
+        backend = AuditedBackend(inner, context_window=cw, summarizer_mode="error")
+        agent = make_agent(tmp_path, backend, payload_chars=12_000)
 
         saved = False
         for turn in range(4):
@@ -76,7 +76,7 @@ class TestF02DeadSessionSmallCW:
         )
 
 
-class TestF07PtlMatcherMissesProviderPhrasings:
+class TestF07PtlMatcherMissesBackendPhrasings:
     async def test_vllm_phrased_ptl_triggers_truncation_retry(self, tmp_path):
         """compact_auto detects PTL with a private 'prompt'+'too long'
         substring check instead of api.errors.is_prompt_too_long. A
@@ -86,7 +86,7 @@ class TestF07PtlMatcherMissesProviderPhrasings:
         backstop. Expected: the second attempt's payload is smaller."""
         cw = 32_768
 
-        class VllmPtlOnce(AuditedProvider):
+        class VllmPtlOnce(AuditedBackend):
             async def stream(self, messages, system, tools, **kw: Any):
                 is_summ = bool(system) and "summariz" in system[0].lower()
                 if is_summ and self.summarizer_calls == 0:
@@ -108,19 +108,19 @@ class TestF07PtlMatcherMissesProviderPhrasings:
                 async for e in super().stream(messages, system, tools, **kw):
                     yield e
 
-        inner = ScriptedProvider.from_responses(
+        inner = ScriptedBackend.from_responses(
             [tool_call("Dummy", {}) for _ in range(14)],
             fallback=text("All done."),
         )
-        provider = VllmPtlOnce(inner, context_window=cw)
+        backend = VllmPtlOnce(inner, context_window=cw)
         tool = FloodTool(lambda i: f"R-{i} " + word_soup(8_000))
-        agent = make_agent(tmp_path, provider, tools=[tool])
+        agent = make_agent(tmp_path, backend, tools=[tool])
 
         await run_turn(agent, "flood")
-        attempts = summarizer_payloads(provider)
+        attempts = summarizer_payloads(backend)
         assert len(attempts) >= 2
         assert len(attempts[1]) < len(attempts[0]), (
-            "the PTL retry re-sent an identical payload: the provider's "
+            "the PTL retry re-sent an identical payload: the backend's "
             "phrasing was not recognized as prompt-too-long, so no "
             "middle-truncation was applied between attempts"
         )

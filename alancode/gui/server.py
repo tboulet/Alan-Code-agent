@@ -105,6 +105,7 @@ def create_gui_app(
             gui_ui.remove_connection(websocket)
         except Exception:
             gui_ui.remove_connection(websocket)
+            logger.debug("GUI websocket handler failed", exc_info=True)
 
     # ── Static files ──────────────────────────────────────────────────
 

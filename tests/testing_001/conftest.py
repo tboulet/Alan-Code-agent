@@ -1,20 +1,12 @@
 """Proof-of-bug suite (adversarial testing round 001).
 
-Every test here encodes the EXPECTED (design-intent) behaviour and FAILS
-on the current code - see perso_dev/testing_001/FINDINGS.md for the
-finding each test proves. They pass once the corresponding bug is fixed.
+Every test here encodes the expected design behaviour and is backed by the
+self-contained instruments in this package.
 
 Deselect them from a normal run with:  pytest -m "not known_bug"
 """
 
-import sys
-from pathlib import Path
-
 import pytest
-
-sys.path.insert(
-    0, str(Path(__file__).parent.parent.parent / "perso_dev" / "testing_001")
-)
 
 
 def pytest_configure(config):

@@ -25,7 +25,7 @@ from alancode.messages.types import (
     ImageBlock,
     get_messages_after_compact_boundary,
 )
-from alancode.providers.base import StreamTextDelta, StreamError
+from alancode.backends.base import StreamTextDelta, StreamError
 from alancode.messages.factory import (
     create_compact_boundary_message,
     create_user_message,
@@ -39,6 +39,8 @@ from alancode.compact.prompt import (
     get_post_compact_notification,
 )
 from alancode.budget import DEFAULT_SUMMARY_MAX_TOKENS, MIN_SUMMARY_OUTPUT_TOKENS
+from alancode.budget import clamp_output_budget
+from alancode.compact.compact_truncate import compaction_truncate_tool_results
 from alancode.api.errors import is_prompt_too_long
 from alancode.utils.tokens import (
     estimate_message_tokens,
@@ -100,7 +102,7 @@ def truncate_middle_for_ptl(
 
 async def compaction_auto(
     messages: list[Message],
-    provider: Any,  # LLMProvider
+    backend: Any,  # LLMBackend
     *,
     model: str | None = None,
     custom_instructions: str | None = None,
@@ -114,7 +116,7 @@ async def compaction_auto(
     1. Build compact system prompt (replacement, not the main prompt)
     2. Build compact user message with 9-section template
     3. Normalize messages for API
-    4. PTL retry loop: call provider, retry with truncation if prompt too long
+    4. PTL retry loop: call backend, retry with truncation if prompt too long
     5. Extract summary via format_compact_summary
     6. Build CompactionResult with boundary + summary + notification
 
@@ -134,7 +136,6 @@ async def compaction_auto(
     # 1. Pre-truncate oversized tool results before compaction
     # Without this, a single huge tool result (e.g., 216K chars) would be
     # included in the compaction request, exceeding the LLM's context window.
-    from alancode.compact.compact_truncate import compaction_truncate_tool_results
     truncated_messages, _ = compaction_truncate_tool_results(
         relevant_messages,
         max_chars=budget.tool_result_cap_chars if budget is not None else None,
@@ -172,8 +173,6 @@ async def compaction_auto(
     for attempt in range(max_ptl_retries + 1):
         # Size the summarizer's output so input + output + margin fits the window.
         if budget is not None:
-            from alancode.budget import clamp_output_budget
-
             est_input = _estimate_api_dict_tokens(api_messages_dicts)
             call_max_tokens = clamp_output_budget(
                 budget, est_input, budget.max_tokens_for_summary,
@@ -185,10 +184,10 @@ async def compaction_auto(
         try:
             if call_max_tokens < MIN_SUMMARY_OUTPUT_TOKENS:
                 # No legal room for a useful summary: route through the same
-                # middle-truncation retry as a provider PTL rather than emit
+                # middle-truncation retry as a backend PTL rather than emit
                 # an over-budget call (I1).
                 raise _PromptTooLongError("input leaves no legal output budget")
-            async for event in provider.stream(
+            async for event in backend.stream(
                 api_messages_dicts,
                 compact_system,
                 tools=[],

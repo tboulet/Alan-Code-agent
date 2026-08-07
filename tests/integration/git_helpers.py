@@ -1,4 +1,4 @@
-"""Git test helpers — temporary repos for AGT integration tests.
+"""Git test helpers for temporary repositories.
 
 Provides fixtures and helper functions for creating temporary git
 repositories with controlled commit histories.  Repos are created in

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 
@@ -19,6 +20,7 @@ from alancode.cli.display import (
     display_replay,
     new_stream_state,
 )
+from alancode.cli.user_input import ask_user_cli
 from alancode.gui.base import SessionUI
 from alancode.messages.types import Message, StreamEvent, Usage
 
@@ -37,8 +39,6 @@ class CLIUI(SessionUI):
 
         # Set up prompt-toolkit with persistent history.
         # Enter = submit, Alt+Enter (Esc then Enter) = newline.
-        from prompt_toolkit.key_binding import KeyBindings
-
         kb = KeyBindings()
 
         @kb.add("escape", "enter")
@@ -68,8 +68,6 @@ class CLIUI(SessionUI):
         return text.strip()
 
     async def ask_user(self, question: str, options: list[str]) -> str:
-        from alancode.cli.user_input import ask_user_cli
-
         return await ask_user_cli(question, options, session=self._ask_session)
 
     # ── Agent event output ────────────────────────────────────────────────
@@ -86,7 +84,7 @@ class CLIUI(SessionUI):
         conversation_tokens: int = 0, context_window: int = 0,
     ) -> None:
         # Session cost. If no cache tokens were reported across the whole
-        # session, the figure may overestimate when the provider applies
+        # session, the figure may overestimate when the backend applies
         # prompt caching without surfacing the breakdown to us.
         parts = [f"  [dim]Session: {usage.total_input:,} in + {usage.output_tokens:,} out"]
         if not cost_unknown:

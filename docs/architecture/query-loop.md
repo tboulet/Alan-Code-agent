@@ -21,7 +21,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # phases 1–10 ...
 ```
 
-`QueryParams` carries everything the loop needs (messages, provider, tools, permission callback, abort event, etc.). `LoopState` is mutable per-turn state.
+`QueryParams` carries everything the loop needs (messages, backend, tools, permission callback, abort event, etc.). `LoopState` is mutable per-turn state.
 
 ## Phase 1 — Abort check
 
@@ -65,7 +65,7 @@ The pre-call gatekeeper. See [concepts/context-and-compaction.md](../concepts/co
 ```python
 messages_for_query = get_messages_after_compact_boundary(state.messages)
 
-model_info = params.provider.get_model_info(params.model)
+model_info = params.backend.get_model_info(params.model)
 budget = resolve_context_budget(model_info, params.settings)
 
 # Layer A
@@ -131,14 +131,12 @@ if params.llm_perspective_callback is not None:
     params.llm_perspective_callback(api_messages_dicts, params.system_prompt)
 
 stream = stream_with_retry(
-    params.provider.stream,
+    params.backend,
     api_messages_dicts,
     system=params.system_prompt,
     tools=tool_schemas,
-    model=current_model,
-    max_tokens=effective_max_output_tokens,
-    thinking=...,
-    fallback_provider=params.fallback_provider,
+    model=params.model,
+    max_tokens=max_tokens,
 )
 
 async for event in stream:
@@ -146,7 +144,8 @@ async for event in stream:
 ```
 
 - `normalize_messages_for_api` strips hidden messages, merges same-role neighbours, drops orphan tool_results. See [architecture/messages-and-api.md](messages-and-api.md).
-- `stream_with_retry` handles retryable errors (429, 529, network) with exponential backoff + jitter. Non-retryable errors (400, 401, 403) propagate immediately.
+- `stream_with_retry` handles retryable rate limits, overloads, timeouts, connection failures, and HTTP 5xx errors with exponential backoff and jitter. It retries only before response content is emitted; a partial stream is never replayed. After persistent pre-content HTTP 5xx failures, the loop makes one emergency-compaction attempt because some local servers report context overflow as an opaque 500. The partial-stream marker also prevents this higher-level recovery from replaying content.
+- Malformed native tool arguments are fed back to the model for a corrected call, with a bounded retry count. They do not end the turn immediately.
 - Events are dispatched into `current_usage` (from `message_delta`), `TextBlock` / `ThinkingBlock` / `ToolUseBlock` accumulators.
 
 ## Phase 5 — Response assembly
@@ -162,6 +161,8 @@ assistant_msg = AssistantMessage(
 ```
 
 All the streamed bits become a single `AssistantMessage`. Text blocks have been streamed with `hide_in_api=True`; the final message is yielded with `hide_in_api=False` — the final view the caller stores.
+
+Inline `<think>` content is separated into `ThinkingBlock`. When a text-tool protocol is active, parsing checks visible text first and then thinking/reasoning content, so a call buried by a reasoning model is still executed without exposing private reasoning. A response with no visible text and no tool call becomes an `empty_response` assistant error rather than a successful blank turn.
 
 ## Phase 6 — Yield + calibration
 
@@ -189,8 +190,8 @@ if params.abort_event and params.abort_event.is_set():
 if not tool_use_blocks:
     # Possibly recover from max_output_tokens mid-thought
     if stop_reason == "max_tokens":
-        # Escalate from 8k → 64k
-        if not state.max_output_tokens_override:
+        # Escalate the automatic budget from 8k -> 64k
+        if not state.max_output_tokens_override and not params.max_output_tokens:
             state.max_output_tokens_override = escalated_max_tokens
             state.transition = "max_output_tokens_escalation"
             continue
@@ -204,7 +205,7 @@ if not tool_use_blocks:
     return
 ```
 
-If the model stops mid-thought, Alan escalates the output budget or injects "Resume directly." Prompt-too-long errors are handled around the provider stream: Alan attempts emergency compaction there and retries the iteration once.
+If the automatically sized output is cut off, Alan first retries the original request with `escalated_max_tokens` (64,000 by default, clamped to legal room). An explicit `max_output_tokens` is never escalated. If the larger/explicit call is still cut off, Alan stores the partial assistant response and injects a hidden "Resume directly" user turn, up to `max_output_tokens_recovery_limit`. Prompt-too-long errors trigger one emergency-compaction attempt around the backend stream.
 
 ## Phase 8 — Tool execution
 
@@ -221,7 +222,7 @@ async for update in run_tools(
 
 `run_tools` in `alancode/tools/orchestration.py` batches the `ToolUseBlock`s into concurrent (for read-only) or serial (for write/exec) tasks. Each emits a `UserMessage` with a `ToolResultBlock`.
 
-If a model-invoked skill restricts its allowed tools, `effective_tools` contains only that subset. If the turn is interrupted, Alan emits synthetic error results for every tool call that did not complete so the stored provider history remains valid.
+If a model-invoked skill restricts its allowed tools, `effective_tools` contains only that subset. If the turn is interrupted, Alan emits synthetic error results for every tool call that did not complete so the stored backend history remains valid.
 
 For each tool, `run_tool_use` (in `alancode/tools/execution.py`):
 

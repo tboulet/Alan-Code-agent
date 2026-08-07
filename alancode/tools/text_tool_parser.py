@@ -581,7 +581,6 @@ def _extract_thinking(text: str) -> tuple[str | None, str]:
     If no thinking tags found, returns (None, original_text).
     """
     # Handle both <think>...</think> and just </think> (opening tag sometimes missing)
-    import re
     match = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
     if match:
         thinking = match.group(1).strip()

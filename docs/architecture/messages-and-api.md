@@ -20,10 +20,10 @@ normalize_messages_for_api  (filter hidden, merge same-role, drop orphan tool_re
 messages_to_openai_dicts    (serialize to [{role, content}, ...])
       │
       ▼
-provider envelope (Anthropic: convert to Anthropic shape; LiteLLM: pass through)
+backend envelope (Anthropic: convert to Anthropic shape; LiteLLM: pass through)
       │
       ▼
-HTTP POST to the provider
+HTTP POST to the backend
 ```
 
 Each step is covered below.
@@ -53,8 +53,7 @@ Purely informational messages used for UI progress updates. Never sent.
 These live in `agent._messages` for UI replay but are stripped before sending. Examples:
 
 - `<system-reminder>` with date/time (injected each turn).
-- `<system-reminder>` about model / provider / memory-mode changes.
-- `<system-reminder>` about `/move`, `/convrevert`, `/allrevert`.
+- `<system-reminder>` about model / backend / memory-mode changes.
 - Virtual "resume directly" recovery prompts.
 
 ### 3c. Drop SystemMessages
@@ -95,11 +94,11 @@ Without this pass, the API 400's with "tool_use_id does not match any tool_use b
 
 Content is a string when simple, a list of blocks when there are tool calls, images, or thinking blocks.
 
-## Step 5 — Provider envelope
+## Step 5 — Backend envelope
 
 ### Anthropic
 
-`AnthropicProvider.stream` converts to Anthropic's specific shape:
+`AnthropicBackend.stream` converts to Anthropic's specific shape:
 - `system` parameter becomes a list of cache-scoped text blocks (see [prompt-caching.md](prompt-caching.md)).
 - `messages` stays alternating user/assistant.
 - `tool_use` blocks use Anthropic's schema (`{type: "tool_use", id, name, input}`).
@@ -108,13 +107,13 @@ Content is a string when simple, a list of blocks when there are tool calls, ima
 
 ### LiteLLM
 
-`LiteLLMProvider.stream` passes the OpenAI dicts through to `litellm.acompletion(...)`, which handles provider-specific reshape internally. Our job is just to ensure the dicts are well-formed.
+`LiteLLMBackend.stream` passes the OpenAI dicts through to `litellm.acompletion(...)`, which handles backend-specific reshape internally. Our job is just to ensure the dicts are well-formed.
 
 `stream_options={"include_usage": True}` is set so `usage` arrives in the final stream chunk — needed for our token accounting.
 
 ### Scripted
 
-`ScriptedProvider` ignores the payload entirely and returns the Nth pre-canned response.
+`ScriptedBackend` ignores the payload entirely and returns the Nth pre-canned response.
 
 ## The two sides diverge — what the user sees vs what the API sees
 
@@ -125,7 +124,6 @@ Content is a string when simple, a list of blocks when there are tool calls, ima
 | Tool call blocks | ✅ | ✅ |
 | Tool result panels | ✅ | ✅ |
 | `<system-reminder>` for date/time | ❌ (hide_in_ui) | ✅ |
-| `<system-reminder>` after `/move` / `/revert` | ❌ | ✅ |
 | `ProgressMessage` (compaction started) | ✅ as informational line | ❌ |
 | `SystemMessage(COMPACT_BOUNDARY)` | ✅ as subtle marker | ❌ (filtered at step 3c) |
 | `AttachmentMessage(max_iterations_per_turn_reached)` | depends on UI | ✅ (converted to UserMessage) |

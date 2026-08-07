@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from alancode.agent import AlanCodeAgent
-from alancode.providers.scripted_provider import ScriptedProvider, text, tool_call
+from alancode.backends.scripted_backend import ScriptedBackend, text, tool_call
 from alancode.tools.base import ToolUseContext
 from alancode.tools.builtin.skill_tool import SkillTool
 
@@ -60,7 +60,7 @@ class TestLoopEnforcesFilter:
         """After the model invokes a restricted skill, the NEXT API call's
         tool schemas contain only the allowed tools (+ Skill) - hard
         enforcement, not just the polite sentence in the prompt."""
-        provider = ScriptedProvider.from_responses(
+        backend = ScriptedBackend.from_responses(
             [
                 tool_call("Skill", {"skill": "restricted"}),
                 text("done"),
@@ -68,7 +68,7 @@ class TestLoopEnforcesFilter:
             fallback=text("done"),
         )
         agent = AlanCodeAgent(
-            backend=provider,
+            backend=backend,
             cwd=str(tmp_path),
             programmatic=True,
             permission_mode="yolo",
@@ -79,9 +79,9 @@ class TestLoopEnforcesFilter:
         async for _ in agent.query_events_async("use the skill"):
             pass
 
-        assert len(provider.call_log) >= 2
-        first_names = {t.name for t in provider.call_log[0]["tools"]}
-        second_names = {t.name for t in provider.call_log[1]["tools"]}
+        assert len(backend.call_log) >= 2
+        first_names = {t.name for t in backend.call_log[0]["tools"]}
+        second_names = {t.name for t in backend.call_log[1]["tools"]}
         # First call: full tool set (Skill not yet invoked)
         assert "Bash" in first_names
         # Second call: only the allowed tools (+ Skill, always kept)
@@ -93,7 +93,7 @@ class TestLoopEnforcesFilter:
     async def test_filter_clears_at_end_of_turn(self, tmp_path):
         """The restriction lives on the per-turn context: a NEW turn gets
         the full tool set again."""
-        provider = ScriptedProvider.from_responses(
+        backend = ScriptedBackend.from_responses(
             [
                 tool_call("Skill", {"skill": "restricted"}),
                 text("done"),
@@ -102,7 +102,7 @@ class TestLoopEnforcesFilter:
             fallback=text("done"),
         )
         agent = AlanCodeAgent(
-            backend=provider,
+            backend=backend,
             cwd=str(tmp_path),
             programmatic=True,
             permission_mode="yolo",
@@ -115,7 +115,7 @@ class TestLoopEnforcesFilter:
         async for _ in agent.query_events_async("new turn"):
             pass
 
-        third_names = {t.name for t in provider.call_log[2]["tools"]}
+        third_names = {t.name for t in backend.call_log[2]["tools"]}
         assert "Bash" in third_names  # full set restored
 
 
@@ -127,7 +127,7 @@ class TestLoopEnforcesFilter:
 class TestBuildSystemPrompt:
     def _agent(self, tmp_path, **kwargs):
         return AlanCodeAgent(
-            backend=ScriptedProvider.from_responses([], fallback=text("ok")),
+            backend=ScriptedBackend.from_responses([], fallback=text("ok")),
             cwd=str(tmp_path),
             programmatic=True,
             permission_mode="yolo",
@@ -140,6 +140,40 @@ class TestBuildSystemPrompt:
         assert isinstance(sections, list) and sections
         assert isinstance(boundary, int) and boundary >= 0
         assert any("CUSTOM-MARKER" in s for s in sections)
+
+    def test_append_prompt_is_additive(self, tmp_path):
+        agent = self._agent(tmp_path, append_system_prompt="APPEND-MARKER")
+        sections, _ = agent.build_system_prompt()
+        rendered = "\n".join(sections)
+        assert "You are Alan Code" in rendered
+        assert "# Using your tools" in rendered
+        assert "Memory is currently disabled" in rendered
+        assert sections[-1] == "APPEND-MARKER"
+
+    def test_custom_prompt_replaces_builtin_but_accepts_explicit_append(
+        self, tmp_path
+    ):
+        agent = self._agent(
+            tmp_path,
+            custom_system_prompt="CUSTOM-BASE",
+            append_system_prompt="CUSTOM-APPEND",
+        )
+        sections, boundary = agent.build_system_prompt()
+        assert sections == ["CUSTOM-BASE", "CUSTOM-APPEND"]
+        assert boundary == 1
+
+    def test_session_start_time_is_agent_scoped(self, tmp_path):
+        first = self._agent(tmp_path)
+        second = self._agent(tmp_path)
+        first._session_started_at = "2026-08-08 10:00"
+        second._session_started_at = "2026-08-08 11:00"
+
+        first_prompt, _ = first.build_system_prompt()
+        second_prompt, _ = second.build_system_prompt()
+
+        assert "2026-08-08 10:00" in "\n".join(first_prompt)
+        assert "2026-08-08 11:00" not in "\n".join(first_prompt)
+        assert "2026-08-08 11:00" in "\n".join(second_prompt)
 
     def test_text_tool_format_appends_schemas_section(self, tmp_path):
         agent = self._agent(
@@ -154,6 +188,19 @@ class TestBuildSystemPrompt:
 
         assert len(with_format) == len(without_format) + 1
         assert "tool" in with_format[-1].lower()
+
+    @pytest.mark.asyncio
+    async def test_custom_prompt_does_not_remove_native_tool_schemas(self, tmp_path):
+        agent = self._agent(tmp_path, custom_system_prompt="CUSTOM-ONLY")
+
+        async for _ in agent.query_events_async("use tools if needed"):
+            pass
+
+        call = agent._backend.call_log[0]
+        assert call["system"] == ["CUSTOM-ONLY"]
+        assert call["tools"]
+        assert any(tool.name == "Bash" for tool in call["tools"])
+        await agent.close()
 
     def test_stable_across_calls(self, tmp_path):
         """Preview (UI) and turn (API) calls must produce the same prompt."""

@@ -83,8 +83,11 @@ class FileWriteTool(Tool):
             try:
                 with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                     old_content = f.read()
-            except Exception:
-                old_content = ""
+            except OSError as exc:
+                return ToolResult(
+                    data=f"Error reading existing file before overwrite: {exc}",
+                    is_error=True,
+                )
 
         try:
             with open(file_path, "w", encoding="utf-8") as f:

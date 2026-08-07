@@ -8,7 +8,7 @@ Typing `/help` in a session prints the currently-registered list.
 
 | Command | Description |
 |---|---|
-| `/clear` | Clear the conversation and start a fresh turn. Keeps the session file (use `--resume` later) but drops in-memory messages and compaction state. |
+| `/clear` | Clear the in-memory conversation and reset the latest-usage counters. The old transcript remains recoverable only until another turn rewrites this session's transcript. |
 | `/compact [instructions]` | Manually trigger conversation compaction. Optional instructions steer the summary (e.g. `/compact focus on the bug we fixed`). |
 | `/exit` | Leave the session cleanly. |
 
@@ -28,14 +28,13 @@ Typing `/help` in a session prints the currently-registered list.
 | `/model <name>` | Switch the active model mid-session. A reminder is injected so the agent knows a switch happened. Changing the model also re-infers the backend (bare `claude-*` → `anthropic-native`; anything else → `auto`). |
 | `/backend` | Show the current transport backend. |
 | `/backend <name>` | Switch the backend (`auto`, `anthropic-native`, `scripted`). Rarely needed — the backend is inferred from the model string. |
-| `/provider` | **Deprecated** alias for `/backend`. Accepts the old values `litellm`, `anthropic`, `scripted` and translates them. Prints a one-line deprecation notice. |
 
 ## Settings
 
 | Command | Description |
 |---|---|
 | `/settings` | Show current session settings. |
-| `/settings <key> <value>` | Update a session setting (e.g. `/settings permission_mode yolo`). Takes effect immediately; backend-related changes (`backend`, `model`, `api_key`, `base_url`) recreate the underlying `LLMProvider`. |
+| `/settings <key> <value>` | Update a session setting (e.g. `/settings permission_mode yolo`). Takes effect immediately; backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`) recreate the underlying `LLMBackend`. |
 | `/settings-project` | Show project settings from `.alan/settings.json`. |
 | `/settings-project <key> <value>` | Update a project-level default. |
 
@@ -46,25 +45,13 @@ Typing `/help` in a session prints the currently-registered list.
 | `/memory` | Show the current memory mode. |
 | `/memory <mode>` | Set mode: `off` (default), `on` (read on start, write on `/save`), `intensive` (also auto-write after significant responses). |
 | `/save [note]` | Ask the agent to persist noteworthy info from the conversation into `.alan/memory/`. Optional note becomes the focus of what to save. |
-| `/memodiff` | Show memory diff vs. the last commit. |
 
 ## Git integration
 
 | Command | Description |
 |---|---|
 | `/diff` | Show the git diff of all uncommitted changes (staged + unstaged), with syntax highlighting. |
-| `/commit [message]` | Stage all changes and create a commit. Without an argument, an AI-generated message is used. |
-
-## Agentic Git Tree (AGT)
-
-The Git Tree panel in the GUI corresponds to these commands; they also work from the CLI.
-
-| Command | Description |
-|---|---|
-| `/move <sha-or-branch>` | Move the agent to a commit or branch. Performs a git checkout and injects a reminder so the agent re-reads files. |
-| `/revert [N]` | Revert `N` commits back (default 1). Discards uncommitted changes; the conversation remains. |
-| `/convrevert [N]` | Revert `N` steps in the conversation only (the agent "forgets" recent messages). The repo is unchanged. |
-| `/allrevert [N]` | Revert both the repo and the conversation by `N` steps, together. |
+| `/commit [guidance]` | Ask the agent to inspect the diff, draft a message, and call `GitCommit`. Optional text guides the generated message. |
 
 ## Skills
 

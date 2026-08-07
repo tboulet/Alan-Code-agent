@@ -8,13 +8,13 @@ This walkthrough takes you from `pip install` to your first successful agent tur
 pip install alancode
 ```
 
-Requires Python 3.11+. One install gives you the CLI, the browser GUI, the Python library, the Anthropic provider, and LiteLLM support for every other model provider.
+Requires Python 3.11+. One install gives you the CLI, the browser GUI, the Python library, the Anthropic backend, and LiteLLM support for every other model backend.
 
 Linux and macOS are supported. On Windows, use WSL; native Windows is not currently supported because session locking relies on a Unix API.
 
 ## 2. Provide an API key
 
-Pick one — whichever matches the provider you want to use.
+Pick one — whichever matches the backend you want to use.
 
 ```bash
 # Anthropic
@@ -121,7 +121,7 @@ alancode --continue
 
 ## 8. Try a different model
 
-The provider is part of the model string. The transport backend is inferred — you almost never need `--backend`.
+The backend is part of the model string. The transport backend is inferred — you almost never need `--backend`.
 
 ```bash
 # Google Gemini via OpenRouter
@@ -134,7 +134,7 @@ alancode --model gpt-4o
 alancode --model ollama/qwen2.5-coder:7b --base-url http://localhost:11434
 ```
 
-See [reference/providers.md](reference/providers.md) for the full provider/model matrix.
+See [reference/backends.md](reference/backends.md) for the full backend and model-provider matrix.
 
 ## 9. Launch the GUI (optional)
 
@@ -142,10 +142,9 @@ See [reference/providers.md](reference/providers.md) for the full provider/model
 alancode --gui
 ```
 
-Opens `http://localhost:8420/`. Three panels:
+Opens `http://localhost:8420/`. Two panels:
 - **Chat** — same as the CLI, but with in-place diff rendering.
 - **LLM Perspective** — the exact payload sent to the model each turn (for debugging).
-- **Git Tree** — visualise commits + the agent's position + revert/move controls.
 
 ## 10. Give Alan project-specific context
 
