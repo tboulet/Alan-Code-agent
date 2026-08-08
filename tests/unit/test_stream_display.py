@@ -4,7 +4,6 @@ These tests exercise new_stream_state and _stream_text_delta by inspecting
 the state dict directly, without rendering to a real console.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
 from alancode.cli.display import (

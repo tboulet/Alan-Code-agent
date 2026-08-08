@@ -14,10 +14,7 @@ from alancode.backends.scripted_backend import (
     multi_tool_call,
 )
 from alancode.messages.types import (
-    AssistantMessage,
     AttachmentMessage,
-    RequestStartEvent,
-    UserMessage,
 )
 
 

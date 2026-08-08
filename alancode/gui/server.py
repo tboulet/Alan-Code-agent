@@ -11,13 +11,15 @@ import json
 import logging
 import socket
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 if TYPE_CHECKING:
+    import uvicorn
+
     from alancode.gui.gui_ui import GUIUI
 
 logger = logging.getLogger(__name__)

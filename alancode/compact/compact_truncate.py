@@ -6,16 +6,16 @@ Truncates individual tool results that exceed the size limit.
 from __future__ import annotations
 
 import logging
-from typing import Union
 
-logger = logging.getLogger(__name__)
-
+from alancode.compact.utils import text_length as _text_length
 from alancode.messages.types import (
     Message,
     UserMessage,
     TextBlock,
     ToolResultBlock,
 )
+
+logger = logging.getLogger(__name__)
 
 # Sentinel prefix so other compaction passes (and debugging) can tell this
 # is synthetic truncation output rather than real tool data.
@@ -29,10 +29,6 @@ DEFAULT_TOOL_RESULT_MAX_CHARS = 20_000
 # Head/tail split of the kept characters: starts carry structure (headers,
 # first errors), tails carry conclusions and final state.
 HEAD_FRACTION = 0.6
-
-
-from alancode.compact.utils import text_length as _text_length
-
 
 def _truncate_tool_result_content(
     content: str | list[TextBlock],

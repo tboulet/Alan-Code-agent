@@ -8,7 +8,6 @@ fixed Ollama /api/show parsing.
 
 import json
 import logging
-from types import SimpleNamespace
 
 import pytest
 

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 import uuid as _uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Callable
 
 from alancode.backends.base import (

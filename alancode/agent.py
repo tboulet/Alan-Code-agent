@@ -84,6 +84,7 @@ from alancode.settings import (
     save_settings,
 )
 from alancode.skills.registry import SkillRegistry
+from alancode.skills.tool_filter import filter_tools_for_skill
 from alancode.tools.base import ToolUseContext
 from alancode.tools.builtin.skill_tool import SkillTool
 from alancode.tools.registry import get_enabled_tools, get_programmatic_tool_set

@@ -10,8 +10,6 @@ to avoid duplicating block-to-dict logic.
 
 from __future__ import annotations
 
-from typing import Any
-
 from alancode.gui.protocol import OutputEvent
 from alancode.messages.types import (
     AssistantMessage,

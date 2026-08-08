@@ -1,17 +1,11 @@
 """Test hooks system."""
 
-import asyncio
-import json
-import os
-import stat
 import sys
-import tempfile
 
 import pytest
 
 from alancode.hooks.registry import (
     HookConfig,
-    HookResult,
     HookType,
     execute_hook,
     load_hooks_from_settings,

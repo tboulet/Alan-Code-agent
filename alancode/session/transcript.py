@@ -7,7 +7,6 @@ append-only writes and streaming reads.
 
 import json
 import logging
-import os
 from pathlib import Path
 from datetime import datetime, timezone
 from uuid import UUID

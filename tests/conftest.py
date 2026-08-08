@@ -1,9 +1,9 @@
 """Shared test fixtures."""
 
 import pytest
-from alancode.backends.scripted_backend import ScriptedBackend, ScriptedResponse, text, tool_call
+from alancode.backends.scripted_backend import ScriptedBackend
 
-from alancode.tools.base import Tool, ToolResult, ToolUseContext
+from alancode.tools.base import Tool, ToolResult
 
 
 @pytest.fixture

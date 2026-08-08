@@ -8,7 +8,6 @@ replaces the pre-boundary history.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,12 +16,6 @@ from alancode.messages.types import (
     UserMessage,
     AssistantMessage,
     SystemMessage,
-    TextBlock,
-    ThinkingBlock,
-    RedactedThinkingBlock,
-    ToolUseBlock,
-    ToolResultBlock,
-    ImageBlock,
     get_messages_after_compact_boundary,
 )
 from alancode.backends.base import StreamTextDelta, StreamError

@@ -56,6 +56,27 @@ class TestSkillToolSetsFilter:
 
 class TestLoopEnforcesFilter:
     @pytest.mark.asyncio
+    async def test_command_activated_filter_is_applied_to_first_call(self, tmp_path):
+        """A filter activated by the /skill command applies before the loop starts."""
+        backend = ScriptedBackend.from_responses([text("done")])
+        agent = AlanCodeAgent(
+            backend=backend,
+            cwd=str(tmp_path),
+            programmatic=True,
+            permission_mode="yolo",
+            custom_system_prompt="You are a test agent.",
+        )
+        agent._active_skill_filter = ["Read"]
+
+        async for _ in agent.query_events_async("run the selected skill"):
+            pass
+
+        names = {tool.name for tool in backend.call_log[0]["tools"]}
+        assert "Bash" not in names
+        assert names <= {"Read", "FileRead", "Skill"}
+        assert names & {"Read", "FileRead"}
+
+    @pytest.mark.asyncio
     async def test_next_iteration_schemas_are_restricted(self, tmp_path):
         """After the model invokes a restricted skill, the NEXT API call's
         tool schemas contain only the allowed tools (+ Skill) - hard

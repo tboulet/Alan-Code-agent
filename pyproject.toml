@@ -47,3 +47,8 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.ruff.lint]
+# Keep the release lint gate focused on Python correctness and stable across
+# Ruff versions. Broader style rules can be introduced separately.
+select = ["E4", "E7", "E9", "F"]

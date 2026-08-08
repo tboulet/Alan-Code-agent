@@ -196,12 +196,20 @@ def coerce_value(raw: str) -> Any:
 # - None values always pass (means "unset")
 # - Keys without an entry are not validated.
 
-_one_of = lambda *vals: (lambda v: v in vals, f"Must be one of: {', '.join(repr(v) for v in vals)}")
+def _one_of(*vals):
+    return lambda v: v in vals, f"Must be one of: {', '.join(repr(v) for v in vals)}"
+
+
 _is_str = (lambda v: isinstance(v, str), "Must be a string")
 _is_bool = (lambda v: isinstance(v, bool), "Must be a boolean")
 _is_pos_int = (lambda v: isinstance(v, int) and v > 0, "Must be a positive integer")
 _is_pos_int_or_none = (lambda v: v is None or (isinstance(v, int) and v > 0), "Must be a positive integer or null")
-_is_auto = lambda v: isinstance(v, str) and v.lower() == "auto"
+
+
+def _is_auto(v):
+    return isinstance(v, str) and v.lower() == "auto"
+
+
 _is_pos_int_or_auto = (
     lambda v: _is_auto(v) or (isinstance(v, int) and not isinstance(v, bool) and v > 0),
     'Must be a positive integer or "auto"',

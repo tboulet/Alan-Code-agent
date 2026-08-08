@@ -2,11 +2,10 @@
 
 import pytest
 
-from alancode.tools.base import Tool, ToolResult, ToolUseContext
+from alancode.tools.base import Tool, ToolUseContext
 from alancode.tools.registry import (
     PROGRAMMATIC_EXCLUDED_TOOL_NAMES,
     get_all_builtin_tools,
-    get_enabled_tools,
     get_programmatic_tool_set,
     find_tool_by_name,
     tools_to_schemas,
@@ -16,7 +15,6 @@ from alancode.messages.types import ToolUseBlock
 from alancode.permissions.context import (
     PermissionBehavior,
     PermissionMode,
-    PermissionResult,
     PermissionRule,
     ToolPermissionContext,
 )

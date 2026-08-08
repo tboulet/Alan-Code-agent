@@ -1,13 +1,10 @@
 """Tests for the skill system — parser, discovery, registry, tool filter."""
 
-import os
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
-from alancode.skills.parser import SkillDefinition, parse_skill_content, parse_skill_file
+from alancode.skills.parser import parse_skill_content, parse_skill_file
 from alancode.skills.discovery import discover_skills, _scan_skills_dir
 from alancode.skills.registry import SkillRegistry
 from alancode.skills.tool_filter import filter_tools_for_skill

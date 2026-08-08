@@ -12,7 +12,6 @@ from alancode.session.session import (
     generate_session_id,
     get_last_session_id,
     get_session_dir,
-    get_sessions_dir,
     load_session_settings,
     save_session_settings,
 )

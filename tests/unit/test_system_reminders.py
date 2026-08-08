@@ -103,7 +103,7 @@ class TestInjectMessageIntegration:
         agent = AlanCodeAgent(backend=backend, cwd="/tmp/test", permission_mode="yolo")
         agent.inject_message("Extra context from the user")
 
-        events = agent.query_events("Do something")
+        agent.query_events("Do something")
         assert backend._call_count == 2
 
         second_call_msgs = backend.call_log[1]["messages"]

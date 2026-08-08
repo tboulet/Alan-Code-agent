@@ -6,7 +6,6 @@ The code has 5 deliberate bugs that the tests will expose.
 """
 
 from datetime import datetime
-from typing import Optional
 
 
 class Product:

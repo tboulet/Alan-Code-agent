@@ -9,10 +9,8 @@ Tests cover:
 - Circuit breaker logic
 """
 
-import pytest
 
 from alancode.compact.compact_truncate import (
-    TRUNCATION_SENTINEL,
     compaction_truncate_tool_results,
 )
 from alancode.compact.compact_clear import (
@@ -28,13 +26,11 @@ from alancode.compact.prompt import (
 )
 from alancode.messages.types import (
     AssistantMessage,
-    TextBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
 )
 from alancode.messages.factory import (
-    create_assistant_message,
     create_tool_result_message,
     create_user_message,
 )

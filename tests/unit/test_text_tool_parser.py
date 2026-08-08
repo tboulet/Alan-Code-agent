@@ -217,7 +217,6 @@ class TestMalformedDetection:
         fired, and the resulting error message — which itself contains
         <tool_call> — got quoted again next turn, causing a retry loop.
         """
-        text = "Sorry, I should have used <tool_call> tags. I'll retry."
         for fmt in ("hermes", "glm", "alan"):
             tag = "<tool_use>" if fmt == "alan" else "<tool_call>"
             sample = f"Sorry, I should have used {tag} tags. I'll retry."

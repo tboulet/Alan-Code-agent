@@ -196,7 +196,7 @@ class TestCrossCutting:
             rule(respond=tool_call("Bash", {"command": "echo loop"})),
         ])
         agent = AlanCodeAgent(backend=backend, cwd="/tmp/test", permission_mode="yolo", max_iterations_per_turn=2)
-        events = agent.query_events("Loop forever")
+        agent.query_events("Loop forever")
         # Should not run forever
         assert backend._call_count <= 4
 

@@ -9,12 +9,10 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from typing import Sequence
 
 from alancode.messages.types import (
     AssistantMessage,
     AttachmentMessage,
-    ContentBlock,
     Message,
     ProgressMessage,
     SystemMessage,

@@ -5,7 +5,7 @@ Each implementation translates its native API format into StreamEvents.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import AsyncGenerator, Any
 
 

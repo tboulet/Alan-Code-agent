@@ -1,13 +1,9 @@
 """Test message types, factory functions, and normalization."""
 
-import pytest
-from uuid import uuid4
 
 from alancode.messages.types import (
     AssistantMessage,
     AttachmentMessage,
-    Attachment,
-    CompactMetadata,
     ProgressMessage,
     SystemMessage,
     SystemMessageSubtype,
@@ -35,7 +31,6 @@ from alancode.messages.factory import (
 )
 from alancode.messages.normalization import (
     normalize_messages_for_api,
-    merge_user_messages,
     get_text_content,
 )
 

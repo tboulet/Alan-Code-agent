@@ -1,11 +1,8 @@
 """Tests for the memory system: directory structure, prompt building, settings migration, scratchpad."""
 
-import json
 import os
 import tempfile
-import time
 
-import pytest
 
 from alancode.memory.memdir import (
     MEMORY_SUBDIRS,
@@ -22,7 +19,7 @@ from alancode.memory.prompt import (
     get_memory_instructions_on,
     get_save_command_prompt,
 )
-from alancode.settings import SETTINGS_DEFAULTS, load_settings, save_settings
+from alancode.settings import SETTINGS_DEFAULTS
 
 
 # ---------------------------------------------------------------------------

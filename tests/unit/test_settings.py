@@ -4,7 +4,6 @@ import json
 import os
 import tempfile
 
-import pytest
 
 from alancode.settings import (
     SETTINGS_DEFAULTS,

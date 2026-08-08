@@ -4,12 +4,11 @@ import pytest
 
 from alancode.agent import AlanCodeAgent
 
-from alancode.backends.scripted_backend import ScriptedBackend, ScriptedResponse, text, tool_call
+from alancode.backends.scripted_backend import ScriptedBackend, ScriptedResponse
 from alancode.messages.types import (
     AssistantMessage,
     AttachmentMessage,
     RequestStartEvent,
-    SystemMessage,
     UserMessage,
 )
 

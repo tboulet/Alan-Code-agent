@@ -26,14 +26,11 @@ from alancode.backends.base import (
     ThinkingConfig,
     ToolSchema,
 )
+from alancode.backends.anthropic_models import lookup_anthropic_model
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CUSTOM_ENDPOINT_REQUEST_TIMEOUT_SECONDS = 3_600
-
-# ── Model capabilities lookup ─────────────────────────────────────────────────
-
-from alancode.backends.anthropic_models import lookup_anthropic_model
 
 _CACHE_MARKER = {"type": "ephemeral"}
 

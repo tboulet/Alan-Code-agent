@@ -211,7 +211,7 @@ async def _run_gui_mode(session_id, settings_cli, cwd):
 
     url = await ui.start()
     print(f"\n  GUI: {url}\n")
-    print(f"  Open the URL in your browser. All interaction happens there.\n")
+    print("  Open the URL in your browser. All interaction happens there.\n")
 
     try:
         await run_session(agent, ui, resumed_session_id=session_id)

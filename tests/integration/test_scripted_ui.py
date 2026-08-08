@@ -8,16 +8,14 @@ Validates:
 5. Combined: ScriptedUI + agent + git repo
 """
 
-import asyncio
 import pytest
 
 from alancode.agent import AlanCodeAgent
 from alancode.cli.repl import run_session
-from alancode.gui.scripted_ui import ScriptedUI, UIContext, UIRule, ui_rule
-from alancode.messages.types import AssistantMessage, RequestStartEvent, Usage
+from alancode.gui.scripted_ui import ScriptedUI, ui_rule
+from alancode.messages.types import AssistantMessage, Usage
 from alancode.backends.scripted_backend import (
     ScriptedBackend,
-    rule,
     text,
     tool_call,
 )
@@ -250,7 +248,7 @@ class TestScriptedUIWithAgent:
         ])
 
         backend = ScriptedBackend.from_responses([text("Done.")])
-        agent = AlanCodeAgent(
+        _agent = AlanCodeAgent(
             backend=backend,
             cwd=str(tmp_path),
             ask_callback=ui.ask_user,
@@ -493,7 +491,7 @@ class TestScriptedUIWithGitRepo:
     @pytest.mark.asyncio
     async def test_agent_with_commit_history(self, git_repo: GitTestRepo):
         """Agent runs in a repo with existing commit history."""
-        shas = git_repo.build_linear_history(3)
+        git_repo.build_linear_history(3)
 
         backend = ScriptedBackend.from_responses([
             tool_call("Bash", {"command": f"cd {git_repo.path} && git log --oneline -5"}),

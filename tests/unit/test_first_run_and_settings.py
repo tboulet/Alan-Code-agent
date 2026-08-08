@@ -3,13 +3,11 @@
 import os
 import tempfile
 
-import pytest
 
 from alancode.settings import (
     SETTINGS_DEFAULTS,
     BACKEND_SETTINGS,
     infer_backend,
-    validate_setting,
     load_settings,
     save_settings,
     get_settings_path,
@@ -203,7 +201,7 @@ class TestFirstRunDetection:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             backend = ScriptedBackend()
-            agent = AlanCodeAgent(backend=backend, cwd=tmpdir, permission_mode="yolo")
+            AlanCodeAgent(backend=backend, cwd=tmpdir, permission_mode="yolo")
 
             # Agent init creates settings.json via load_projects_settings_and_maybe_init
             assert get_settings_path(tmpdir).exists()

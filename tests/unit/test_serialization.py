@@ -1,6 +1,5 @@
 """Test message serialization (alancode/messages/serialization.py)."""
 
-import pytest
 
 from alancode.messages.serialization import block_to_anthropic_dict as block_to_dict, message_to_anthropic_dict as message_to_api_dict, messages_to_openai_dicts
 from alancode.messages.types import (
@@ -11,7 +10,6 @@ from alancode.messages.types import (
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
-    Usage,
     UserMessage,
 )
 from alancode.messages.factory import create_user_message, create_assistant_message

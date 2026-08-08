@@ -1,9 +1,7 @@
 """Test compaction layers."""
 
-import pytest
 
 from alancode.compact.compact_truncate import (
-    TRUNCATION_SENTINEL,
     compaction_truncate_tool_results,
 )
 from alancode.compact.compact_clear import (
@@ -12,7 +10,6 @@ from alancode.compact.compact_clear import (
 )
 from alancode.messages.types import (
     AssistantMessage,
-    TextBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
@@ -22,7 +19,6 @@ from alancode.messages.factory import (
     create_tool_result_message,
     create_user_message,
 )
-from alancode.settings import SETTINGS_DEFAULTS
 from alancode.utils.tokens import (
     estimate_message_tokens,
     rough_token_count,

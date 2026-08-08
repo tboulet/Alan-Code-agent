@@ -4,10 +4,7 @@ Every tool in Alan Code implements the Tool ABC.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Literal, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from alancode.messages.types import AssistantMessage, Message
+from typing import Any, Awaitable, Callable, Literal
 
 
 @dataclass

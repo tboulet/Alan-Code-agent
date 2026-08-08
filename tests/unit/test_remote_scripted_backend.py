@@ -11,8 +11,6 @@ import pytest
 
 from alancode.backends.base import (
     StreamMessageDelta,
-    StreamMessageStart,
-    StreamMessageStop,
     StreamTextDelta,
     StreamToolUseStart,
     StreamToolUseStop,

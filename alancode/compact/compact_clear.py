@@ -9,7 +9,6 @@ from alancode.messages.types import (
     AssistantMessage,
     Message,
     UserMessage,
-    TextBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
@@ -17,10 +16,6 @@ from alancode.utils.tokens import rough_token_count, estimate_message_tokens
 
 COMPACTABLE_TOOLS = {"Bash", "Read", "Grep", "Glob", "WebSearch", "WebFetch", "Edit", "Write"}
 CLEARED_MESSAGE = "[Old tool result content cleared]"
-
-
-from alancode.compact.utils import text_length as _text_length
-
 
 def _estimate_block_tokens(block: ToolResultBlock) -> int:
     """Estimate token count for a tool result block's content.

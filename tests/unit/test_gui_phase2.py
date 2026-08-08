@@ -1,7 +1,5 @@
 """Tests for the GUI module: SessionUI, CLIUI, GUIUI, serialization, server."""
 
-import asyncio
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,9 +19,7 @@ from alancode.messages.types import (
     SystemMessageSubtype,
     TextBlock,
     ThinkingBlock,
-    ToolResultBlock,
     ToolUseBlock,
-    UserMessage,
 )
 from alancode.messages.factory import (
     create_assistant_message,

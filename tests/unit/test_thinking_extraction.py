@@ -1,6 +1,5 @@
 """Tests for thinking extraction in text_tool_parser.py."""
 
-import pytest
 
 from alancode.tools.text_tool_parser import (
     _extract_thinking,

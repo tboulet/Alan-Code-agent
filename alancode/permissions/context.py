@@ -1,7 +1,6 @@
 """Permission system types — modes, rules, decision results."""
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
 
 
 class PermissionMode(str, Enum):

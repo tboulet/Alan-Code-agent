@@ -12,7 +12,6 @@ from alancode.backends.scripted_backend import ScriptedBackend, text, tool_call
 from .harness import (
     AuditedBackend,
     FloodTool,
-    error_messages,
     final_text,
     make_agent,
     run_turn,

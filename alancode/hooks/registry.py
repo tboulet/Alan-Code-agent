@@ -32,7 +32,7 @@ import asyncio
 import json
 import logging
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
