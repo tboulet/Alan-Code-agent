@@ -53,7 +53,7 @@ if injected:
 ```
 
 - `RequestStartEvent` signals to the UI that a new API call is starting (used to trigger "Thinking..." indicators).
-- On iteration 0 of the turn, inject a date/time `<system-reminder>` — keeps the model aware of wall-clock time across long sessions.
+- On iteration 0 of an interactive turn, inject a date/time `<system-reminder>` — keeps the model aware of wall-clock time across long sessions. This is omitted in `programmatic=True` mode so embedded callers control the complete conversation payload.
 - Drain any messages injected via `agent.inject_message(...)` from another task.
 
 All injected messages are `hide_in_ui=True` — they go to the API but not to the user's chat panel.

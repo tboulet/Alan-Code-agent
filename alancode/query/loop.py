@@ -152,6 +152,8 @@ class QueryParams:
     system_static_boundary: int = 0
     max_iterations_per_turn: int | None = None
     max_output_tokens: int | None = None
+    # Embedded agents should receive only caller-controlled conversation data.
+    programmatic: bool = False
     # Memory mode
     memory_mode: str = "on"  # "on", "off", "intensive"
     # Permission callback
@@ -257,7 +259,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         injected: list[UserMessage] = []
 
         # Turn reminders (date+time): only on the first iteration of the turn
-        if iteration == 0:
+        if iteration == 0 and not params.programmatic:
             for reminder in _build_turn_reminders(params.context):
                 injected.append(reminder)
                 yield reminder

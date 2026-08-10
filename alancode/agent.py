@@ -708,6 +708,7 @@ class AlanCodeAgent:
                 model=self._model,
                 max_iterations_per_turn=self._max_iterations_per_turn,
                 max_output_tokens=self._max_output_tokens,
+                programmatic=self._programmatic,
                 abort_event=self._abort_event,
                 message_queue=self._message_queue,
                 memory_mode=self._memory_mode,

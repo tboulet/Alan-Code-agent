@@ -2,6 +2,7 @@
 
 - **2026-08-10 - Alan Code 1.3.1**
   - Fixed tool-only assistant messages being serialized with JSON `null` content. They now use an empty string, preserving OpenAI compatibility while preventing Ollama and other strict OpenAI-compatible servers from rejecting the request after the first tool call.
+  - Removed the automatic date/time `<system-reminder>` from `programmatic=True` turns, keeping embedded and benchmark conversations fully caller-controlled. Interactive sessions retain the reminder.
 - **2026-08-08 - Alan Code 1.3.0**
   - Hardened offline and slow-endpoint operation: package import selects LiteLLM's packaged cost metadata before any backend is loaded; both LiteLLM and Anthropic custom endpoints get one-hour automatic timeouts; explicit `request_timeout`/`--request-timeout`, SimpleLM `max_model_len` discovery, and retry classification cover pre-content timeouts, connection failures, and HTTP 5xx responses.
   - Completed native streamed tool-call assembly and text-tool parsing from visible or reasoning content. Malformed native tool arguments receive bounded correction feedback, persistent opaque 5xx failures get one emergency-compaction attempt, and reasoning-only/empty completions surface an `empty_response` error instead of silently ending a turn.

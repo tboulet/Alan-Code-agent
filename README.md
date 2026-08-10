@@ -248,7 +248,7 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
-- **2026-08-10 - Alan Code 1.3.1** - Fixed multi-turn tool use with Ollama and other strict OpenAI-compatible servers by serializing tool-only assistant messages with empty-string content instead of JSON `null`.
+- **2026-08-10 - Alan Code 1.3.1** - Fixed multi-turn tool use with Ollama and other strict OpenAI-compatible servers by serializing tool-only assistant messages with empty-string content instead of JSON `null`. Programmatic mode no longer injects the automatic date/time reminder.
 - **2026-08-08 - Alan Code 1.3** - Hardened slow/offline local-model operation, tool calls embedded in reasoning streams, timeout and context-window controls, backend lifecycle cleanup, concurrent shared-state writes, and error reporting. Internal transport terminology is now consistently `backend`, with obsolete GUI, REPL, and session complexity removed.
 - **2026-07-25 - Alan Code 1.2** - Context budgets now adapt to the model and reserve legal output space on every call. Long sessions recover from aggregate tool-output growth, prompt-too-long responses, and failed summarization through context-scaled truncation, retrying compaction, and a deterministic last-resort fallback. Local-model context windows can be resolved from server metadata or a cached probe, and interrupted turns retain valid tool-call history.
 - **2026-05-11 - Backend / model UX redesign** - `--backend` selects `auto`, `anthropic-native`, or `scripted`, and is inferred from `--model` when omitted. Bare Claude names use the native Anthropic SDK; everything else uses LiteLLM.

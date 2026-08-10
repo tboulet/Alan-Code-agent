@@ -103,7 +103,7 @@ Events are message dataclasses from `alancode.messages.types`:
 | `RequestStartEvent` | Each API call begins (useful for "Thinking..." indicators). |
 | `AssistantMessage` with `hide_in_api=True` | Streaming delta — text chunks, thinking chunks. |
 | `AssistantMessage` with `hide_in_api=False` | Final assembled message after the stream completes. Has tool calls. |
-| `UserMessage` | Injected (system reminders, tool results). |
+| `UserMessage` | Injected (interactive system reminders, tool results). The automatic date/time reminder is omitted with `programmatic=True`. |
 | `SystemMessage` | Informational (compaction markers, etc.). |
 | `AttachmentMessage` | Structured metadata (e.g., `max_iterations_per_turn_reached`). |
 | `ProgressMessage` | Long-running operation updates. |

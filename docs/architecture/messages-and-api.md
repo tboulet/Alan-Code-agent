@@ -52,7 +52,7 @@ Purely informational messages used for UI progress updates. Never sent.
 
 These live in `agent._messages` for UI replay but are stripped before sending. Examples:
 
-- `<system-reminder>` with date/time (injected each turn).
+- `<system-reminder>` with date/time (injected each interactive turn; omitted with `programmatic=True`).
 - `<system-reminder>` about model / backend / memory-mode changes.
 - Virtual "resume directly" recovery prompts.
 
@@ -123,7 +123,7 @@ Content is a string when simple, a list of blocks when there are tool calls, ima
 | Assistant text (streamed) | ✅ | ✅ |
 | Tool call blocks | ✅ | ✅ |
 | Tool result panels | ✅ | ✅ |
-| `<system-reminder>` for date/time | ❌ (hide_in_ui) | ✅ |
+| `<system-reminder>` for date/time | ❌ (hide_in_ui) | ✅ in interactive mode; omitted in programmatic mode |
 | `ProgressMessage` (compaction started) | ✅ as informational line | ❌ |
 | `SystemMessage(COMPACT_BOUNDARY)` | ✅ as subtle marker | ❌ (filtered at step 3c) |
 | `AttachmentMessage(max_iterations_per_turn_reached)` | depends on UI | ✅ (converted to UserMessage) |

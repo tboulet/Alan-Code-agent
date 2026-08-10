@@ -83,6 +83,30 @@ class TestToolSelection:
 
 class TestInstructionGating:
     @pytest.mark.asyncio
+    async def test_programmatic_omits_current_datetime_reminder(
+        self, backend, tmp_path,
+    ):
+        agent = AlanCodeAgent(
+            backend=backend, cwd=str(tmp_path), programmatic=True,
+        )
+
+        async for _ in agent.query_events_async("hi"):
+            pass
+
+        assert "currentDateTime" not in str(backend.call_log[0]["messages"])
+
+    @pytest.mark.asyncio
+    async def test_default_keeps_current_datetime_reminder(
+        self, backend, tmp_path,
+    ):
+        agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
+
+        async for _ in agent.query_events_async("hi"):
+            pass
+
+        assert "currentDateTime" in str(backend.call_log[0]["messages"])
+
+    @pytest.mark.asyncio
     async def test_programmatic_skips_global_and_project_instructions(
         self, backend, tmp_path,
     ):
