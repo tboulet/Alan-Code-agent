@@ -140,7 +140,10 @@ def _assistant_to_openai(msg: AssistantMessage) -> list[dict[str, Any]]:
 
     d: dict[str, Any] = {
         "role": "assistant",
-        "content": "\n".join(text_parts) if text_parts else None,
+        # The OpenAI API permits null content when tool_calls are present,
+        # but strict compatible servers such as Ollama reject JSON null.
+        # An empty string is accepted by both and preserves the same meaning.
+        "content": "\n".join(text_parts) if text_parts else "",
     }
     if tool_calls:
         d["tool_calls"] = tool_calls

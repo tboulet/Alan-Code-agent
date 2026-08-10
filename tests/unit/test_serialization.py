@@ -302,10 +302,10 @@ class TestOpenAIFormat:
         assert result[3]["role"] == "assistant"
         assert result[3]["content"] == "Here are the files: file1, file2"
 
-    def test_assistant_tool_only_no_text(self):
-        """Assistant with only tool calls, no text."""
+    def test_assistant_tool_only_uses_empty_content_for_strict_servers(self):
+        """Tool-only messages must not send JSON null to Ollama-like servers."""
         blocks = [ToolUseBlock(id="call_1", name="Read", input={"file_path": "x.py"})]
         msg = AssistantMessage(content=blocks)
         result = messages_to_openai_dicts([msg])
-        assert result[0]["content"] is None
+        assert result[0]["content"] == ""
         assert len(result[0]["tool_calls"]) == 1
