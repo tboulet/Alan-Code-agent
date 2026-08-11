@@ -322,8 +322,10 @@ class AlanFormat(ToolCallFormat):
 # — but the body is XML-shaped not JSON-shaped.
 
 
+# The trailing </tool_call> is optional: models that stop generation right
+# after </function> (observed on Qwen2.5-72B) must still parse.
 _HERMES_XML_PATTERN = re.compile(
-    r"<tool_call>\s*<function=([^>\s]+)\s*>(.*?)</function>\s*</tool_call>",
+    r"<tool_call>\s*<function=([^>\s]+)\s*>(.*?)</function>(?:\s*</tool_call>)?",
     re.DOTALL,
 )
 
@@ -418,6 +420,19 @@ class HermesXMLFormat(ToolCallFormat):
             "<tool_call>\n"
             "<function=tool_name>\n"
             "<parameter=param>value</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n\n"
+            "Parameter values are RAW text: never JSON-encode or escape them. "
+            "Multi-line values (scripts, file contents, heredocs) go between the "
+            "parameter tags verbatim:\n"
+            "<tool_call>\n"
+            "<function=Bash>\n"
+            "<parameter=command>\n"
+            "cat > hello.py <<'EOF'\n"
+            "print(\"hello\")\n"
+            "EOF\n"
+            "python3 hello.py\n"
+            "</parameter>\n"
             "</function>\n"
             "</tool_call>\n\n"
             "You may call multiple tools by outputting multiple <tool_call> blocks.\n"

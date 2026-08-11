@@ -147,6 +147,54 @@ class TestHermesFormat:
         assert "not valid" in result.error
 
 
+class TestHermesXMLFormat:
+    """Hermes-XML (Qwen3-Coder-Next style) text tool call format."""
+
+    def test_single_tool_call(self):
+        text = (
+            '<tool_call>\n'
+            '<function=Bash>\n'
+            '<parameter=command>ls /tmp</parameter>\n'
+            '</function>\n'
+            '</tool_call>'
+        )
+        result = extract_tool_calls_from_text(text, format="hermes_xml")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input == {"command": "ls /tmp"}
+        assert result.error is None
+
+    def test_missing_closing_tool_call_tag_parses(self):
+        # Qwen2.5-72B stops generation right after </function>; the call
+        # must still parse without the trailing </tool_call>.
+        text = (
+            'I will inspect the directory.\n'
+            '<tool_call>\n'
+            '<function=Bash>\n'
+            '<parameter=command>ls /tmp</parameter>\n'
+            '<parameter=purpose>list files</parameter>\n'
+            '</function>'
+        )
+        result = extract_tool_calls_from_text(text, format="hermes_xml")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input["command"] == "ls /tmp"
+        assert result.error is None
+
+    def test_multiline_raw_body_preserved(self):
+        body = 'cat > hello.py <<EOF\nprint("hi")\nEOF\npython3 hello.py'
+        text = (
+            '<tool_call>\n'
+            '<function=Bash>\n'
+            f'<parameter=command>\n{body}\n</parameter>\n'
+            '</function>\n'
+            '</tool_call>'
+        )
+        result = extract_tool_calls_from_text(text, format="hermes_xml")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input["command"] == body
+
+
 class TestAlanFormat:
     """Alan's custom text tool call format."""
 
