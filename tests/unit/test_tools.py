@@ -1,5 +1,7 @@
 """Test tool registry, orchestration, and permissions."""
 
+import asyncio
+
 import pytest
 
 from alancode.tools.base import Tool, ToolUseContext
@@ -315,3 +317,25 @@ class TestPermissions:
         )
         result = await check_permissions(mutate, {"target": "x"}, context, perm_context)
         assert result.behavior == PermissionBehavior.DENY
+
+
+# ---------------------------------------------------------------------------
+# BashTool execution tests
+# ---------------------------------------------------------------------------
+
+
+class TestBashTool:
+    @pytest.mark.asyncio
+    async def test_stdin_reading_command_gets_eof(self):
+        # A bare stdin-reading command must terminate immediately on EOF
+        # instead of blocking on the parent's inherited stdin.
+        from alancode.tools.builtin.bash import BashTool
+
+        tool = BashTool()
+        context = ToolUseContext(cwd="/tmp", messages=[])
+        result = await asyncio.wait_for(
+            tool.call({"command": "cat", "timeout": 30_000}, context),
+            timeout=10,
+        )
+        assert not result.is_error
+        assert result.data == "(no output)"

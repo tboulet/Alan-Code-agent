@@ -74,6 +74,9 @@ class BashTool(Tool):
         try:
             process = await asyncio.create_subprocess_shell(
                 command,
+                # Detached stdin: a stdin-reading command (bare `cat >`, `read`)
+                # must get EOF, not block forever on the inherited pipe.
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=context.cwd,
