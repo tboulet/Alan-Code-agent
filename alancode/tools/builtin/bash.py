@@ -18,12 +18,7 @@ class BashTool(Tool):
         return (
             "Executes a given bash command and returns its output.\n\n"
             "The working directory is set to the project root for each call. "
-            "stdout and stderr are combined in the output.\n\n"
-            "IMPORTANT: Avoid using this tool to run cat, head, tail, sed, awk, "
-            "or echo commands unless explicitly instructed. Instead, use the "
-            "appropriate dedicated tool (Read, Edit, Write, Glob, Grep) as they "
-            "provide a better experience.\n\n"
-            "For quick Python snippets, use: python3 -c '<code>'"
+            "stdout and stderr are combined in the output."
         )
 
     @property
