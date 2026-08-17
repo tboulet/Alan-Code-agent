@@ -1,8 +1,9 @@
 # Changelog
 
 - **2026-08-17 - Alan Code 1.3.7**
-  - bash_block fences now tolerate CRLF line endings: GLM-5.2 intermittently emits `\r\n`, which silently failed both fence anchors on a well-formed block and dropped the turn as no-call.
+  - Fixed `auto`'s stop-truncation repair corrupting valid calls: a stray `<tool_call>` label before a well-formed fence made the hermes balance-repair glue `</tool_call>` onto the closing fence line, so the repair-then-parse pipeline rejected a textbook block (the dominant GLM-5.2 `auto` miss, reproduced byte-exact). Repair now leaves any already-parsing text untouched and accepts a candidate repair only if its own format then parses.
   - `auto` no longer uses `</tool_call>`/`</tool_use>` as stop sequences: models emit stray tag-label chatter around their real call, and a tag stop can cut the turn early. Directly-configured formats keep their own tag stops.
+  - bash_block fences now tolerate CRLF line endings as defensive hardening.
 - **2026-08-17 - Alan Code 1.3.6**
   - A length-truncated response that also pattern-matches a malformed structured tool call now goes to the length recovery (escalate/resume) instead of the format-error retry, which could previously pre-empt it and loop at the same output cap.
 - **2026-08-17 - Alan Code 1.3.5**

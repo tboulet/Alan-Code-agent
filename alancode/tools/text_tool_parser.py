@@ -974,10 +974,17 @@ class AutoFormat(ToolCallFormat):
     )
 
     def repair_stop_truncation(self, text: str) -> str:
-        # Each member repair is balance-guarded, so this is a no-op for
-        # every format whose markers are absent or already closed.
+        # Never touch a text that already parses, and never let one
+        # format's repair corrupt another's call: a stray <tool_call>
+        # label once made the hermes balance-repair glue </tool_call>
+        # onto a valid closing fence, breaking the bash_block anchor.
+        # Each candidate repair must prove itself by parsing.
+        if self.parse(text):
+            return text
         for name in _AUTO_ORDER:
-            text = FORMATS[name].repair_stop_truncation(text)
+            candidate = FORMATS[name].repair_stop_truncation(text)
+            if candidate != text and FORMATS[name].parse(candidate):
+                return candidate
         return text
 
     def _formats(self, source: str) -> list[tuple[str, ToolCallFormat]]:

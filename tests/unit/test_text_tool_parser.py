@@ -541,6 +541,27 @@ class TestStopRepair:
         result = extract_tool_calls_from_text(repaired, format="auto")
         assert len(result.tool_calls) == 1
 
+    def test_auto_repair_never_corrupts_a_parsing_text(self):
+        """The GLM turn-4 bug: a stray <tool_call> label before a valid
+        fence made the hermes balance-repair glue </tool_call> onto the
+        closing fence line, breaking the parse in the repair-then-parse
+        pipeline. Repair must leave an already-parsing text untouched."""
+        fmt = get_format("auto")
+        text = (
+            "Understanding the game mechanics.<tool_call>Bash Output:\n"
+            "```bash\n"
+            "cat > code_library/explore.py <<EOF\n"
+            "print(1)\n"
+            "EOF\n"
+            "python code_library/explore.py\n"
+            "```"
+        )
+        repaired = fmt.repair_stop_truncation(text)
+        assert repaired == text
+        result = extract_tool_calls_from_text(repaired, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.error is None
+
     def test_all_text_formats_declare_stops_except_meta_json(self):
         for name in ("bash_block", "hermes", "hermes_xml", "glm", "alan", "kimi", "auto"):
             assert get_format(name).stop_sequences, name
