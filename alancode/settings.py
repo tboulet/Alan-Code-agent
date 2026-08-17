@@ -40,7 +40,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "api_key": None,  # None = read from env var
     "base_url": None,  # None = use backend default. Set for local servers (e.g., http://localhost:8000/v1)
     "request_timeout": "auto",  # seconds; auto = 1h for custom endpoints, otherwise SDK default
-    "tool_call_format": None,  # Text-based tool call format: "hermes", "hermes_xml", "glm", "alan", "meta_json", "bash_block", "kimi", "deepseek", "auto" (accept any), or None (native)
+    "tool_call_format": None,  # Text-based tool call format: "hermes", "hermes_xml", "glm", "alan", "meta_json", "bash_block", "kimi", "deepseek", "minimax", "auto" (accept any), or None (native)
     # Session
     "permission_mode": "edit",  # 'yolo', 'edit', 'safe'
     "max_iterations_per_turn": None,  # None = unlimited. Caps API calls per user message.
@@ -220,7 +220,7 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "model": _is_str,
     "base_url": _is_str,
     "request_timeout": _is_pos_int_or_auto,
-    "tool_call_format": _one_of("hermes", "hermes_xml", "glm", "alan", "meta_json", "bash_block", "kimi", "deepseek", "auto"),
+    "tool_call_format": _one_of("hermes", "hermes_xml", "glm", "alan", "meta_json", "bash_block", "kimi", "deepseek", "minimax", "auto"),
     "permission_mode": _one_of("yolo", "edit", "safe"),
     "max_iterations_per_turn": _is_pos_int_or_none,
     "max_output_tokens": (

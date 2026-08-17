@@ -362,6 +362,67 @@ class TestKimiFormat:
         assert result.tool_calls[0].input == {"command": "python explore.py"}
 
 
+class TestMiniMaxFormat:
+    """MiniMax envelope around plain invoke/parameter markup."""
+
+    def _sample(self, command):
+        return (
+            "<minimax:tool_call>\n"
+            '<invoke name="Bash">\n'
+            f'<parameter name="command">{command}</parameter>\n'
+            "</invoke>\n"
+            "</minimax:tool_call>"
+        )
+
+    def test_single_invoke(self):
+        text = "Checking the env.\n" + self._sample("ls -la code_library")
+        result = extract_tool_calls_from_text(text, format="minimax")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input == {"command": "ls -la code_library"}
+        assert "minimax:tool_call" not in result.cleaned_text
+        assert result.error is None
+
+    def test_multiline_heredoc_value(self):
+        command = "cat > f.py <<'EOF'\nprint(1)\nEOF\npython f.py"
+        result = extract_tool_calls_from_text(
+            self._sample(command), format="minimax",
+        )
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input["command"] == command
+
+    def test_envelope_optional(self):
+        text = (
+            '<invoke name="Bash">\n'
+            '<parameter name="command">ls</parameter>\n'
+            "</invoke>"
+        )
+        result = extract_tool_calls_from_text(text, format="minimax")
+        assert len(result.tool_calls) == 1
+
+    def test_malformed_flagged(self):
+        text = "<minimax:tool_call>\n<invoke name=Bash>broken"
+        result = extract_tool_calls_from_text(text, format="minimax")
+        assert result.tool_calls == []
+        assert result.error is not None
+
+    def test_prose_clean(self):
+        result = extract_tool_calls_from_text("Just prose.", format="minimax")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_system_prompt(self):
+        prompt = get_tool_format_system_prompt("minimax", [])
+        assert "<minimax:tool_call>" in prompt
+
+    def test_auto_detects_minimax(self):
+        result = extract_tool_calls_from_text(
+            self._sample("ls"), format="auto",
+        )
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+
+
 DS = "｜"
 
 

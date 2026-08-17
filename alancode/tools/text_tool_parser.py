@@ -13,6 +13,7 @@ Supported formats:
 - ``bash_block``: one fenced ```` ```bash ```` code block, run as the Bash tool
 - ``kimi``: ``<|tool_call_begin|>id<|tool_call_argument_begin|>{...}<|tool_call_end|>``
 - ``deepseek``: DSML ``invoke``/``parameter`` markup (fullwidth-bar delimited)
+- ``minimax``: ``<minimax:tool_call>`` envelope around plain ``invoke``/``parameter``
 - ``auto``: accept ANY of the above, whichever strict-parses (teaches bash_block)
 
 Each format is implemented as a ToolCallFormat class with:
@@ -865,6 +866,83 @@ class DeepSeekFormat(ToolCallFormat):
         )
 
 
+# ── Format: minimax ──────────────────────────────────────────────────────────
+#
+# MiniMax M2-family markup, observed live from MiniMax-M2.7 (7/8 turns):
+# a <minimax:tool_call> envelope around plain-ASCII invoke/parameter tags:
+# <minimax:tool_call>
+# <invoke name="Bash">
+# <parameter name="command">CMD</parameter>
+# </invoke>
+# </minimax:tool_call>
+# Same invoke/parameter shape as DeepSeek DSML but with regular < > and no
+# fullwidth bars. Parameter values are raw element text.
+
+
+_MINIMAX_INVOKE_PATTERN = re.compile(
+    r"(?:<minimax:tool_call>\s*)?"
+    r'<invoke name="([^"]+)"\s*>(.*?)</invoke>'
+    r"(?:\s*</minimax:tool_call>)?",
+    re.DOTALL,
+)
+
+_MINIMAX_PARAM_PATTERN = re.compile(
+    r'<parameter name="([^"]+)"[^>]*>(.*?)</parameter>',
+    re.DOTALL,
+)
+
+
+class MiniMaxFormat(ToolCallFormat):
+    """MiniMax format: ``<minimax:tool_call>`` envelope around ``invoke``/``parameter`` tags."""
+
+    stop_sequences = ("</minimax:tool_call>",)
+
+    def parse(self, text: str) -> list[ParsedToolCall]:
+        results = []
+        for match in _MINIMAX_INVOKE_PATTERN.finditer(text):
+            name = match.group(1).strip()
+            args: dict[str, object] = {}
+            for param in _MINIMAX_PARAM_PATTERN.finditer(match.group(2)):
+                args[param.group(1).strip()] = param.group(2)
+            if name:
+                results.append(ParsedToolCall(
+                    name=name, input=args, raw_match=match.group(0),
+                ))
+        return results
+
+    def detect_malformed(self, text: str) -> bool:
+        if "<minimax:tool_call>" not in text and '<invoke name="' not in text:
+            return False
+        return not self.parse(text)
+
+    def format_error(self) -> str:
+        return (
+            "Found invoke markup but the tool call did not parse.\n\n"
+            "Expected format:\n"
+            "<minimax:tool_call>\n"
+            '<invoke name="tool_name">\n'
+            '<parameter name="param">value</parameter>\n'
+            "</invoke>\n"
+            "</minimax:tool_call>\n\n"
+            "Please retry with the correct format."
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        tools_json = json.dumps(tool_schemas, indent=2)
+        return (
+            "\n\n# Tool Calling\n\n"
+            "You have access to the following tools:\n"
+            f"<tools>\n{tools_json}\n</tools>\n\n"
+            "To call a tool, use invoke markup:\n"
+            "<minimax:tool_call>\n"
+            '<invoke name="tool_name">\n'
+            '<parameter name="param">value</parameter>\n'
+            "</invoke>\n"
+            "</minimax:tool_call>\n\n"
+            "After a tool call, wait for the result before continuing."
+        )
+
+
 # ── Format: auto ─────────────────────────────────────────────────────────────
 #
 # Frontier models routinely ignore the taught convention and emit their
@@ -877,7 +955,7 @@ class DeepSeekFormat(ToolCallFormat):
 
 _AUTO_ORDER = [
     "bash_block", "hermes_xml", "hermes", "glm", "kimi", "deepseek",
-    "alan", "meta_json",
+    "minimax", "alan", "meta_json",
 ]
 
 
@@ -886,7 +964,7 @@ class AutoFormat(ToolCallFormat):
 
     stop_sequences = (
         "\n```\n", "</tool_call>", "</tool_use>", "<|tool_call_end|>",
-        f"{_DS_CLOSE}tool_calls>",
+        f"{_DS_CLOSE}tool_calls>", "</minimax:tool_call>",
     )
 
     def repair_stop_truncation(self, text: str) -> str:
@@ -943,6 +1021,7 @@ FORMATS: dict[str, ToolCallFormat] = {
     "bash_block": BashBlockFormat(),
     "kimi": KimiFormat(),
     "deepseek": DeepSeekFormat(),
+    "minimax": MiniMaxFormat(),
     "auto": AutoFormat(),
 }
 

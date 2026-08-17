@@ -1,5 +1,7 @@
 # Changelog
 
+- **2026-08-17 - Alan Code 1.3.5**
+  - Added the `minimax` text tool-call format (MiniMax M2-family: a `<minimax:tool_call>` envelope around plain-ASCII `invoke`/`parameter` markup), included in `auto` with its own stop sequence.
 - **2026-08-17 - Alan Code 1.3.4**
   - Added `tool_call_format=auto`: strict-parses every registered text format and uses whichever yields calls, so models that ignore the taught convention and emit their trained markup still execute (teaches bash_block, accepts any).
   - Added two native formats observed live on the MiniGrid bench: `kimi` (K2-family special tokens, opaque function-ids supported) and `deepseek` (DSML `invoke`/`parameter` markup, fullwidth-bar delimited).
