@@ -291,6 +291,22 @@ class TestBashBlockFormat:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].input == {"command": "cat solution.py"}
 
+    def test_crlf_line_endings_parse(self):
+        # GLM-5.2 intermittently emits CRLF; both fences must still match.
+        text = (
+            "Label.<tool_call>Bash Output:\r\n"
+            "```bash\r\n"
+            "cat > f.py <<EOF\r\n"
+            "print(1)\r\n"
+            "EOF\r\n"
+            "python f.py\r\n"
+            "```"
+        )
+        for fmt in ("bash_block", "auto"):
+            result = extract_tool_calls_from_text(text, format=fmt)
+            assert len(result.tool_calls) == 1, fmt
+            assert result.tool_calls[0].name == "Bash"
+
 
 class TestKimiFormat:
     """Kimi K2-family special-token format."""
@@ -529,6 +545,13 @@ class TestStopRepair:
         for name in ("bash_block", "hermes", "hermes_xml", "glm", "alan", "kimi", "auto"):
             assert get_format(name).stop_sequences, name
         assert get_format("meta_json").stop_sequences == ()
+
+    def test_auto_stops_exclude_ambiguous_tag_closers(self):
+        """Stray <tool_call>-label chatter before a real call must not let
+        a tag stop cut the turn early under auto."""
+        auto_stops = get_format("auto").stop_sequences
+        assert "</tool_call>" not in auto_stops
+        assert "</tool_use>" not in auto_stops
 
 
 class TestAutoFormat:

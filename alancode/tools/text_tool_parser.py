@@ -625,8 +625,10 @@ class MetaJSONFormat(ToolCallFormat):
 # truncated case.
 
 
+# Fence lines tolerate a trailing \r: GLM-5.2 intermittently emits CRLF
+# line endings, which otherwise kill both anchors on a well-formed block.
 _BASH_BLOCK_PATTERN = re.compile(
-    r"```bash[ \t]*\n(.*?)\n```[ \t]*$",
+    r"```bash[ \t]*\r?\n(.*?)\n```[ \t\r]*$",
     re.DOTALL | re.MULTILINE,
 )
 
@@ -645,8 +647,8 @@ class BashBlockFormat(ToolCallFormat):
     def repair_stop_truncation(self, text: str) -> str:
         if _BASH_BLOCK_PATTERN.search(text):
             return text
-        if re.search(r"```bash[ \t]*\n", text):
-            return text.rstrip("\n") + "\n```"
+        if re.search(r"```bash[ \t]*\r?\n", text):
+            return text.rstrip("\r\n") + "\n```"
         return text
 
     def parse(self, text: str) -> list[ParsedToolCall]:
@@ -962,8 +964,12 @@ _AUTO_ORDER = [
 class AutoFormat(ToolCallFormat):
     """Auto-detecting format: accept any registered markup, teach bash_block."""
 
+    # Only unambiguous stops: models emit stray <tool_call>-style label
+    # chatter BEFORE their real call (observed on GLM-5.2), so a
+    # </tool_call> stop can cut the turn before the call is written.
+    # Formats configured directly keep their own tag stops.
     stop_sequences = (
-        "\n```\n", "</tool_call>", "</tool_use>", "<|tool_call_end|>",
+        "\n```\n", "<|tool_call_end|>",
         f"{_DS_CLOSE}tool_calls>", "</minimax:tool_call>",
     )
 
