@@ -1,5 +1,7 @@
 # Changelog
 
+- **2026-08-17 - Alan Code 1.3.9**
+  - Added the `kimi_k3` text tool-call format (Kimi K3 structured tokens: `<|open|>call tool="..."<|sep|>...<|close|>call`, raw string values, lowercase tool names resolved by the single-tool remap), included in `auto` with its own stop sequence. Requires the model served raw (no server-side tool grammar).
 - **2026-08-17 - Alan Code 1.3.8**
   - Fixed `auto`'s stop-truncation repair corrupting valid calls: a stray `<tool_call>` label before a well-formed fence made the hermes balance-repair glue `</tool_call>` onto the closing fence line, so the repair-then-parse pipeline rejected a textbook block (the dominant GLM-5.2 `auto` miss, reproduced byte-exact). Repair now leaves any already-parsing text untouched and accepts a candidate repair only if its own format then parses.
 - **2026-08-17 - Alan Code 1.3.7**

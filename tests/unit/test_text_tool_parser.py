@@ -378,6 +378,75 @@ class TestKimiFormat:
         assert result.tool_calls[0].input == {"command": "python explore.py"}
 
 
+class TestKimiK3Format:
+    """Kimi K3 structured-token format."""
+
+    def test_live_sample(self):
+        # The verbatim K3 turn shape from the Adastra serve.
+        text = (
+            '<|open|>tools<|sep|><|open|>call tool="bash" index="1"<|sep|>'
+            '<|open|>argument key="command" type="string"<|sep|>'
+            "cat framework/make_env.py && ls code_library"
+            "<|close|>argument<|sep|><|close|>call<|sep|><|close|>tools<|sep|>"
+            "<|close|>message<|sep|><|end_of_msg|>"
+        )
+        result = extract_tool_calls_from_text(text, format="kimi_k3")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "bash"
+        assert result.tool_calls[0].input == {
+            "command": "cat framework/make_env.py && ls code_library",
+        }
+        assert result.error is None
+
+    def test_multiline_heredoc_value(self):
+        command = "cat > f.py <<'EOF'\nprint(1)\nEOF\npython f.py"
+        text = (
+            '<|open|>call tool="bash" index="1"<|sep|>'
+            f'<|open|>argument key="command" type="string"<|sep|>{command}'
+            "<|close|>argument<|sep|><|close|>call"
+        )
+        result = extract_tool_calls_from_text(text, format="kimi_k3")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input["command"] == command
+
+    def test_malformed_flagged(self):
+        text = '<|open|>call tool="bash"<|sep|>no argument structure'
+        result = extract_tool_calls_from_text(text, format="kimi_k3")
+        assert result.tool_calls == []
+        assert result.error is not None
+
+    def test_prose_clean(self):
+        result = extract_tool_calls_from_text("Just prose.", format="kimi_k3")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_repair_closes_call(self):
+        fmt = get_format("kimi_k3")
+        text = (
+            '<|open|>call tool="bash" index="1"<|sep|>'
+            '<|open|>argument key="command" type="string"<|sep|>ls'
+            "<|close|>argument<|sep|>"
+        )
+        result = extract_tool_calls_from_text(
+            fmt.repair_stop_truncation(text), format="kimi_k3",
+        )
+        assert len(result.tool_calls) == 1
+
+    def test_system_prompt(self):
+        prompt = get_tool_format_system_prompt("kimi_k3", [])
+        assert '<|open|>call tool=' in prompt
+
+    def test_auto_detects_kimi_k3(self):
+        text = (
+            '<|open|>call tool="bash" index="1"<|sep|>'
+            '<|open|>argument key="command" type="string"<|sep|>ls'
+            "<|close|>argument<|sep|><|close|>call"
+        )
+        result = extract_tool_calls_from_text(text, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "bash"
+
+
 class TestMiniMaxFormat:
     """MiniMax envelope around plain invoke/parameter markup."""
 

@@ -14,6 +14,7 @@ Supported formats:
 - ``kimi``: ``<|tool_call_begin|>id<|tool_call_argument_begin|>{...}<|tool_call_end|>``
 - ``deepseek``: DSML ``invoke``/``parameter`` markup (fullwidth-bar delimited)
 - ``minimax``: ``<minimax:tool_call>`` envelope around plain ``invoke``/``parameter``
+- ``kimi_k3``: ``<|open|>call tool="..."<|sep|>...<|close|>call`` structured tokens
 - ``auto``: accept ANY of the above, whichever strict-parses (teaches bash_block)
 
 Each format is implemented as a ToolCallFormat class with:
@@ -945,6 +946,85 @@ class MiniMaxFormat(ToolCallFormat):
         )
 
 
+# ── Format: kimi_k3 ──────────────────────────────────────────────────────────
+#
+# Kimi K3 structured-token format, observed live (served raw, no
+# server-side tool grammar):
+# <|open|>tools<|sep|><|open|>call tool="bash" index="1"<|sep|>
+# <|open|>argument key="command" type="string"<|sep|>VALUE<|close|>argument
+# <|sep|><|close|>call<|sep|><|close|>tools<|sep|>...
+# Argument values are raw text when type="string", JSON-coerced otherwise.
+# Tool names are lowercase (tool="bash"); the loop's single-tool remap
+# resolves them.
+
+
+_K3_CALL_PATTERN = re.compile(
+    r"(?:<\|open\|>tools<\|sep\|>\s*)?"
+    r'<\|open\|>call\s+tool="([^"]+)"[^<]*<\|sep\|>(.*?)<\|close\|>call'
+    r"(?:<\|sep\|>)?"
+    r"(?:\s*<\|close\|>tools(?:<\|sep\|>)?)?",
+    re.DOTALL,
+)
+
+_K3_ARG_PATTERN = re.compile(
+    r'<\|open\|>argument\s+key="([^"]+)"([^<]*)<\|sep\|>(.*?)<\|close\|>argument',
+    re.DOTALL,
+)
+
+
+class KimiK3Format(ToolCallFormat):
+    """Kimi K3 format: ``<|open|>call tool="..."<|sep|>...<|close|>call`` structured tokens."""
+
+    stop_sequences = ("<|close|>call",)
+
+    def repair_stop_truncation(self, text: str) -> str:
+        return _close_unbalanced_tag(text, "<|open|>call", "<|close|>call")
+
+    def parse(self, text: str) -> list[ParsedToolCall]:
+        results = []
+        for match in _K3_CALL_PATTERN.finditer(text):
+            name = match.group(1).strip()
+            args: dict[str, object] = {}
+            for arg in _K3_ARG_PATTERN.finditer(match.group(2)):
+                key = arg.group(1).strip()
+                attrs = arg.group(2)
+                value = arg.group(3)
+                args[key] = value if 'type="string"' in attrs else _coerce_arg(value)
+            if name:
+                results.append(ParsedToolCall(
+                    name=name, input=args, raw_match=match.group(0),
+                ))
+        return results
+
+    def detect_malformed(self, text: str) -> bool:
+        if "<|open|>call" not in text:
+            return False
+        return not self.parse(text)
+
+    def format_error(self) -> str:
+        return (
+            "Found K3 call tokens but the tool call did not parse.\n\n"
+            "Expected format:\n"
+            '<|open|>call tool="tool_name" index="1"<|sep|>'
+            '<|open|>argument key="param" type="string"<|sep|>value'
+            "<|close|>argument<|sep|><|close|>call\n\n"
+            "Please retry with the correct format."
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        tools_json = json.dumps(tool_schemas, indent=2)
+        return (
+            "\n\n# Tool Calling\n\n"
+            "You have access to the following tools:\n"
+            f"<tools>\n{tools_json}\n</tools>\n\n"
+            "To call a tool, use your structured call tokens:\n"
+            '<|open|>call tool="tool_name" index="1"<|sep|>'
+            '<|open|>argument key="param" type="string"<|sep|>value'
+            "<|close|>argument<|sep|><|close|>call\n\n"
+            "After a tool call, wait for the result before continuing."
+        )
+
+
 # ── Format: auto ─────────────────────────────────────────────────────────────
 #
 # Frontier models routinely ignore the taught convention and emit their
@@ -956,8 +1036,8 @@ class MiniMaxFormat(ToolCallFormat):
 
 
 _AUTO_ORDER = [
-    "bash_block", "hermes_xml", "hermes", "glm", "kimi", "deepseek",
-    "minimax", "alan", "meta_json",
+    "bash_block", "hermes_xml", "hermes", "glm", "kimi", "kimi_k3",
+    "deepseek", "minimax", "alan", "meta_json",
 ]
 
 
@@ -970,7 +1050,7 @@ class AutoFormat(ToolCallFormat):
     # Formats configured directly keep their own tag stops.
     stop_sequences = (
         "\n```\n", "<|tool_call_end|>",
-        f"{_DS_CLOSE}tool_calls>", "</minimax:tool_call>",
+        f"{_DS_CLOSE}tool_calls>", "</minimax:tool_call>", "<|close|>call",
     )
 
     def repair_stop_truncation(self, text: str) -> str:
@@ -1033,6 +1113,7 @@ FORMATS: dict[str, ToolCallFormat] = {
     "meta_json": MetaJSONFormat(),
     "bash_block": BashBlockFormat(),
     "kimi": KimiFormat(),
+    "kimi_k3": KimiK3Format(),
     "deepseek": DeepSeekFormat(),
     "minimax": MiniMaxFormat(),
     "auto": AutoFormat(),
