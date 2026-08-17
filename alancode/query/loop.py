@@ -887,39 +887,66 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             )
             return
 
-        # -- Phase 7: Handle no tool use (completion or recovery) --------
+        # -- Phase 7: Length-truncation recovery / completion ------------
+        if stop_reason == "max_tokens" or assistant_msg.api_error == "max_output_tokens":
+            # A truncated response's tool calls cannot be trusted -- the
+            # last one may be cut mid-argument yet still parse as complete
+            # (text formats tolerate a missing closing tag) -- so fail
+            # them all instead of executing.
+            truncated_tool_results = [
+                create_tool_result_message(
+                    tool_use_id=block.id,
+                    content=(
+                        "This tool call was cut off by the output token "
+                        "limit and was NOT executed. Re-issue it "
+                        "completely, in smaller pieces if needed."
+                    ),
+                    is_error=True,
+                    source_tool_assistant_uuid=assistant_msg.uuid,
+                )
+                for block in tool_use_blocks
+            ]
+            for result in truncated_tool_results:
+                yield result
+
+            # Try escalation first. An explicit max_output_tokens is a
+            # starting budget, not a recovery ceiling: escalate whenever
+            # the target is higher (clamp_output_budget still bounds the
+            # actual call to the window).
+            escalated = params.settings.get("escalated_max_tokens", 64000)
+            if (
+                state.max_output_tokens_override is None
+                and (params.max_output_tokens or 0) < escalated
+            ):
+                logger.info("Escalating max_tokens to %d", escalated)
+                state.max_output_tokens_override = escalated
+                state.messages = list(messages_for_query)
+                state.transition = "max_output_tokens_escalate"
+                continue
+
+            # Multi-turn recovery
+            if state.max_output_tokens_recovery_count < params.settings.get("max_output_tokens_recovery_limit", 3):
+                state.max_output_tokens_recovery_count += 1
+                recovery_msg = create_user_message(
+                    "Output token limit hit. Resume directly -- no apology, no recap. "
+                    "Pick up mid-thought. Break remaining work into smaller pieces.",
+                    hide_in_ui=True,
+                )
+                state.messages = (
+                    list(messages_for_query)
+                    + [assistant_msg]
+                    + truncated_tool_results
+                    + [recovery_msg]
+                )
+                state.max_output_tokens_override = None
+                state.transition = "max_output_tokens_recovery"
+                continue
+
+            # Recovery exhausted: end the turn with the truncated response.
+            return
+
+        # -- Phase 7b: No tool use -> normal completion ------------------
         if not tool_use_blocks:
-            # Max-output-tokens recovery
-            if stop_reason == "max_tokens" or assistant_msg.api_error == "max_output_tokens":
-                # Try escalation first (bump to 64K)
-                if (
-                    state.max_output_tokens_override is None
-                    and not params.max_output_tokens
-                ):
-                    escalated = params.settings.get("escalated_max_tokens", 64000)
-                    logger.info("Escalating max_tokens to %d", escalated)
-                    state.max_output_tokens_override = escalated
-                    state.messages = list(messages_for_query)
-                    state.transition = "max_output_tokens_escalate"
-                    continue
-
-                # Multi-turn recovery
-                if state.max_output_tokens_recovery_count < params.settings.get("max_output_tokens_recovery_limit", 3):
-                    state.max_output_tokens_recovery_count += 1
-                    recovery_msg = create_user_message(
-                        "Output token limit hit. Resume directly -- no apology, no recap. "
-                        "Pick up mid-thought. Break remaining work into smaller pieces.",
-                        hide_in_ui=True,
-                    )
-                    state.messages = list(messages_for_query) + [
-                        assistant_msg,
-                        recovery_msg,
-                    ]
-                    state.max_output_tokens_override = None
-                    state.transition = "max_output_tokens_recovery"
-                    continue
-
-            # Normal completion
             return
 
         # -- Phase 8: Tool execution -------------------------------------

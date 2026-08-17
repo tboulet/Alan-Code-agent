@@ -291,3 +291,97 @@ class TestOllamaShow:
         assert self._backend()._query_server_context_window(
             "ollama/llama-custom"
         ) == 4_096
+
+
+# ---------------------------------------------------------------------------
+# llama.cpp /props parsing
+# ---------------------------------------------------------------------------
+
+
+class TestLlamaCppProps:
+    def _backend(self):
+        return LiteLLMBackend(
+            model="openai/local-gguf", api_base="http://localhost:8080/v1"
+        )
+
+    def test_props_n_ctx_wins_over_trained_max(self, monkeypatch):
+        """The serving n_ctx (30k slot) must be returned, never the
+        trained max from /v1/models meta (262k)."""
+        def fake_get(url, timeout):
+            if url.endswith("/v1/models"):
+                return _FakeResponse(200, {
+                    "data": [{
+                        "id": "local-gguf",
+                        "meta": {"n_ctx_train": 262_144, "n_vocab": 151_936},
+                    }],
+                })
+            if url.endswith("/props"):
+                return _FakeResponse(200, {
+                    "default_generation_settings": {"id": 0, "n_ctx": 30_000},
+                    "total_slots": 3,
+                })
+            return _FakeResponse(404, {})
+
+        def fake_post(url, json, timeout):
+            return _FakeResponse(404, {})
+
+        monkeypatch.setattr("requests.get", fake_get)
+        monkeypatch.setattr("requests.post", fake_post)
+        assert self._backend()._query_server_context_window(
+            "openai/local-gguf"
+        ) == 30_000
+
+    def test_props_absent_falls_through(self, monkeypatch):
+        def fake_get(url, timeout):
+            return _FakeResponse(404, {})
+
+        def fake_post(url, json, timeout):
+            return _FakeResponse(404, {})
+
+        monkeypatch.setattr("requests.get", fake_get)
+        monkeypatch.setattr("requests.post", fake_post)
+        assert self._backend()._query_server_context_window(
+            "openai/local-gguf"
+        ) is None
+
+
+# ---------------------------------------------------------------------------
+# context_window setting -> backend constructor plumbing
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsPlumbing:
+    def test_settings_context_window_reaches_backend(self, caplog):
+        from alancode.agent import _create_backend_from_settings
+
+        backend = _create_backend_from_settings({
+            "backend": "auto",
+            "model": "totally-unknown-xyz",
+            "context_window": 30_000,
+        })
+        with caplog.at_level(logging.WARNING):
+            info = backend.get_model_info()
+        assert info.context_window == 30_000
+        assert info.cw_source == "override"
+        assert not [r for r in caplog.records if "UNKNOWN" in r.message]
+
+    def test_settings_auto_leaves_override_unset(self):
+        from alancode.agent import _create_backend_from_settings
+
+        backend = _create_backend_from_settings({
+            "backend": "auto",
+            "model": "totally-unknown-xyz",
+            "context_window": "auto",
+        })
+        assert backend._context_window_override is None
+
+    def test_anthropic_native_ignores_context_window(self):
+        from alancode.agent import _create_backend_from_settings
+
+        backend = _create_backend_from_settings({
+            "backend": "anthropic-native",
+            "model": "claude-sonnet-4-6",
+            "api_key": "test-key",
+            "context_window": 30_000,
+        })
+        assert backend is not None

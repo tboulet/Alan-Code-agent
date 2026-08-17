@@ -161,14 +161,26 @@ def flood_payload(n_chars: int) -> str:
     return " ".join(words)
 
 
-def make_agent(tmp_path, backend, payload_chars=9_000, **kwargs):
+class CountingTool(DummyTool):
+    """DummyTool that records how many times it actually ran."""
+
+    def __init__(self, payload: str) -> None:
+        super().__init__(payload)
+        self.executions = 0
+
+    async def call(self, args: dict, context: ToolUseContext) -> ToolResult:
+        self.executions += 1
+        return await super().call(args, context)
+
+
+def make_agent(tmp_path, backend, payload_chars=9_000, tool=None, **kwargs):
     return AlanCodeAgent(
         backend=backend,
         cwd=str(tmp_path),
         programmatic=True,
         permission_mode="yolo",
         custom_system_prompt="You are a test agent.",
-        tools=[DummyTool(flood_payload(payload_chars))],
+        tools=[tool or DummyTool(flood_payload(payload_chars))],
         **kwargs,
     )
 
@@ -300,6 +312,132 @@ class TestEscalationClamp:
         # Escalated beyond the default budget, but legal for the window.
         assert retry["max_tokens"] > 8_192
         assert retry["max_tokens"] < cw
+
+
+# ---------------------------------------------------------------------------
+# Scenario 5b - escalation overrides an explicit pin below the target
+# ---------------------------------------------------------------------------
+
+
+class TestEscalationPastPin:
+    @pytest.mark.asyncio
+    async def test_pin_below_target_escalates(self, tmp_path):
+        """An explicit max_output_tokens below escalated_max_tokens is a
+        starting budget: a truncation escalates past it (window-clamped)."""
+        cw = 32_768
+        inner = ScriptedBackend.from_responses(
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
+            fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=cw)
+        agent = make_agent(tmp_path, backend, max_output_tokens=3_000)
+
+        events = await run_turn(agent, "write something long")
+        assert_survived(backend, events)
+        assert final_text(events) == "recovered fully"
+
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
+        assert len(main_calls) == 2
+        assert main_calls[0]["max_tokens"] == 3_000
+        assert main_calls[1]["max_tokens"] > 3_000
+        assert main_calls[1]["max_tokens"] < cw
+
+    @pytest.mark.asyncio
+    async def test_pin_at_target_stays_hard_ceiling(self, tmp_path):
+        """A pin >= escalated_max_tokens never escalates: recovery goes
+        straight to the resume message at the same budget."""
+        cw = 200_000
+        inner = ScriptedBackend.from_responses(
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
+            fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=cw)
+        agent = make_agent(tmp_path, backend, max_output_tokens=64_000)
+
+        events = await run_turn(agent, "write something long")
+        assert_survived(backend, events)
+        assert final_text(events) == "recovered fully"
+
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
+        assert len(main_calls) == 2
+        assert main_calls[1]["max_tokens"] == 64_000
+        assert "Output token limit hit" in str(main_calls[1]["messages"])
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6 - truncation mid-tool-call: never execute, always recover
+# ---------------------------------------------------------------------------
+
+
+def truncated_tool_response() -> ScriptedResponse:
+    return ScriptedResponse(
+        tool_calls=[{"name": "Dummy", "input": {}, "id": "toolu_truncated"}],
+        stop_reason="max_tokens",
+    )
+
+
+class TestTruncatedToolCall:
+    @pytest.mark.asyncio
+    async def test_not_executed_and_escalation_retries(self, tmp_path):
+        """A response cut at max_tokens while a tool call was in flight:
+        the call must NOT run (it may be cut mid-argument yet still parse),
+        an error tool_result must answer it, and the escalation retry must
+        fire as if there were no tool call."""
+        cw = 32_768
+        inner = ScriptedBackend.from_responses(
+            [truncated_tool_response(), text("recovered fully")],
+            fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=cw)
+        tool = CountingTool(flood_payload(1_000))
+        agent = make_agent(tmp_path, backend, tool=tool)
+
+        events = await run_turn(agent, "write a big file")
+        assert_survived(backend, events)
+        assert final_text(events) == "recovered fully"
+
+        assert tool.executions == 0
+        results = [
+            e for e in events
+            if isinstance(e, UserMessage) and "NOT executed" in str(e.content)
+        ]
+        assert len(results) == 1
+
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
+        assert len(main_calls) == 2
+        assert main_calls[1]["max_tokens"] > main_calls[0]["max_tokens"]
+
+    @pytest.mark.asyncio
+    async def test_not_executed_and_recovery_messages_are_api_valid(self, tmp_path):
+        """Same truncation with escalation unavailable (pin == target): the
+        retry conversation must pair the dangling tool_use with the error
+        tool_result (strict servers 400 otherwise) plus the resume nudge."""
+        cw = 200_000
+        inner = ScriptedBackend.from_responses(
+            [truncated_tool_response(), text("recovered fully")],
+            fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=cw)
+        tool = CountingTool(flood_payload(1_000))
+        agent = make_agent(tmp_path, backend, tool=tool, max_output_tokens=64_000)
+
+        events = await run_turn(agent, "write a big file")
+        assert_survived(backend, events)
+        assert final_text(events) == "recovered fully"
+        assert tool.executions == 0
+
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
+        assert len(main_calls) == 2
+        retry = str(main_calls[1]["messages"])
+        assert "toolu_truncated" in retry
+        assert "NOT executed" in retry
+        assert "Output token limit hit" in retry
 
 
 # ---------------------------------------------------------------------------

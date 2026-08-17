@@ -1,5 +1,10 @@
 # Changelog
 
+- **2026-08-17 - Alan Code 1.3.2**
+  - Length-truncated responses now recover even when a tool call was in flight: the suspect calls are never executed (a call cut mid-argument can still parse as complete in text tool formats), each gets a synthesized error `tool_result` so the conversation stays valid for strict servers, and the usual escalation/resume recovery fires.
+  - An explicit `max_output_tokens` now acts as a starting budget rather than a recovery ceiling: a truncation escalates once to `escalated_max_tokens` (default 64000, window-clamped) when that is higher. Set `escalated_max_tokens` at or below your pin to keep a hard ceiling.
+  - The `context_window` setting now reaches the LiteLLM backend constructor, so an explicit value resolves as an override and the misleading "context window UNKNOWN" warning no longer fires. `context_window` also triggers a backend rebuild when changed mid-session.
+  - The server-metadata probe now reads llama.cpp's `/props` endpoint (`default_generation_settings.n_ctx`) - the actual serving context of the running instance, never the trained maximum - so GGUF endpoints resolve their context window automatically.
 - **2026-08-10 - Alan Code 1.3.1**
   - Fixed tool-only assistant messages being serialized with JSON `null` content. They now use an empty string, preserving OpenAI compatibility while preventing Ollama and other strict OpenAI-compatible servers from rejecting the request after the first tool call.
   - Removed the automatic date/time `<system-reminder>` from `programmatic=True` turns, keeping embedded and benchmark conversations fully caller-controlled. Interactive sessions retain the reminder.

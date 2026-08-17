@@ -128,6 +128,7 @@ def _resolve_backend(
     api_key: str | None = None,
     base_url: str | None = None,
     request_timeout: int | str | None = None,
+    context_window: int | None = None,
     **kwargs: Any,
 ) -> LLMBackend:
     """Resolve a backend string (or pre-built ``LLMBackend``) into an
@@ -162,6 +163,7 @@ def _resolve_backend(
             api_key=api_key,
             api_base=base_url,
             request_timeout=request_timeout,
+            context_window=context_window,
             **kwargs,
         )
 
@@ -201,12 +203,15 @@ def _create_backend_from_settings(settings: dict[str, Any], **extra) -> LLMBacke
     Used by ``__init__`` and by ``update_session_setting`` when a
     backend-related key changes mid-session.
     """
+    # "auto" (the default) means resolve from registry/server/probe.
+    cw = settings.get("context_window")
     return _resolve_backend(
         settings.get("backend", "auto"),
         model=settings.get("model"),
         api_key=settings.get("api_key"),
         base_url=settings.get("base_url"),
         request_timeout=settings.get("request_timeout"),
+        context_window=cw if isinstance(cw, int) else None,
         **extra,
     )
 
@@ -249,7 +254,11 @@ class AlanCodeAgent:
     max_iterations_per_turn : int, optional
         Maximum agentic iterations per turn.
     max_output_tokens : int, optional
-        Max tokens per LLM response.
+        Max tokens per LLM response. Acts as a starting budget: on a
+        length-truncated response the loop escalates once to the
+        ``escalated_max_tokens`` setting (default 64000) when that is
+        higher. Set ``escalated_max_tokens`` at or below this value to
+        keep it a hard ceiling.
     custom_system_prompt : str, optional
         Replace Alan's normal system prompt.
     append_system_prompt : str, optional

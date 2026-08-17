@@ -289,7 +289,11 @@ class LiteLLMBackend(LLMBackend):
         return None
 
     def _query_server_context_window(self, model: str) -> int | None:
-        """Query a local server's /v1/models or /api/tags for context window info."""
+        """Query a local server's metadata for context window info.
+
+        Sources: OpenAI-compatible /v1/models (vLLM, SGLang), llama.cpp
+        /props, Ollama /api/show.
+        """
         import requests as http_requests
 
         base = self._api_base.rstrip("/")
@@ -342,6 +346,25 @@ class LiteLLMBackend(LLMBackend):
                     "Context metadata request failed for %s: %s", endpoint, exc,
                 )
                 continue
+
+        # Try llama.cpp /props: default_generation_settings.n_ctx is the
+        # SERVING context of the running instance (per-slot when -c is
+        # split across --parallel slots). Never read n_ctx_train from
+        # /v1/models meta - that is the trained max, not what the server
+        # will accept.
+        try:
+            resp = http_requests.get(f"{root}/props", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                n_ctx = (data.get("default_generation_settings") or {}).get("n_ctx")
+                if n_ctx:
+                    value = int(n_ctx)
+                    logger.info(
+                        "Got context window %d from llama.cpp /props", value,
+                    )
+                    return value
+        except (OSError, ValueError, TypeError, http_requests.RequestException) as exc:
+            logger.debug("llama.cpp /props request failed: %s", exc)
 
         # Try Ollama /api/show (POST with the model name). Note /api/tags
         # does NOT expose context_length - it lives in /api/show's

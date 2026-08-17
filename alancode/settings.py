@@ -60,7 +60,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "context_window": "auto",  # "auto" = resolve from registry/server/probe; int = trust this value
     "compact_max_output_tokens": "auto",  # Summarizer output budget (auto: min(20k, CW - T - m))
     "capped_default_max_tokens": 8_000,  # Default max_tokens (slot reservation optimization)
-    "escalated_max_tokens": 64_000,  # Retry budget after capped default is hit (clamped to the window)
+    "escalated_max_tokens": 64_000,  # Retry budget on length-truncation, overrides a lower max_output_tokens (clamped to the window)
     "auto_compact_buffer_tokens": 13_000,  # Buffer below context window that triggers auto-compact
     "warning_threshold_buffer_tokens": 20_000,  # Remaining tokens to trigger warning
     "max_consecutive_compact_failures": 3,  # Circuit breaker for auto-compact retries
@@ -279,6 +279,7 @@ BACKEND_SETTINGS: set[str] = {
     "api_key",
     "base_url",
     "request_timeout",
+    "context_window",
 }
 
 # ── Backend inference ────────────────────────────────────────────────────────
