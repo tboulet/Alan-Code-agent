@@ -11,6 +11,9 @@ Supported formats:
 - ``alan``: ``<tool_use>{"name": "...", "input": {...}}</tool_use>``
 - ``meta_json``: ``{"type": "function", "name": "...", "parameters": {...}}``
 - ``bash_block``: one fenced ```` ```bash ```` code block, run as the Bash tool
+- ``kimi``: ``<|tool_call_begin|>id<|tool_call_argument_begin|>{...}<|tool_call_end|>``
+- ``deepseek``: DSML ``invoke``/``parameter`` markup (fullwidth-bar delimited)
+- ``auto``: accept ANY of the above, whichever strict-parses (teaches bash_block)
 
 Each format is implemented as a ToolCallFormat class with:
 - ``parse(text)`` → extract well-formed tool calls
@@ -68,6 +71,18 @@ class ToolCallFormat(ABC):
     # OpenAI-compatible reasoning models emit their protocol there).
     parse_thinking: bool = True
 
+    # API stop strings that end generation the moment a call is complete
+    # (one tool call per turn, no post-call rambling). Servers cut the
+    # output BEFORE the stop string, so a stop-terminated call arrives
+    # without its closing marker - repair_stop_truncation restores it.
+    # The loop only repairs when stop_reason is not "max_tokens": a
+    # length-truncated call must stay unparseable.
+    stop_sequences: tuple[str, ...] = ()
+
+    def repair_stop_truncation(self, text: str) -> str:
+        """Re-append the closing marker a stop sequence stripped."""
+        return text
+
     @abstractmethod
     def parse(self, text: str) -> list[ParsedToolCall]:
         """Extract well-formed tool calls from text."""
@@ -98,6 +113,13 @@ class ToolCallFormat(ABC):
         ...
 
 
+def _close_unbalanced_tag(text: str, open_tag: str, close_tag: str) -> str:
+    """Append *close_tag* when an *open_tag* is left unclosed."""
+    if text.count(open_tag) > text.count(close_tag):
+        return text + close_tag
+    return text
+
+
 # ── Format: hermes ───────────────────────────────────────────────────────────
 
 
@@ -118,6 +140,11 @@ _HERMES_LOOSE_PATTERN = re.compile(
 
 class HermesFormat(ToolCallFormat):
     """Hermes/Qwen format: ``<tool_call>{"name": ..., "arguments": ...}</tool_call>``"""
+
+    stop_sequences = ("</tool_call>",)
+
+    def repair_stop_truncation(self, text: str) -> str:
+        return _close_unbalanced_tag(text, "<tool_call>", "</tool_call>")
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -196,6 +223,11 @@ _GLM_LOOSE_PATTERN = re.compile(
 class GLMFormat(ToolCallFormat):
     """GLM format: ``<tool_call>Name<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>``"""
 
+    stop_sequences = ("</tool_call>",)
+
+    def repair_stop_truncation(self, text: str) -> str:
+        return _close_unbalanced_tag(text, "<tool_call>", "</tool_call>")
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
         for match in _GLM_PATTERN.finditer(text):
@@ -269,6 +301,11 @@ _ALAN_LOOSE_PATTERN = re.compile(
 
 class AlanFormat(ToolCallFormat):
     """Alan format: ``<tool_use>{"name": ..., "input": ...}</tool_use>``"""
+
+    stop_sequences = ("</tool_use>",)
+
+    def repair_stop_truncation(self, text: str) -> str:
+        return _close_unbalanced_tag(text, "<tool_use>", "</tool_use>")
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -366,6 +403,10 @@ class HermesXMLFormat(ToolCallFormat):
     Used by Qwen3-Coder-Next and other Hermes-FunctionCalling-Lite trained
     models — the body of the <tool_call> tag is XML-shaped, NOT JSON.
     """
+
+    # The parser already tolerates a missing </tool_call> (stop-stripped
+    # or model-omitted), so no repair is needed.
+    stop_sequences = ("</tool_call>",)
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -575,13 +616,16 @@ class MetaJSONFormat(ToolCallFormat):
 # followed by ONE fenced ```bash code block, whose content is the Bash tool's
 # command. No structured markup. Only the first block of an answer runs; the
 # teaching prompt says "exactly one block", so extras are model confusion and
-# are ignored. Both fences must sit at line start; an unclosed block (stream
-# still arriving, or output truncated) is NOT a call - the length-truncation
-# recovery handles the truncated case.
+# are ignored. The opening fence may be glued to prose (GLM-5.2 emits
+# "prose.```bash\n...") but must be followed by a newline - that is what
+# keeps a prose MENTION of "```bash" from matching; the closing fence must
+# sit at line start. An unclosed block (stream still arriving, or output
+# truncated) is NOT a call - the length-truncation recovery handles the
+# truncated case.
 
 
 _BASH_BLOCK_PATTERN = re.compile(
-    r"^```bash[ \t]*\n(.*?)\n```[ \t]*$",
+    r"```bash[ \t]*\n(.*?)\n```[ \t]*$",
     re.DOTALL | re.MULTILINE,
 )
 
@@ -592,6 +636,17 @@ class BashBlockFormat(ToolCallFormat):
     # Fenced code in reasoning is a draft, not an action: the convention
     # puts the executable block in the visible answer only.
     parse_thinking = False
+
+    # "\n```\n" only matches a CLOSING fence line - the opening fence is
+    # "```bash" so the newline right after the backticks cannot match it.
+    stop_sequences = ("\n```\n",)
+
+    def repair_stop_truncation(self, text: str) -> str:
+        if _BASH_BLOCK_PATTERN.search(text):
+            return text
+        if re.search(r"```bash[ \t]*\n", text):
+            return text.rstrip("\n") + "\n```"
+        return text
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         matches = list(_BASH_BLOCK_PATTERN.finditer(text))
@@ -639,6 +694,243 @@ class BashBlockFormat(ToolCallFormat):
         )
 
 
+# ── Format: kimi ─────────────────────────────────────────────────────────────
+#
+# Kimi K2-family special-token format, emitted by Kimi-K2.7-Code regardless
+# of the taught convention (195/196 turns observed on the MiniGrid bench):
+# <|tool_calls_section_begin|><|tool_call_begin|>functions.Name:0
+# <|tool_call_argument_begin|>{"param": ...}<|tool_call_end|>
+# <|tool_calls_section_end|>. Tool-id shapes vary (functions.Name:idx,
+# Name:idx, bare Name); the name is extracted tolerantly. Built from the
+# K2 spec plus bench transcripts - refine against raw samples if a
+# variant shows up.
+
+
+_KIMI_CALL_PATTERN = re.compile(
+    r"(?:<\|tool_calls_section_begin\|>\s*)?"
+    r"<\|tool_call_begin\|>\s*(.*?)\s*"
+    r"<\|tool_call_argument_begin\|>(.*?)<\|tool_call_end\|>"
+    r"(?:\s*<\|tool_calls_section_end\|>)?",
+    re.DOTALL,
+)
+
+_KIMI_NAME_PATTERN = re.compile(r"([A-Za-z_][\w-]*)(?::\d+)?\s*$")
+
+
+def _kimi_tool_name(raw_id: str) -> str:
+    match = _KIMI_NAME_PATTERN.search(raw_id.split(".")[-1])
+    return match.group(1) if match else raw_id.strip()
+
+
+class KimiFormat(ToolCallFormat):
+    """Kimi special-token format: ``<|tool_call_begin|>id<|tool_call_argument_begin|>{...}<|tool_call_end|>``"""
+
+    stop_sequences = ("<|tool_call_end|>",)
+
+    def repair_stop_truncation(self, text: str) -> str:
+        return _close_unbalanced_tag(
+            text, "<|tool_call_begin|>", "<|tool_call_end|>",
+        )
+
+    def parse(self, text: str) -> list[ParsedToolCall]:
+        results = []
+        for match in _KIMI_CALL_PATTERN.finditer(text):
+            name = _kimi_tool_name(match.group(1))
+            try:
+                args = json.loads(match.group(2))
+            except (json.JSONDecodeError, ValueError):
+                continue  # Detected as malformed below
+            if not isinstance(args, dict):
+                continue
+            if name:
+                results.append(ParsedToolCall(
+                    name=name, input=args, raw_match=match.group(0),
+                ))
+        return results
+
+    def detect_malformed(self, text: str) -> bool:
+        if "<|tool_call_begin|>" not in text:
+            return False
+        return not self.parse(text)
+
+    def format_error(self) -> str:
+        return (
+            "Found Kimi tool-call tokens but the call did not parse.\n\n"
+            "Expected format (arguments must be a valid JSON object):\n"
+            "<|tool_call_begin|>functions.tool_name:0"
+            '<|tool_call_argument_begin|>{"param": "value"}<|tool_call_end|>\n\n'
+            "Example:\n"
+            "<|tool_call_begin|>functions.Bash:0"
+            '<|tool_call_argument_begin|>{"command": "ls -la"}<|tool_call_end|>\n\n'
+            "Please retry with the correct format."
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        tools_json = json.dumps(tool_schemas, indent=2)
+        return (
+            "\n\n# Tool Calling\n\n"
+            "You have access to the following tools:\n"
+            f"<tools>\n{tools_json}\n</tools>\n\n"
+            "To call a tool, use your tool-call tokens with a JSON object "
+            "as the argument payload:\n"
+            "<|tool_call_begin|>functions.tool_name:0"
+            '<|tool_call_argument_begin|>{"param": "value"}<|tool_call_end|>\n\n'
+            "After a tool call, wait for the result before continuing."
+        )
+
+
+# ── Format: deepseek ─────────────────────────────────────────────────────────
+#
+# DeepSeek DSML markup, emitted by DeepSeek-V4-Flash regardless of the
+# taught convention (21/22 turns observed on the MiniGrid bench). The
+# delimiter bar is FULLWIDTH VERTICAL LINE U+FF5C, not the ASCII pipe:
+# <(bar)DSML(bar)tool_calls> / <(bar)DSML(bar)invoke name="Bash"> /
+# <(bar)DSML(bar)parameter name="command" string="true">VALUE</...>.
+# Values are raw element text (multi-line, heredocs) unless the
+# string="true" attribute is absent, in which case they are JSON-coerced.
+
+
+_DS_BAR = "｜"  # FULLWIDTH VERTICAL LINE, the actual delimiter DeepSeek emits
+_DS_OPEN = f"<{_DS_BAR}DSML{_DS_BAR}"
+_DS_CLOSE = f"</{_DS_BAR}DSML{_DS_BAR}"
+
+_DEEPSEEK_INVOKE_PATTERN = re.compile(
+    rf"(?:{re.escape(_DS_OPEN)}tool_calls>\s*)?"
+    rf'{re.escape(_DS_OPEN)}invoke name="([^"]+)"\s*>(.*?)'
+    rf"{re.escape(_DS_CLOSE)}invoke>"
+    rf"(?:\s*{re.escape(_DS_CLOSE)}tool_calls>)?",
+    re.DOTALL,
+)
+
+_DEEPSEEK_PARAM_PATTERN = re.compile(
+    rf'{re.escape(_DS_OPEN)}parameter name="([^"]+)"([^>]*)>(.*?)'
+    rf"{re.escape(_DS_CLOSE)}parameter>",
+    re.DOTALL,
+)
+
+
+class DeepSeekFormat(ToolCallFormat):
+    """DeepSeek DSML format: fullwidth-bar ``invoke``/``parameter`` markup."""
+
+    stop_sequences = (f"{_DS_CLOSE}tool_calls>",)
+
+    def parse(self, text: str) -> list[ParsedToolCall]:
+        results = []
+        for match in _DEEPSEEK_INVOKE_PATTERN.finditer(text):
+            name = match.group(1).strip()
+            args: dict[str, object] = {}
+            for param in _DEEPSEEK_PARAM_PATTERN.finditer(match.group(2)):
+                key = param.group(1).strip()
+                attrs = param.group(2)
+                value = param.group(3)
+                args[key] = value if 'string="true"' in attrs else _coerce_arg(value)
+            if name:
+                results.append(ParsedToolCall(
+                    name=name, input=args, raw_match=match.group(0),
+                ))
+        return results
+
+    def detect_malformed(self, text: str) -> bool:
+        if _DS_OPEN not in text:
+            return False
+        return not self.parse(text)
+
+    def format_error(self) -> str:
+        return (
+            "Found DSML tool-call markup but the call did not parse.\n\n"
+            "Expected format:\n"
+            f"{_DS_OPEN}tool_calls>\n"
+            f'{_DS_OPEN}invoke name="tool_name">\n'
+            f'{_DS_OPEN}parameter name="param" string="true">value'
+            f"{_DS_CLOSE}parameter>\n"
+            f"{_DS_CLOSE}invoke>\n"
+            f"{_DS_CLOSE}tool_calls>\n\n"
+            "Please retry with the correct format."
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        tools_json = json.dumps(tool_schemas, indent=2)
+        return (
+            "\n\n# Tool Calling\n\n"
+            "You have access to the following tools:\n"
+            f"<tools>\n{tools_json}\n</tools>\n\n"
+            "To call a tool, use DSML markup:\n"
+            f"{_DS_OPEN}tool_calls>\n"
+            f'{_DS_OPEN}invoke name="tool_name">\n'
+            f'{_DS_OPEN}parameter name="param" string="true">value'
+            f"{_DS_CLOSE}parameter>\n"
+            f"{_DS_CLOSE}invoke>\n"
+            f"{_DS_CLOSE}tool_calls>\n\n"
+            "After a tool call, wait for the result before continuing."
+        )
+
+
+# ── Format: auto ─────────────────────────────────────────────────────────────
+#
+# Frontier models routinely ignore the taught convention and emit their
+# TRAINED tool markup instead (observed: Qwen3-Coder emitting hermes_xml
+# under a bash_block prompt, 104/108 turns). A skill benchmark should never
+# drop a real tool call over markup, so ``auto`` strict-parses every
+# concrete format and uses whichever yields calls. The markups are mutually
+# distinctive, so the first strict match is unambiguous in practice.
+
+
+_AUTO_ORDER = [
+    "bash_block", "hermes_xml", "hermes", "glm", "kimi", "deepseek",
+    "alan", "meta_json",
+]
+
+
+class AutoFormat(ToolCallFormat):
+    """Auto-detecting format: accept any registered markup, teach bash_block."""
+
+    stop_sequences = (
+        "\n```\n", "</tool_call>", "</tool_use>", "<|tool_call_end|>",
+        f"{_DS_CLOSE}tool_calls>",
+    )
+
+    def repair_stop_truncation(self, text: str) -> str:
+        # Each member repair is balance-guarded, so this is a no-op for
+        # every format whose markers are absent or already closed.
+        for name in _AUTO_ORDER:
+            text = FORMATS[name].repair_stop_truncation(text)
+        return text
+
+    def _formats(self, source: str) -> list[tuple[str, ToolCallFormat]]:
+        return [
+            (name, FORMATS[name])
+            for name in _AUTO_ORDER
+            if source == "text" or FORMATS[name].parse_thinking
+        ]
+
+    def parse(self, text: str, source: str = "text") -> list[ParsedToolCall]:
+        for name, fmt in self._formats(source):
+            calls = fmt.parse(text)
+            if calls:
+                if name != _AUTO_ORDER[0]:
+                    logger.info("auto tool format matched %r", name)
+                return calls
+        return []
+
+    def detect_malformed(self, text: str) -> bool:
+        return any(
+            fmt.detect_malformed(text) for _, fmt in self._formats("text")
+        )
+
+    def format_error(self) -> str:
+        return (
+            "Your tool call did not parse in any supported format.\n\n"
+            "Preferred format - exactly one fenced bash code block; its "
+            "content is executed as a shell command:\n"
+            "```bash\n"
+            "ls -la\n"
+            "```"
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        return FORMATS["bash_block"].system_prompt(tool_schemas)
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 
@@ -649,6 +941,9 @@ FORMATS: dict[str, ToolCallFormat] = {
     "alan": AlanFormat(),
     "meta_json": MetaJSONFormat(),
     "bash_block": BashBlockFormat(),
+    "kimi": KimiFormat(),
+    "deepseek": DeepSeekFormat(),
+    "auto": AutoFormat(),
 }
 
 
@@ -693,8 +988,13 @@ def _extract_thinking(text: str) -> tuple[str | None, str]:
 def extract_tool_calls_from_text(
     text: str,
     format: str = "hermes",
+    source: str = "text",
 ) -> ParseResult:
     """Extract tool calls from model text output.
+
+    ``source`` is ``"text"`` for visible content or ``"thinking"`` for
+    reasoning content - ``auto`` restricts its thinking pass to formats
+    whose ``parse_thinking`` allows it.
 
     Returns a ParseResult with:
     - ``tool_calls``: successfully parsed tool calls
@@ -706,7 +1006,10 @@ def extract_tool_calls_from_text(
     fmt = get_format(format)
 
     # Try strict parsing first
-    tool_calls = fmt.parse(text)
+    if isinstance(fmt, AutoFormat):
+        tool_calls = fmt.parse(text, source=source)
+    else:
+        tool_calls = fmt.parse(text)
     cleaned = text
     for tc in tool_calls:
         cleaned = cleaned.replace(tc.raw_match, "")

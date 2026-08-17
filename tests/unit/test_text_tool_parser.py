@@ -284,6 +284,258 @@ class TestBashBlockFormat:
         assert get_format("bash_block").parse_thinking is False
         assert get_format("hermes").parse_thinking is True
 
+    def test_inline_opening_fence_glued_to_prose(self):
+        # GLM-5.2 emits the opening fence glued to its prose line.
+        text = "Let me look at the files first.```bash\ncat solution.py\n```"
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input == {"command": "cat solution.py"}
+
+
+class TestKimiFormat:
+    """Kimi K2-family special-token format."""
+
+    def test_single_call(self):
+        text = (
+            "I'll list the files.\n"
+            "<|tool_calls_section_begin|><|tool_call_begin|>functions.Bash:0"
+            '<|tool_call_argument_begin|>{"command": "ls -la"}<|tool_call_end|>'
+            "<|tool_calls_section_end|>"
+        )
+        result = extract_tool_calls_from_text(text, format="kimi")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input == {"command": "ls -la"}
+        assert "<|tool_call_begin|>" not in result.cleaned_text
+        assert result.error is None
+
+    def test_tool_id_shapes(self):
+        for raw_id in ("functions.Bash:0", "Bash:2", "Bash"):
+            text = (
+                f"<|tool_call_begin|>{raw_id}"
+                '<|tool_call_argument_begin|>{"command": "ls"}<|tool_call_end|>'
+            )
+            result = extract_tool_calls_from_text(text, format="kimi")
+            assert len(result.tool_calls) == 1, raw_id
+            assert result.tool_calls[0].name == "Bash", raw_id
+
+    def test_invalid_json_args_flagged(self):
+        text = (
+            "<|tool_call_begin|>functions.Bash:0"
+            "<|tool_call_argument_begin|>{command: ls}<|tool_call_end|>"
+        )
+        result = extract_tool_calls_from_text(text, format="kimi")
+        assert result.tool_calls == []
+        assert result.error is not None
+        assert "JSON" in result.error
+
+    def test_prose_without_tokens_clean(self):
+        result = extract_tool_calls_from_text("Just reasoning.", format="kimi")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_system_prompt(self):
+        prompt = get_tool_format_system_prompt("kimi", [])
+        assert "<|tool_call_begin|>" in prompt
+
+    def test_auto_detects_kimi(self):
+        text = (
+            "<|tool_call_begin|>functions.Bash:0"
+            '<|tool_call_argument_begin|>{"command": "ls"}<|tool_call_end|>'
+        )
+        result = extract_tool_calls_from_text(text, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+
+    def test_opaque_function_id_kept_verbatim(self):
+        """K2.7 emits opaque ids (text_de60e4f6) - the parser keeps them;
+        the loop's single-tool remap resolves them to the real tool."""
+        text = (
+            "Probing the env first."
+            "<|tool_calls_section_begin|><|tool_call_begin|>text_de60e4f6"
+            '<|tool_call_argument_begin|>{"command": "python explore.py"}'
+            "<|tool_call_end|><|tool_calls_section_end|>"
+        )
+        result = extract_tool_calls_from_text(text, format="kimi")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "text_de60e4f6"
+        assert result.tool_calls[0].input == {"command": "python explore.py"}
+
+
+DS = "｜"
+
+
+class TestDeepSeekFormat:
+    """DeepSeek DSML markup (fullwidth-bar delimited)."""
+
+    def _sample(self, command):
+        return (
+            f"<{DS}DSML{DS}tool_calls>\n"
+            f'<{DS}DSML{DS}invoke name="Bash">\n'
+            f'<{DS}DSML{DS}parameter name="command" string="true">{command}'
+            f"</{DS}DSML{DS}parameter>\n"
+            f"</{DS}DSML{DS}invoke>\n"
+            f"</{DS}DSML{DS}tool_calls>"
+        )
+
+    def test_single_invoke(self):
+        text = self._sample("cat code_library/example_controller.py")
+        result = extract_tool_calls_from_text(text, format="deepseek")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input == {
+            "command": "cat code_library/example_controller.py",
+        }
+        assert "DSML" not in result.cleaned_text
+        assert result.error is None
+
+    def test_multiline_heredoc_value(self):
+        command = "cd /workspace && python << 'EOF'\nprint('hi')\nEOF"
+        text = "Now the controller:\n\n" + self._sample(command)
+        result = extract_tool_calls_from_text(text, format="deepseek")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input["command"] == command
+        assert "Now the controller:" in result.cleaned_text
+
+    def test_prose_without_markup_clean(self):
+        result = extract_tool_calls_from_text("Just reasoning.", format="deepseek")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_malformed_markup_flagged(self):
+        text = f"<{DS}DSML{DS}invoke name=Bash>broken"
+        result = extract_tool_calls_from_text(text, format="deepseek")
+        assert result.tool_calls == []
+        assert result.error is not None
+
+    def test_system_prompt(self):
+        prompt = get_tool_format_system_prompt("deepseek", [])
+        assert f"<{DS}DSML{DS}invoke" in prompt
+
+    def test_auto_detects_deepseek(self):
+        text = self._sample("ls")
+        result = extract_tool_calls_from_text(text, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+
+
+class TestStopRepair:
+    """Stop sequences strip the closing marker; repair restores it."""
+
+    def test_bash_block_repair_closes_open_fence(self):
+        fmt = get_format("bash_block")
+        repaired = fmt.repair_stop_truncation("Check.\n```bash\nls -la")
+        result = extract_tool_calls_from_text(repaired, format="bash_block")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input == {"command": "ls -la"}
+
+    def test_bash_block_repair_noop_when_complete(self):
+        fmt = get_format("bash_block")
+        text = "```bash\nls\n```"
+        assert fmt.repair_stop_truncation(text) == text
+
+    def test_bash_block_repair_noop_without_fence(self):
+        fmt = get_format("bash_block")
+        assert fmt.repair_stop_truncation("no fence here") == "no fence here"
+
+    def test_glm_repair_closes_tag(self):
+        fmt = get_format("glm")
+        text = "<tool_call>Bash<arg_key>command</arg_key><arg_value>ls</arg_value>"
+        result = extract_tool_calls_from_text(
+            fmt.repair_stop_truncation(text), format="glm",
+        )
+        assert len(result.tool_calls) == 1
+
+    def test_kimi_repair_closes_token(self):
+        fmt = get_format("kimi")
+        text = (
+            "<|tool_call_begin|>functions.Bash:0"
+            '<|tool_call_argument_begin|>{"command": "ls"}'
+        )
+        result = extract_tool_calls_from_text(
+            fmt.repair_stop_truncation(text), format="kimi",
+        )
+        assert len(result.tool_calls) == 1
+
+    def test_auto_repair_chains_and_is_idempotent(self):
+        fmt = get_format("auto")
+        text = "Check.\n```bash\nls -la"
+        repaired = fmt.repair_stop_truncation(fmt.repair_stop_truncation(text))
+        result = extract_tool_calls_from_text(repaired, format="auto")
+        assert len(result.tool_calls) == 1
+
+    def test_all_text_formats_declare_stops_except_meta_json(self):
+        for name in ("bash_block", "hermes", "hermes_xml", "glm", "alan", "kimi", "auto"):
+            assert get_format(name).stop_sequences, name
+        assert get_format("meta_json").stop_sequences == ()
+
+
+class TestAutoFormat:
+    """Auto-detecting format: accept any registered markup."""
+
+    def test_bash_block_detected(self):
+        text = "Listing first.\n```bash\nls -la\n```"
+        result = extract_tool_calls_from_text(text, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input == {"command": "ls -la"}
+
+    def test_hermes_xml_detected(self):
+        # Qwen3-Coder defecting to its trained markup under a bash_block prompt.
+        text = (
+            "<tool_call>\n<function=Bash>\n"
+            "<parameter=command>ls -la</parameter>\n"
+            "</function>\n</tool_call>"
+        )
+        result = extract_tool_calls_from_text(text, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input == {"command": "ls -la"}
+
+    def test_glm_detected(self):
+        text = (
+            "<tool_call>Bash<arg_key>command</arg_key>"
+            "<arg_value>ls -la</arg_value></tool_call>"
+        )
+        result = extract_tool_calls_from_text(text, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input == {"command": "ls -la"}
+
+    def test_hermes_json_detected(self):
+        text = '<tool_call>\n{"name": "Bash", "arguments": {"command": "ls"}}\n</tool_call>'
+        result = extract_tool_calls_from_text(text, format="auto")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+
+    def test_plain_text_no_calls_no_error(self):
+        result = extract_tool_calls_from_text("Just thinking aloud.", format="auto")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_malformed_gets_generic_error(self):
+        result = extract_tool_calls_from_text(
+            "<tool_call>total garbage</tool_call>", format="auto",
+        )
+        assert result.tool_calls == []
+        assert result.error is not None
+        assert "Preferred format" in result.error
+
+    def test_thinking_source_excludes_bash_block(self):
+        fence = "Draft:\n```bash\nrm -rf x\n```"
+        result = extract_tool_calls_from_text(fence, format="auto", source="thinking")
+        assert result.tool_calls == []
+        # Structured markup still parses from thinking.
+        xml = (
+            "<tool_call>\n<function=Bash>\n"
+            "<parameter=command>ls</parameter>\n</function>\n</tool_call>"
+        )
+        result = extract_tool_calls_from_text(xml, format="auto", source="thinking")
+        assert len(result.tool_calls) == 1
+
+    def test_system_prompt_teaches_bash_block(self):
+        prompt = get_tool_format_system_prompt("auto", [])
+        assert "```bash" in prompt
+
 
 class TestThinkingStrip:
     """The </think> tag should be stripped from cleaned text."""
@@ -388,6 +640,8 @@ class TestFormatRegistry:
         assert "glm" in FORMATS
         assert "alan" in FORMATS
         assert "bash_block" in FORMATS
+        assert "kimi" in FORMATS
+        assert "auto" in FORMATS
 
     def test_get_format_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown"):

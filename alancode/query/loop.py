@@ -458,8 +458,14 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # Don't pass tool schemas to the backend when using text-based
         # tool calling — tools are communicated via the system prompt instead.
+        # Text formats also define stop sequences that end generation the
+        # moment a tool call is complete (one call per turn).
+        format_stop_sequences: list[str] | None = None
         if params.settings.get("tool_call_format"):
             tool_schemas = []
+            format_stop_sequences = list(
+                get_format(params.settings["tool_call_format"]).stop_sequences
+            ) or None
         else:
             tool_schemas = [
                 ToolSchema(**s) for s in tools_to_schemas(effective_tools)
@@ -488,6 +494,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 tool_schemas,
                 model=params.model,
                 max_tokens=max_tokens,
+                stop_sequences=format_stop_sequences,
                 system_static_boundary=params.system_static_boundary,
             ):
                 # --- StreamMessageStart ---
@@ -702,6 +709,14 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 for b in assistant_content
                 if isinstance(b, ThinkingBlock)
             )
+            # A stop sequence strips the call's closing marker; restore it.
+            # Never on max_tokens: a length-truncated call must not parse.
+            fmt_obj = get_format(tool_call_format)
+            if fmt_obj.stop_sequences and stop_reason != "max_tokens":
+                if full_text:
+                    full_text = fmt_obj.repair_stop_truncation(full_text)
+                if full_thinking:
+                    full_thinking = fmt_obj.repair_stop_truncation(full_thinking)
             parse_source: str | None = None
             parse_result = None
             if full_text:
@@ -724,7 +739,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 )
             ):
                 thinking_result = extract_tool_calls_from_text(
-                    full_thinking, format=tool_call_format,
+                    full_thinking, format=tool_call_format, source="thinking",
                 )
                 if thinking_result.tool_calls or thinking_result.error:
                     parse_source = "thinking"
@@ -771,6 +786,21 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                             new_content.append(
                                 TextBlock(text=parse_result.cleaned_text)
                             )
+                    # A single-tool agent never drops a call over a garbled
+                    # tool name - Kimi K2 emits opaque function-ids
+                    # (text_de60e4f6) instead of the tool's name.
+                    if len(effective_tools) == 1:
+                        only_tool = effective_tools[0]
+                        known_names = {
+                            only_tool.name, *getattr(only_tool, "aliases", []),
+                        }
+                        for pc in parse_result.tool_calls:
+                            if pc.name not in known_names:
+                                logger.info(
+                                    "Remapping unknown tool %r to the only "
+                                    "registered tool %r", pc.name, only_tool.name,
+                                )
+                                pc.name = only_tool.name
                     for pc in parse_result.tool_calls:
                         call_id = f"text_{uuid.uuid4().hex[:8]}"
                         block = ToolUseBlock(

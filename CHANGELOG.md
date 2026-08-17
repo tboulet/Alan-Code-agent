@@ -1,5 +1,10 @@
 # Changelog
 
+- **2026-08-17 - Alan Code 1.3.4**
+  - Added `tool_call_format=auto`: strict-parses every registered text format and uses whichever yields calls, so models that ignore the taught convention and emit their trained markup still execute (teaches bash_block, accepts any).
+  - Added two native formats observed live on the MiniGrid bench: `kimi` (K2-family special tokens, opaque function-ids supported) and `deepseek` (DSML `invoke`/`parameter` markup, fullwidth-bar delimited).
+  - Text formats now define per-format stop sequences that end generation the moment a tool call is complete (one call per turn, no post-call rambling), with stop-stripped closing markers repaired before parsing - never on a `max_tokens` truncation, which still goes to the length recovery.
+  - The bash_block opening fence may be glued to prose (GLM-5.2 style) while still requiring an immediate newline; single-tool agents remap calls with garbled/opaque tool names to the only registered tool instead of dropping them.
 - **2026-08-17 - Alan Code 1.3.3**
   - Added `tool_call_format=bash_block`: the MSWEA convention where the model writes one fenced ```bash code block and its content runs as the `Bash` tool call. First block only (extras ignored with a debug log), no block means a normal no-tool turn, and an unclosed fence is never executed - it defers to the length-truncation recovery. Fenced blocks in reasoning content are treated as drafts, never actions (new per-format `parse_thinking` capability).
 - **2026-08-17 - Alan Code 1.3.2**
