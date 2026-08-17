@@ -220,6 +220,71 @@ class TestAlanFormat:
         assert "Let me check" in result.cleaned_text
 
 
+class TestBashBlockFormat:
+    """SWE-agent style fenced ```bash block format."""
+
+    def test_single_block(self):
+        text = "I will list the files first.\n\n```bash\nls -la /tmp\n```"
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].name == "Bash"
+        assert result.tool_calls[0].input == {"command": "ls -la /tmp"}
+        assert "```bash" not in result.cleaned_text
+        assert "I will list the files first." in result.cleaned_text
+        assert result.error is None
+
+    def test_multiline_heredoc_preserved(self):
+        body = "cat > hello.py <<'EOF'\nprint(\"hi\")\nEOF\npython3 hello.py"
+        text = f"Writing the file now.\n```bash\n{body}\n```"
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input["command"] == body
+
+    def test_multiple_blocks_first_only(self):
+        text = (
+            "First I check, then I run.\n"
+            "```bash\necho one\n```\n"
+            "and then:\n"
+            "```bash\necho two\n```"
+        )
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0].input == {"command": "echo one"}
+        assert result.error is None
+
+    def test_no_block_is_normal_text(self):
+        text = "Let me think about the layout of the grid first."
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert result.tool_calls == []
+        assert result.error is None
+        assert result.cleaned_text == text
+
+    def test_unclosed_block_not_executed(self):
+        """A block cut before its closing fence (mid-stream chunk or a
+        length-truncated output) must NOT parse as a call - the loop's
+        truncation recovery handles the truncated case."""
+        text = "Writing:\n```bash\ncat > f <<'EOF'\nif ("
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_other_language_fences_ignored(self):
+        text = "```python\nprint('hi')\n```\nand\n```sh\nls\n```"
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_inline_fence_mention_not_matched(self):
+        text = "Use a ```bash block to act, closing it with ``` as usual."
+        result = extract_tool_calls_from_text(text, format="bash_block")
+        assert result.tool_calls == []
+        assert result.error is None
+
+    def test_parse_thinking_disabled(self):
+        assert get_format("bash_block").parse_thinking is False
+        assert get_format("hermes").parse_thinking is True
+
+
 class TestThinkingStrip:
     """The </think> tag should be stripped from cleaned text."""
 
@@ -305,6 +370,11 @@ class TestSystemPrompt:
         prompt = get_tool_format_system_prompt("alan", schemas)
         assert "<tool_use>" in prompt
 
+    def test_bash_block_prompt(self):
+        prompt = get_tool_format_system_prompt("bash_block", [])
+        assert "```bash" in prompt
+        assert "ONE" in prompt
+
     def test_unknown_format_raises(self):
         with pytest.raises(ValueError, match="Unknown"):
             get_tool_format_system_prompt("unknown", [])
@@ -317,6 +387,7 @@ class TestFormatRegistry:
         assert "hermes" in FORMATS
         assert "glm" in FORMATS
         assert "alan" in FORMATS
+        assert "bash_block" in FORMATS
 
     def test_get_format_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown"):

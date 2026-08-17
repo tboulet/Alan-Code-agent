@@ -6,8 +6,11 @@ those tool calls from the text and converts them to ToolUseBlock objects.
 
 Supported formats:
 - ``hermes``: ``<tool_call>{"name": "...", "arguments": {...}}</tool_call>``
+- ``hermes_xml``: ``<tool_call><function=N><parameter=K>V</parameter></function></tool_call>``
 - ``glm``: ``<tool_call>Name<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>``
 - ``alan``: ``<tool_use>{"name": "...", "input": {...}}</tool_use>``
+- ``meta_json``: ``{"type": "function", "name": "...", "parameters": {...}}``
+- ``bash_block``: one fenced ```` ```bash ```` code block, run as the Bash tool
 
 Each format is implemented as a ToolCallFormat class with:
 - ``parse(text)`` → extract well-formed tool calls
@@ -60,6 +63,10 @@ class ParseResult:
 
 class ToolCallFormat(ABC):
     """Base class for text-based tool call format parsers."""
+
+    # Whether reasoning content may carry this format's tool calls (some
+    # OpenAI-compatible reasoning models emit their protocol there).
+    parse_thinking: bool = True
 
     @abstractmethod
     def parse(self, text: str) -> list[ParsedToolCall]:
@@ -562,6 +569,76 @@ class MetaJSONFormat(ToolCallFormat):
         )
 
 
+# ── Format: bash_block ───────────────────────────────────────────────────────
+#
+# Mini-SWE-Agent convention: the model writes free-form reasoning
+# followed by ONE fenced ```bash code block, whose content is the Bash tool's
+# command. No structured markup. Only the first block of an answer runs; the
+# teaching prompt says "exactly one block", so extras are model confusion and
+# are ignored. Both fences must sit at line start; an unclosed block (stream
+# still arriving, or output truncated) is NOT a call - the length-truncation
+# recovery handles the truncated case.
+
+
+_BASH_BLOCK_PATTERN = re.compile(
+    r"^```bash[ \t]*\n(.*?)\n```[ \t]*$",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+class BashBlockFormat(ToolCallFormat):
+    """Bash-block format: one fenced ```bash block, run as the Bash tool."""
+
+    # Fenced code in reasoning is a draft, not an action: the convention
+    # puts the executable block in the visible answer only.
+    parse_thinking = False
+
+    def parse(self, text: str) -> list[ParsedToolCall]:
+        matches = list(_BASH_BLOCK_PATTERN.finditer(text))
+        if not matches:
+            return []
+        if len(matches) > 1:
+            logger.debug(
+                "bash_block: ignoring %d extra fenced block(s), running the "
+                "first only", len(matches) - 1,
+            )
+        first = matches[0]
+        return [ParsedToolCall(
+            name="Bash",
+            input={"command": first.group(1)},
+            raw_match=first.group(0),
+        )]
+
+    def detect_malformed(self, text: str) -> bool:
+        # No-block and unclosed-block answers are normal turns (reasoning
+        # only, or truncated output), never a malformed call to retry.
+        return False
+
+    def format_error(self) -> str:
+        return (
+            "No valid bash block found.\n\n"
+            "Write exactly one fenced bash code block; its content is "
+            "executed as a shell command:\n"
+            "```bash\n"
+            "ls -la\n"
+            "```"
+        )
+
+    def system_prompt(self, tool_schemas: list[dict]) -> str:
+        return (
+            "\n\n# Tool Calling\n\n"
+            "You act by writing shell commands. After your reasoning, "
+            "include exactly ONE fenced bash code block; its content is "
+            "executed in the terminal and the output is returned to you:\n"
+            "```bash\n"
+            "ls -la\n"
+            "```\n\n"
+            "Multi-line commands, heredocs and && chains all go inside the "
+            "single block. Only the first block of an answer is executed.\n"
+            "After the block, wait for the result before continuing."
+        )
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 
@@ -571,6 +648,7 @@ FORMATS: dict[str, ToolCallFormat] = {
     "glm": GLMFormat(),
     "alan": AlanFormat(),
     "meta_json": MetaJSONFormat(),
+    "bash_block": BashBlockFormat(),
 }
 
 

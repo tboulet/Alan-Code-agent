@@ -1,5 +1,7 @@
 # Changelog
 
+- **2026-08-17 - Alan Code 1.3.3**
+  - Added `tool_call_format=bash_block`: the MSWEA convention where the model writes one fenced ```bash code block and its content runs as the `Bash` tool call. First block only (extras ignored with a debug log), no block means a normal no-tool turn, and an unclosed fence is never executed - it defers to the length-truncation recovery. Fenced blocks in reasoning content are treated as drafts, never actions (new per-format `parse_thinking` capability).
 - **2026-08-17 - Alan Code 1.3.2**
   - Length-truncated responses now recover even when a tool call was in flight: the suspect calls are never executed (a call cut mid-argument can still parse as complete in text tool formats), each gets a synthesized error `tool_result` so the conversation stays valid for strict servers, and the usual escalation/resume recovery fires.
   - An explicit `max_output_tokens` now acts as a starting budget rather than a recovery ceiling: a truncation escalates once to `escalated_max_tokens` (default 64000, window-clamped) when that is higher. Set `escalated_max_tokens` at or below your pin to keep a hard ceiling.

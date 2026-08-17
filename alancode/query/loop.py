@@ -75,6 +75,7 @@ from alancode.tools.text_tool_parser import (
     MAX_TEXT_TOOL_RETRIES,
     _extract_thinking,
     extract_tool_calls_from_text,
+    get_format,
 )
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
@@ -716,6 +717,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             # content so private reasoning never leaks into the final answer.
             if (
                 full_thinking
+                and get_format(tool_call_format).parse_thinking
                 and (
                     parse_result is None
                     or (not parse_result.tool_calls and not parse_result.error)
