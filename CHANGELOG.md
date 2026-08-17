@@ -1,5 +1,7 @@
 # Changelog
 
+- **2026-08-17 - Alan Code 1.3.6**
+  - A length-truncated response that also pattern-matches a malformed structured tool call now goes to the length recovery (escalate/resume) instead of the format-error retry, which could previously pre-empt it and loop at the same output cap.
 - **2026-08-17 - Alan Code 1.3.5**
   - Added the `minimax` text tool-call format (MiniMax M2-family: a `<minimax:tool_call>` envelope around plain-ASCII `invoke`/`parameter` markup), included in `auto` with its own stop sequence.
 - **2026-08-17 - Alan Code 1.3.4**

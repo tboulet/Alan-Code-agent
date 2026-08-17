@@ -143,6 +143,34 @@ async def test_stop_sequences_sent_and_stop_cut_fence_repaired(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_truncation_trumps_malformed_detection(tmp_path):
+    """A max_tokens-truncated response that also pattern-matches a
+    malformed structured call must go to the length recovery, not the
+    format-error retry."""
+    backend = TextTurnsBackend([
+        (
+            None,
+            "hmm <tool_call>not a call</tool_call> then\n"
+            "```bash\ncat > f <<'EOF'\ntruncat",
+            "max_tokens",
+        ),
+        (None, "recovered"),
+    ])
+    tool = RecordingBashTool()
+    agent = make_agent(tmp_path, backend, tool, tool_call_format="auto")
+
+    events = [event async for event in agent.query_events_async("go")]
+
+    assert backend.calls == 2
+    assert tool.commands == []
+    format_errors = [
+        e for e in events
+        if isinstance(e, UserMessage) and "Preferred format" in str(e.content)
+    ]
+    assert format_errors == []
+
+
+@pytest.mark.asyncio
 async def test_max_tokens_cut_fence_not_repaired(tmp_path):
     """A fence cut by the OUTPUT LIMIT (not a stop sequence) must not be
     repaired into an executable call - truncation recovery handles it."""

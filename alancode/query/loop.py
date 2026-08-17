@@ -819,9 +819,12 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         request_id=request_id,
                     )
 
-                elif parse_result.error:
+                elif parse_result.error and stop_reason != "max_tokens":
                     # Model attempted a tool call but used wrong format.
                     # Feed back the error and retry (up to MAX_TEXT_TOOL_RETRIES).
+                    # Not on a length truncation: a cut-off response can
+                    # pattern-match a malformed call, and the Phase 7 length
+                    # recovery must handle it, not a format-error retry.
                     retry_count = getattr(state, "_text_tool_retries", 0)
                     if retry_count < MAX_TEXT_TOOL_RETRIES:
                         state._text_tool_retries = retry_count + 1  # type: ignore[attr-defined]
