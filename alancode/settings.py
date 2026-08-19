@@ -68,11 +68,13 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "max_compact_ptl_retries": 3,  # Max prompt-too-long retries during compaction summarize
     # Error recovery
     "max_output_tokens_recovery_limit": 3,  # Max multi-turn recovery attempts on output limit hit
+    "empty_response_retries": 2,  # In-send nudges for reasoning-only/empty turns before surfacing (0 = off)
     # Tool execution
     "max_tool_concurrency": 10,  # Max parallel read-only tool executions
     "tool_result_max_chars": "auto",  # Per-result cap (auto: min(10k, 10% of T in chars))
     # Thinking
     "thinking_budget_default": 10_000,  # Default thinking token budget (when model supports it)
+    "persist_thinking": False,  # Re-render past turns' thinking as inline <think> text in API history
     # Memory
     "memory_reminder_threshold": 10,  # Iterations between memory reminders (intensive mode)
     "max_scratchpad_sessions": 5,  # Max scratchpad session dirs to keep
@@ -203,6 +205,7 @@ def _one_of(*vals):
 _is_str = (lambda v: isinstance(v, str), "Must be a string")
 _is_bool = (lambda v: isinstance(v, bool), "Must be a boolean")
 _is_pos_int = (lambda v: isinstance(v, int) and v > 0, "Must be a positive integer")
+_is_nonneg_int = (lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0, "Must be a non-negative integer")
 _is_pos_int_or_none = (lambda v: v is None or (isinstance(v, int) and v > 0), "Must be a positive integer or null")
 
 
@@ -244,9 +247,11 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     ),
     "max_compact_ptl_retries": _is_pos_int,
     "max_output_tokens_recovery_limit": _is_pos_int,
+    "empty_response_retries": _is_nonneg_int,
     "max_tool_concurrency": _is_pos_int,
     "tool_result_max_chars": _is_pos_int_or_auto,
     "thinking_budget_default": _is_pos_int,
+    "persist_thinking": _is_bool,
     "memory_reminder_threshold": _is_pos_int,
     "max_scratchpad_sessions": _is_pos_int,
     "compaction_truncate_enabled": _is_bool,

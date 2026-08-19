@@ -88,6 +88,8 @@ def message_to_anthropic_dict(msg: UserMessage | AssistantMessage) -> dict[str, 
 
 def messages_to_openai_dicts(
     messages: list[UserMessage | AssistantMessage],
+    *,
+    include_thinking: bool = False,
 ) -> list[dict[str, Any]]:
     """Convert a list of messages to OpenAI API dict format.
 
@@ -101,12 +103,16 @@ def messages_to_openai_dicts(
     - User: ``{"role": "user", "content": "text"}``
     - Assistant: ``{"role": "assistant", "content": "text", "tool_calls": [...]}``
     - Tool result: ``{"role": "tool", "tool_call_id": "...", "content": "..."}``
+
+    ``include_thinking`` renders each ThinkingBlock back into the assistant
+    content as inline ``<think>...</think>`` text (the ``persist_thinking``
+    setting), so models whose state lives in their reasoning can re-see it.
     """
     result: list[dict[str, Any]] = []
 
     for msg in messages:
         if isinstance(msg, AssistantMessage):
-            result.extend(_assistant_to_openai(msg))
+            result.extend(_assistant_to_openai(msg, include_thinking=include_thinking))
         elif isinstance(msg, UserMessage):
             result.extend(_user_to_openai(msg))
         else:
@@ -116,7 +122,9 @@ def messages_to_openai_dicts(
     return result
 
 
-def _assistant_to_openai(msg: AssistantMessage) -> list[dict[str, Any]]:
+def _assistant_to_openai(
+    msg: AssistantMessage, *, include_thinking: bool = False,
+) -> list[dict[str, Any]]:
     """Convert an AssistantMessage to OpenAI format.
 
     Splits content into text (``content``) and tool calls (``tool_calls``).
@@ -136,7 +144,10 @@ def _assistant_to_openai(msg: AssistantMessage) -> list[dict[str, Any]]:
                     "arguments": json.dumps(block.input) if isinstance(block.input, dict) else str(block.input),
                 },
             })
-        # ThinkingBlock, RedactedThinkingBlock — not included in OpenAI format
+        elif isinstance(block, ThinkingBlock) and include_thinking and block.thinking:
+            text_parts.append(f"<think>{block.thinking}</think>")
+        # ThinkingBlock (when not persisted), RedactedThinkingBlock - not
+        # included in OpenAI format
 
     d: dict[str, Any] = {
         "role": "assistant",

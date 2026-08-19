@@ -259,6 +259,16 @@ class AlanCodeAgent:
         ``escalated_max_tokens`` setting (default 64000) when that is
         higher. Set ``escalated_max_tokens`` at or below this value to
         keep it a hard ceiling.
+    empty_response_retries : int, optional
+        In-send corrective nudges when a response has reasoning but no
+        visible answer or tool call (default 2, 0 disables). After
+        exhaustion the turn surfaces with ``api_error="empty_response"``
+        (not flagged as an API error - the backend answered fine).
+    persist_thinking : bool, optional
+        Re-render past turns' thinking as inline ``<think>`` text in the
+        API history (default False), so models whose plan lives in their
+        reasoning can re-see it across turns. Reasoning is otherwise
+        stripped from history.
     custom_system_prompt : str, optional
         Replace Alan's normal system prompt.
     append_system_prompt : str, optional
@@ -289,6 +299,8 @@ class AlanCodeAgent:
         permission_mode: str | None = None,
         max_iterations_per_turn: int | None = None,
         max_output_tokens: int | None = None,
+        empty_response_retries: int | None = None,
+        persist_thinking: bool | None = None,
         memory: str | None = None,
         tool_call_format: str | None = None,
         session_id: str | None = None,
@@ -350,6 +362,8 @@ class AlanCodeAgent:
             "permission_mode": permission_mode,
             "max_iterations_per_turn": max_iterations_per_turn,
             "max_output_tokens": max_output_tokens,
+            "empty_response_retries": empty_response_retries,
+            "persist_thinking": persist_thinking,
             "memory": memory,
             "tool_call_format": tool_call_format,
             "custom_system_prompt": custom_system_prompt,

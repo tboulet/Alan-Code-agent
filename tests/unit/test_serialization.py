@@ -309,3 +309,19 @@ class TestOpenAIFormat:
         result = messages_to_openai_dicts([msg])
         assert result[0]["content"] == ""
         assert len(result[0]["tool_calls"]) == 1
+
+    def test_thinking_excluded_from_history_by_default(self):
+        msg = AssistantMessage(content=[
+            ThinkingBlock(thinking="hidden plan"),
+            TextBlock(text="visible answer"),
+        ])
+        result = messages_to_openai_dicts([msg])
+        assert result[0]["content"] == "visible answer"
+
+    def test_include_thinking_renders_inline_think_text(self):
+        msg = AssistantMessage(content=[
+            ThinkingBlock(thinking="hidden plan"),
+            TextBlock(text="visible answer"),
+        ])
+        result = messages_to_openai_dicts([msg], include_thinking=True)
+        assert result[0]["content"] == "<think>hidden plan</think>\nvisible answer"

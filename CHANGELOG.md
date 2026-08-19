@@ -1,5 +1,11 @@
 # Changelog
 
+- **2026-08-19 - Alan Code 1.3.11**
+  - New `persist_thinking` setting/constructor param (default off): past turns' thinking is re-rendered as inline `<think>...</think>` text in the API history, so models whose plan lives in their reasoning can re-see it across turns. History rendering only - extraction, empty-turn detection, and drafts-never-execute semantics are unchanged. Note: compaction token estimates do not yet count persisted thinking.
+- **2026-08-19 - Alan Code 1.3.10**
+  - A response with reasoning but no visible answer or tool call now gets an in-send corrective nudge and retry (new `empty_response_retries` setting/constructor param, default 2, 0 disables) before being surfaced. Reasoning-heavy models that ended a turn without acting were previously killed by callers as backend failures.
+  - After nudge exhaustion the turn surfaces with `api_error="empty_response"` but is no longer flagged `is_api_error_message`: the backend answered fine, the model just never acted. Callers that treated `empty_response` as an API error should route on `api_error` instead.
+  - The empty-turn warning now logs `stop_reason`, thinking length, thinking source (server-split vs inline `<think>`), and whether the think tag was ever closed, to make over-thinking cases self-diagnosing.
 - **2026-08-17 - Alan Code 1.3.9**
   - Added the `kimi_k3` text tool-call format (Kimi K3 structured tokens: `<|open|>call tool="..."<|sep|>...<|close|>call`, raw string values, lowercase tool names resolved by the single-tool remap), included in `auto` with its own stop sequence. Requires the model served raw (no server-side tool grammar).
 - **2026-08-17 - Alan Code 1.3.8**

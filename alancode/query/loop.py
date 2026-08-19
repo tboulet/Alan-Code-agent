@@ -87,6 +87,14 @@ logger = logging.getLogger(__name__)
 _hard_truncate_fallback = hard_truncate_messages
 MAX_NATIVE_TOOL_RETRIES = 2
 
+EMPTY_RESPONSE_NUDGE = (
+    "Your previous response contained no visible answer or tool call - the "
+    "output was spent entirely on reasoning, and reasoning is NOT preserved "
+    "between turns. Reply now with (1) a brief visible summary of your "
+    "current plan and state, so it persists in the conversation, then (2) "
+    "the answer or tool call."
+)
+
 
 # ---------------------------------------------------------------------------
 # System reminders — injected between iterations as <system-reminder> messages
@@ -442,7 +450,10 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # -- Phase 4: API call (streaming) -------------------------------
         api_messages = normalize_messages_for_api(messages_for_query)
-        api_messages_dicts = messages_to_openai_dicts(api_messages)
+        api_messages_dicts = messages_to_openai_dicts(
+            api_messages,
+            include_thinking=bool(params.settings.get("persist_thinking")),
+        )
 
         # Notify LLM perspective observers (GUI)
         if params.llm_perspective_callback:
@@ -667,11 +678,19 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # Some models (e.g. Qwen3 thinking variants via Ollama/LiteLLM) embed
         # <think>...</think> in the text content instead of using separate
         # thinking events. Extract it into a ThinkingBlock.
+        thinking_source = (
+            "server"
+            if any(isinstance(b, ThinkingBlock) for b in assistant_content)
+            else "none"
+        )
+        think_close_seen: bool | None = None
         if not any(isinstance(b, ThinkingBlock) for b in assistant_content):
             full_text_for_thinking = "".join(
                 b.text for b in assistant_content if isinstance(b, TextBlock)
             )
             if "<think>" in full_text_for_thinking or "</think>" in full_text_for_thinking:
+                thinking_source = "inline"
+                think_close_seen = "</think>" in full_text_for_thinking
                 thinking_text, remaining_text = _extract_thinking(full_text_for_thinking)
                 if thinking_text:
                     new_blocks: list[AssistantContentBlock] = [
@@ -860,6 +879,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         if not isinstance(block, TextBlock)
                     ]
                     if parse_result.thinking:
+                        thinking_source = "inline"
                         rebuilt_content.append(ThinkingBlock(thinking=parse_result.thinking))
                     if parse_result.cleaned_text:
                         rebuilt_content.append(TextBlock(text=parse_result.cleaned_text))
@@ -885,8 +905,32 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         if not has_visible_text and not tool_use_blocks:
             detail = "reasoning but " if has_thinking else ""
             logger.warning(
-                "Model returned %sno visible answer or tool call", detail
+                "Model returned %sno visible answer or tool call "
+                "(stop_reason=%s, thinking_chars=%d, thinking_source=%s, "
+                "think_close_seen=%s)",
+                detail, stop_reason,
+                sum(
+                    len(b.thinking)
+                    for b in assistant_msg.content
+                    if isinstance(b, ThinkingBlock)
+                ),
+                thinking_source, think_close_seen,
             )
+            # Nudge and retry in-send before surfacing. Not on a length
+            # truncation: the Phase 7 length recovery owns that case.
+            empty_retry_limit = params.settings.get("empty_response_retries") or 0
+            empty_retry_count = getattr(state, "_empty_response_retries", 0)
+            if stop_reason != "max_tokens" and empty_retry_count < empty_retry_limit:
+                state._empty_response_retries = empty_retry_count + 1  # type: ignore[attr-defined]
+                yield assistant_msg
+                nudge_msg = create_user_message(
+                    EMPTY_RESPONSE_NUDGE,
+                    hide_in_ui=False,
+                )
+                yield nudge_msg
+                state.messages = list(messages_for_query) + [assistant_msg, nudge_msg]
+                state.transition = "empty_response_retry"
+                continue
             assistant_msg.content.append(
                 TextBlock(
                     text=(
@@ -894,7 +938,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     )
                 )
             )
-            assistant_msg.is_api_error_message = True
+            # Distinct signal, deliberately NOT is_api_error_message: the
+            # backend answered fine; the model just never acted. api_error
+            # carries the machine-readable marker for callers to route on.
             assistant_msg.api_error = "empty_response"
 
         # Yield the (possibly rebuilt) assistant message
