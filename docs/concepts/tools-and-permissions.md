@@ -34,12 +34,12 @@ The session-wide stance on when to ask you before running a tool:
 | Mode | read | write | exec |
 |---|---|---|---|
 | **`safe`** | ✅ auto | 🟡 ask | 🟡 ask |
-| **`edit`** *(default)* | ✅ auto | 🟡 ask | 🟡 ask |
+| **`edit`** *(default)* | ✅ auto | ✅ auto | 🟡 ask |
 | **`yolo`** | ✅ auto | ✅ auto | ✅ auto |
 
 Set per-session with `--permission-mode` or at runtime with `/settings permission_mode=yolo`.
 
-> **Note**: The difference between `safe` and `edit` mainly matters for **hooks** and **allow rules** — both modes ask for write/exec by default, but `safe` is stricter about rules that downgrade to auto-allow. In practice most users pick `edit` for interactive work and `yolo` for trusted autonomous runs like the [auto-fix loop example](../../examples/example_2_auto_fix_loop/).
+> **Important**: default `edit` mode lets `Edit`, `Write`, and other tools classified as `write` run without a prompt; only `exec` tools such as `Bash` ask. Use `safe` when every file mutation must be approved. Explicit deny/ask rules still take precedence over the mode.
 
 ## The permission prompt
 
@@ -58,7 +58,7 @@ Your choice: _
 
 - **Allow** — runs this one call.
 - **Deny** — the tool is blocked; the model gets a "Permission denied" result and can adapt (e.g. ask you why).
-- **Allow always** — only shown for Bash. Extracts the command's first word (`git`, `npm`, `pytest`...) and records a session-scoped rule so future `git *` calls run without asking. Persisted in `.alan/allow_rules.json` so it also applies to future sessions in this project.
+- **Allow always** - only shown for Bash. Extracts the command's first word (`git`, `npm`, `pytest`...) and records a project-scoped rule so future `git *` calls run without asking. It is persisted in `.alan/allow_rules.json` and applies to later sessions in this project.
 - **Type your own answer** — your text is fed back to the model as the tool result. Useful for "deny, and here's why" without a menu option.
 
 Ctrl+C at the prompt cleanly aborts the turn.
@@ -102,7 +102,7 @@ See [guides/hooks.md](../guides/hooks.md) for config and worked examples.
 3. For each block, in parallel (for read-only tools) or serially (for writes):
    - `tool.validate_input(args, ctx)` — structural check.
    - Pre-tool-use hook fires (if configured).
-   - Permission pipeline: allow-rule? deny-rule? mode-auto? else ask the user.
+   - Permission pipeline: deny rule → ask rule → mode auto-allow → explicit allow rule → ask the user.
    - `tool.call(args, ctx)` — the actual work.
    - Post-tool-use hook fires.
 4. Each tool's `ToolResult.data` becomes the content of a `tool_result` block in a `UserMessage`.

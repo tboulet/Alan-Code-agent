@@ -222,7 +222,7 @@ schemas = tools_to_schemas(ALL_BUILTIN_TOOLS)
 ## How tools are exposed to the model
 
 - **Native tool-use models** (Anthropic, OpenAI, Gemini, most mainstream): schemas passed as the `tools=[...]` API parameter.
-- **Text-based tool-use models** (GLM, Hermes fine-tunes): the schema list is rendered into the system prompt. Format depends on `tool_call_format` setting (`hermes`, `glm`, `alan`). See `alancode/tools/text_tool_parser.py`.
+- **Text-based tool-use models** (local/reasoning models without reliable native calls): the schema list is rendered into the system prompt. The registered `tool_call_format` values are `hermes`, `hermes_xml`, `glm`, `alan`, `meta_json`, `bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, and `auto`. See `alancode/tools/text_tool_parser.py`.
 
 ## Controlling the tool set from Python
 

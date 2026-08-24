@@ -1,6 +1,6 @@
 # Messages and the API payload
 
-How Alan's internal `agent._messages` list becomes the bytes on the wire. This is where the mental model "what the user saw" diverges from "what the model saw".
+How Alan's internal `agent._messages` list becomes a backend request. This is where the mental model "what the user saw" diverges from "what Alan handed to the backend"; provider SDKs still perform their own final shaping.
 
 ## Pipeline
 
@@ -50,11 +50,9 @@ Purely informational messages used for UI progress updates. Never sent.
 
 ### 3b. Drop messages with `hide_in_api=True`
 
-These live in `agent._messages` for UI replay but are stripped before sending. Examples:
+These are virtual UI events and are stripped before sending. The concrete case today is the streamed `AssistantMessage` text/thinking delta; the durable assembled assistant message is sent instead. The agent normally does not append those deltas to `_messages`, but normalization remains defensive if a caller supplies them.
 
-- `<system-reminder>` with date/time (injected each interactive turn; omitted with `programmatic=True`).
-- `<system-reminder>` about model / backend / memory-mode changes.
-- Virtual "resume directly" recovery prompts.
+Do not confuse this with `hide_in_ui=True`: date/time reminders, memory reminders, and "Resume directly" recovery prompts are hidden from the chat panel precisely because they are model-facing, and they are sent to the API.
 
 ### 3c. Drop SystemMessages
 
@@ -87,12 +85,16 @@ Without this pass, the API 400's with "tool_use_id does not match any tool_use b
 ```json
 [
   {"role": "user", "content": "..."},
-  {"role": "assistant", "content": [{"type": "text", "text": "..."}, {"type": "tool_use", "id": "...", ...}]},
-  {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "...", "content": "..."}]}
+  {
+    "role": "assistant",
+    "content": "I will inspect it.",
+    "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "Read", "arguments": "{...}"}}]
+  },
+  {"role": "tool", "tool_call_id": "call_1", "content": "..."}
 ]
 ```
 
-Content is a string when simple, a list of blocks when there are tool calls, images, or thinking blocks.
+Assistant text is a string and structured calls live in `tool_calls`; each tool result becomes its own `role="tool"` message. The current universal serializer stringifies `ImageBlock` objects instead of producing native OpenAI image input. Stored reasoning is omitted by default or rendered inline as `<think>...</think>` text when `persist_thinking=True`.
 
 ## Step 5 — Backend envelope
 
@@ -127,11 +129,11 @@ Content is a string when simple, a list of blocks when there are tool calls, ima
 | `ProgressMessage` (compaction started) | ✅ as informational line | ❌ |
 | `SystemMessage(COMPACT_BOUNDARY)` | ✅ as subtle marker | ❌ (filtered at step 3c) |
 | `AttachmentMessage(max_iterations_per_turn_reached)` | depends on UI | ✅ (converted to UserMessage) |
-| Layer-B-cleared tool results | ✅ (original until next send) | ❌ (sent as `[cleared to free context]`) |
+| Layer-B-cleared tool results | ✅ (original until next send) | placeholder only; original content omitted |
 
 ## Debugging — the LLM Perspective panel
 
-The GUI's LLM Perspective panel shows the serialized messages (the output of step 4) along with the system prompt. This is the authoritative view of "what the model actually saw for this turn".
+The GUI's LLM Perspective panel shows the serialized messages (the output of step 4) along with the system-prompt sections. It is authoritative for Alan's normalized pre-backend conversation, not for bytes on the wire: it omits tool schemas, max tokens, stops, cache markers, and backend/provider-specific reshaping.
 
 From Python, the same data is available via `llm_perspective_callback`:
 
@@ -143,7 +145,7 @@ agent = AlanCodeAgent(...)
 agent._llm_perspective_callback = on_perspective
 ```
 
-Called before each API call.
+Called before each main-model API call. This underscored callback is an internal GUI hook, not part of the stable public constructor API.
 
 ## Related
 

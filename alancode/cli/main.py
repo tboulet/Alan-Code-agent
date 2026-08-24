@@ -32,12 +32,35 @@ from alancode.session.session import (
 from alancode.__version__ import __version__
 from alancode.settings import (
     SETTINGS_DEFAULTS,
+    SUPPORTED_TOOL_CALL_FORMATS,
     coerce_value,
     get_settings_path,
     load_settings,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _positive_int(raw: str) -> int:
+    """Argparse converter for strictly positive integer settings."""
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return value
+
+
+def _nonnegative_int(raw: str) -> int:
+    """Argparse converter for integer settings where zero disables a feature."""
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a non-negative integer") from exc
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return value
 
 
 def main() -> None:
@@ -70,7 +93,7 @@ def main() -> None:
     parser.add_argument("--base-url", default=None, help="API base URL (for local servers: http://localhost:8000/v1)")
     parser.add_argument(
         "--request-timeout",
-        type=int,
+        type=_positive_int,
         default=None,
         metavar="SECONDS",
         help="Model request timeout in seconds (custom endpoints default to 3600)",
@@ -79,22 +102,51 @@ def main() -> None:
         "--context-window",
         "--cw",
         dest="context_window",
-        type=int,
+        type=_positive_int,
         default=None,
         metavar="TOKENS",
         help="Override the detected model context window",
     )
-    parser.add_argument("--tool-call-format", default=None,
-                        choices=["hermes", "hermes_xml", "glm", "alan", "meta_json"],
-                        help="Text-based tool call format for models without native tool calling")
+    parser.add_argument(
+        "--tool-call-format",
+        default=None,
+        choices=SUPPORTED_TOOL_CALL_FORMATS,
+        help="Text-based tool call format for models without native tool calling",
+    )
     parser.add_argument("--permission-mode", default=None, choices=["yolo", "edit", "safe"])
     parser.add_argument(
         "--max-iterations-per-turn",
-        type=int,
+        type=_positive_int,
         default=None,
-        help="Max API calls (iterations) per user message before the agent stops",
+        help="Max completed tool-use cycles per user message before the agent stops",
     )
-    parser.add_argument("--max-output-tokens", type=int, default=None)
+    parser.add_argument(
+        "--max-output-tokens",
+        type=_positive_int,
+        default=None,
+        help=(
+            "Starting output budget; truncated replies may retry at "
+            "--escalated-max-tokens"
+        ),
+    )
+    parser.add_argument(
+        "--escalated-max-tokens",
+        type=_positive_int,
+        default=None,
+        help="Retry budget after an output-limit truncation",
+    )
+    parser.add_argument(
+        "--empty-response-retries",
+        type=_nonnegative_int,
+        default=None,
+        help="Retries after an empty or reasoning-only response with no visible action",
+    )
+    parser.add_argument(
+        "--persist-thinking",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Re-inject prior reasoning into later model requests",
+    )
     parser.add_argument("--memory", default=None, choices=["on", "off", "intensive"])
     parser.add_argument("--verbose", default=None, action="store_true")
 

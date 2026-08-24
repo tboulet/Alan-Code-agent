@@ -3,6 +3,7 @@
 import pytest
 
 from alancode.agent import AlanCodeAgent
+from alancode.compact.compact_auto import compaction_auto
 from alancode.backends.base import (
     LLMBackend,
     ModelInfo,
@@ -12,6 +13,7 @@ from alancode.backends.base import (
     StreamTextDelta,
     StreamThinkingDelta,
 )
+from alancode.messages.types import AssistantMessage, TextBlock, ThinkingBlock
 
 
 class RecordingBackend(LLMBackend):
@@ -73,3 +75,47 @@ async def test_persist_thinking_reinjects_inline_think_text(tmp_path):
     assert "<think>my hidden plan</think>" in history
     assert "Working on it." in history
     await agent.close()
+
+
+@pytest.mark.asyncio
+async def test_persist_thinking_reaches_compaction_summarizer():
+    """Layer-C compaction must not erase explicitly persisted reasoning."""
+    backend = RecordingBackend()
+    messages = [
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="reasoning that must survive"),
+                TextBlock(text="visible progress"),
+            ]
+        )
+    ]
+
+    result = await compaction_auto(
+        messages,
+        backend,
+        settings={"persist_thinking": True},
+    )
+
+    assert result is not None
+    history = "\n".join(_assistant_contents(backend.calls[0]))
+    assert "<think>reasoning that must survive</think>" in history
+
+
+@pytest.mark.asyncio
+async def test_default_compaction_omits_thinking():
+    backend = RecordingBackend()
+    messages = [
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="private reasoning"),
+                TextBlock(text="visible progress"),
+            ]
+        )
+    ]
+
+    result = await compaction_auto(messages, backend, settings={})
+
+    assert result is not None
+    history = "\n".join(_assistant_contents(backend.calls[0]))
+    assert "private reasoning" not in history
+    assert "visible progress" in history

@@ -3,6 +3,8 @@
 import os
 import tempfile
 
+import pytest
+
 
 from alancode.settings import (
     SETTINGS_DEFAULTS,
@@ -26,6 +28,28 @@ class TestDefaults:
 
     def test_default_permission_mode_is_edit(self):
         assert SETTINGS_DEFAULTS["permission_mode"] == "edit"
+
+    @pytest.mark.parametrize(
+        ("kwargs", "setting"),
+        [
+            ({"escalated_max_tokens": 0}, "escalated_max_tokens"),
+            ({"empty_response_retries": -1}, "empty_response_retries"),
+            ({"persist_thinking": "yes"}, "persist_thinking"),
+            ({"verbose": "yes"}, "verbose"),
+        ],
+    )
+    def test_constructor_rejects_invalid_declared_settings(
+        self, tmp_path, kwargs, setting,
+    ):
+        from alancode.agent import AlanCodeAgent
+        from alancode.backends.scripted_backend import ScriptedBackend
+
+        with pytest.raises(ValueError, match=setting):
+            AlanCodeAgent(
+                backend=ScriptedBackend(),
+                cwd=str(tmp_path),
+                **kwargs,
+            )
 
     def test_default_tool_call_format_is_none(self):
         assert SETTINGS_DEFAULTS["tool_call_format"] is None
@@ -154,6 +178,41 @@ class TestUpdateSessionSettingRejectsRestartRequired:
         error = agent.update_session_setting("permission_mode", "safe")
         assert error is None
         assert agent._permission_mode == "safe"
+        assert agent._permission_context.mode.value == "safe"
+
+    def test_reject_null_permission_mode_without_mutation(self, tmp_path):
+        from alancode.agent import AlanCodeAgent
+        from alancode.backends.scripted_backend import ScriptedBackend
+
+        agent = AlanCodeAgent(
+            backend=ScriptedBackend(),
+            cwd=str(tmp_path),
+            permission_mode="safe",
+        )
+
+        error = agent.update_session_setting("permission_mode", None)
+
+        assert error is not None
+        assert agent._settings["permission_mode"] == "safe"
+        assert agent._permission_mode == "safe"
+        assert agent._permission_context.mode.value == "safe"
+
+    def test_explicit_false_overrides_persisted_verbose(self, tmp_path):
+        from alancode.agent import AlanCodeAgent
+        from alancode.backends.scripted_backend import ScriptedBackend
+
+        settings = dict(SETTINGS_DEFAULTS)
+        settings["verbose"] = True
+        save_settings(settings, str(tmp_path))
+
+        agent = AlanCodeAgent(
+            backend=ScriptedBackend(),
+            cwd=str(tmp_path),
+            verbose=False,
+        )
+
+        assert agent._settings["verbose"] is False
+        assert agent._verbose is False
 
 
 class TestUpdateProjectSetting:

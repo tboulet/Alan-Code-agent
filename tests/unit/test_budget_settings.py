@@ -1,5 +1,7 @@
 """Tests for change-set 6: liveness fallback helper + budget settings surface."""
 
+import json
+
 from alancode.messages.factory import (
     create_compact_boundary_message,
     create_tool_result_message,
@@ -10,8 +12,8 @@ from alancode.query.loop import _hard_truncate_fallback
 from alancode.settings import (
     SETTINGS_DEFAULTS,
     _DEPRECATED_KEYS,
+    get_settings_path,
     load_settings,
-    save_settings,
     validate_setting,
 )
 
@@ -134,12 +136,12 @@ class TestBudgetSettingsSurface:
 
     def test_load_strips_deprecated_keys(self, tmp_path):
         settings = dict(SETTINGS_DEFAULTS)
-        settings["blocking_limit_buffer_tokens"] = 3_000
-        settings["compact_clear_keep_recent"] = 10
-        save_settings(settings, str(tmp_path))
+        settings.update(dict.fromkeys(_DEPRECATED_KEYS, 10))
+        path = get_settings_path(str(tmp_path))
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(settings))
 
         loaded = load_settings(str(tmp_path))
-        assert "blocking_limit_buffer_tokens" not in loaded
-        assert "compact_clear_keep_recent" not in loaded
+        assert _DEPRECATED_KEYS.isdisjoint(loaded)
         # The rest survives
         assert loaded["compaction_threshold_percent"] == "auto"

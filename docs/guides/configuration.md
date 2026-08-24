@@ -41,7 +41,8 @@ You don't edit these manually — they're managed by the session system.
 alancode --model gpt-4o --permission-mode yolo
 ```
 
-Or in Python:
+Or in Python (declared setting parameters are validated before they override
+project/session values):
 
 ```python
 AlanCodeAgent(
@@ -62,7 +63,7 @@ Three ways:
 > /settings permission_mode=yolo
 ```
 
-Updates the session's effective setting and persists it to the session snapshot. Takes effect immediately. Backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`) recreate the underlying `LLMBackend`; creation is transactional, so a failure keeps the old backend and settings. Changing `model` also re-infers the backend (bare `claude-*` → `anthropic-native`, anything else → `auto`).
+Updates the session's effective setting and persists it to the session snapshot. Takes effect immediately. Backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`, `context_window`) recreate the underlying `LLMBackend`; creation is transactional, so a failure keeps the old backend and settings. Changing `model` also re-infers the backend (bare `claude-*` → `anthropic-native`, anything else → `auto`).
 
 **Edit the project file**:
 ```
@@ -71,7 +72,9 @@ Updates the session's effective setting and persists it to the session snapshot.
 
 Writes to `.alan/settings.json`. Does NOT affect the current session — only future sessions pick this up. Use when you want to change the default for this project.
 
-**Direct file edit**: open `.alan/settings.json` in an editor. Same effect as `/settings-project`.
+**Direct file edit**: open `.alan/settings.json` in an editor. It changes the
+same future-session file but bypasses `/settings-project`'s update-time value
+validation.
 
 ## Every setting key
 
@@ -86,7 +89,7 @@ Highlights:
 | `request_timeout` | `"auto"` | SDK default, or 3,600 seconds for a custom endpoint |
 | `permission_mode` | `edit` | `yolo`, `edit`, `safe` |
 | `memory` | `off` | `off`, `on`, `intensive` |
-| `max_iterations_per_turn` | `None` | Cap API calls per user message |
+| `max_iterations_per_turn` | `None` | Cap completed model→tool cycles per user message |
 | `context_window` | `"auto"` | Resolve from model/server/probe; set an integer to override |
 | `compaction_threshold_percent` | `"auto"` (80) | Layer C threshold as a percentage of usable input space |
 | `tool_result_max_chars` | `"auto"` | Context-scaled per-result cap before Layer A truncation |

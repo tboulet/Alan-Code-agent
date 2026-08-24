@@ -58,10 +58,10 @@ user types "fix this bug"
      phase 1.5: inject date/time system-reminder
      phase 2: compaction pre-check (truncate → clear → auto)
      phase 3: blocking-limit check and deterministic fallback if needed
-     phase 4: backend.stream() — streams response
+     phase 4: backend.stream() - stream response, then account usage
      phase 5: collect content, parse reasoning/text tool calls, build AssistantMessage
-     phase 6: yield AssistantMessage to caller
-     phase 7: abort check
+     phase 6: yield AssistantMessage, then check abort when the caller advances
+     phase 7: output truncation recovery or tool-free completion
      phase 8: execute tools (orchestration.py runs them concurrent/serial)
              for each tool:
                  validate → pre-hook → permission pipeline → tool.call → post-hook
@@ -105,7 +105,7 @@ user types "fix this bug"
 - `execution.py` — `run_tool_use` — validate + permission + call + hooks.
 - `orchestration.py` — batch tool calls (concurrent for reads, serial for writes).
 - `builtin/*.py` — built-in tool implementations.
-- `text_tool_parser.py` — hermes/hermes_xml/glm/alan/meta_json formats for non-native models.
+- `text_tool_parser.py` - registry and strict parsers for non-native text tool-call formats.
 
 ### `alancode.messages`
 - `types.py` — all message dataclasses (UserMessage, AssistantMessage, blocks).

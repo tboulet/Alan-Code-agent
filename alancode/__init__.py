@@ -14,12 +14,12 @@ model goes through LiteLLM. Pass ``backend="anthropic-native" | "auto" |
 "scripted"`` to override, or an ``LLMBackend`` instance for custom
 transports.
 
-Streaming::
+Buffered events::
 
     for event in agent.query_events("Fix the bug"):
         print(event)
 
-Async::
+Live async streaming::
 
     async for event in agent.query_events_async("Fix the bug"):
         ...

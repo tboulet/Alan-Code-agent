@@ -1,6 +1,12 @@
 # System prompt assembly
 
-The system prompt Alan sends in every API call is assembled by `alancode/prompt/system_prompt.py::get_system_prompt`. It's built as a list of sections; the backend decides how to serialize them (Anthropic: separate cache blocks; OpenAI-compatible: joined with `\n\n`).
+The system prompt Alan sends in every main agent-model call is assembled by
+`alancode/prompt/system_prompt.py::get_system_prompt`. It is built once per
+public user turn and reused across that turn's loop rounds. Compaction
+summarization and context-window probes make separate calls with different
+prompts. The prompt is a list of sections; the backend decides how to serialize
+them (Anthropic: separate cache blocks; OpenAI-compatible: joined with
+`\n\n`).
 
 ## Assembly order
 
@@ -140,13 +146,18 @@ Contents of `~/.alan/ALAN.md`, `<cwd>/ALAN.md`, and `append_system_prompt`, join
 
 ### 14. Tool-format instructions (conditional)
 
-For `--tool-call-format hermes|hermes_xml|glm|alan|meta_json`. Appended at the very end. See `alancode/tools/text_tool_parser.py`:
+For any configured text tool-call format. Appended at the very end. See `alancode/tools/text_tool_parser.py` for the parser registry and exact prompts:
 
 - **hermes**: `<tool_call>{"name": ..., "arguments": ...}</tool_call>`
 - **hermes_xml**: `<tool_call><function=Name><parameter=key>value</parameter></function></tool_call>`
 - **glm**: `<tool_call>ToolName<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>` (closing tag now mandatory after an audit fix)
 - **alan**: `<tool_use>{"name": ..., "input": ...}</tool_use>`
 - **meta_json**: JSON tool calls used by Meta/Llama templates.
+- **bash_block**: one fenced `bash` block, executed as the `Bash` tool (never parsed from private reasoning).
+- **kimi** / **kimi_k3**: Kimi-family special-token protocols.
+- **deepseek**: DSML `invoke` / `parameter` markup.
+- **minimax**: MiniMax `invoke` / `parameter` markup.
+- **auto**: teaches `bash_block`, then strict-parses every registered concrete format.
 
 ## Backend-specific assembly
 
@@ -158,9 +169,11 @@ Sections are passed as individual text blocks. Cache markers are placed on the l
 
 Alan sends a system-role message containing structured text blocks so it can place the same cache markers. LiteLLM passes supported markers through (for example to Anthropic/OpenRouter routes) and handles or strips them for other providers.
 
-## Inspecting what was sent
+## Inspecting Alan's pre-backend prompt view
 
-In the GUI, the **LLM Perspective** panel shows the exact system prompt for the current turn. From Python:
+In the GUI, the **LLM Perspective** panel shows Alan's backend-independent
+system-prompt sections for the current turn. Backend reshaping and cache markers
+are applied later, so this is not a wire capture. From Python:
 
 ```python
 agent = AlanCodeAgent(...)

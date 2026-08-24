@@ -465,11 +465,10 @@ function sendInputResponse(value) {
 
 // ── LLM Perspective rendering ──────────────────────────────────
 
-// Known limitation: panel always gets OpenAI-shaped dicts (loop.py uses
-// messages_to_openai_dicts), and that conversion drops thinking blocks. On
-// Anthropic-direct + extended thinking, Claude does attend to those blocks,
-// so the panel underrepresents what the model sees. Fix: feed backend-native
-// payloads and handle typed-block arrays (text/thinking/tool_use/tool_result).
+// This is Alan's normalized OpenAI-shaped pre-backend view. It intentionally
+// mirrors persist_thinking (inline <think> text when enabled, omitted when
+// disabled), but it is not a wire capture: provider reshaping, tool schemas,
+// budgets, stop strings, and cache markers are applied later.
 function renderLlmPerspective(messages, systemPrompt) {
     llmMessages.innerHTML = "";
 

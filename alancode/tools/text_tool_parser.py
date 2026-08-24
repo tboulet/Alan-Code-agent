@@ -1119,6 +1119,12 @@ FORMATS: dict[str, ToolCallFormat] = {
     "auto": AutoFormat(),
 }
 
+# Public configuration surfaces (settings validation, CLI argparse choices,
+# and documentation checks) must derive from the parser registry.  Keeping a
+# second hand-written list is how the CLI fell behind when the local-model
+# formats were added in 1.3.x.
+SUPPORTED_TOOL_CALL_FORMATS: tuple[str, ...] = tuple(FORMATS)
+
 
 def get_format(name: str) -> ToolCallFormat:
     """Get a ToolCallFormat by name.

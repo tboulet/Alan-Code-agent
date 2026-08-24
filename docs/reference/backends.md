@@ -43,7 +43,7 @@ The `anthropic/...` prefix is the explicit escape hatch for using Claude through
 Uses the official `anthropic` SDK. Gets Alan the best of what Anthropic offers:
 
 - **Prompt caching** — system prompt is split into 4 cache blocks, slashing cost on multi-turn conversations.
-- **Extended thinking** — Claude Sonnet 4's `thinking` mode is supported (budget controlled by `thinking_budget_default` setting).
+- **Thinking streams** - native thinking deltas returned by Claude are represented as `ThinkingBlock`s. `AlanCodeAgent` does not currently enable Anthropic extended thinking itself; the low-level backend accepts a `ThinkingConfig` when called directly. `persist_thinking` only controls whether reasoning already returned by a backend is re-injected into later requests.
 - **Native tool use** — structured `tool_use` blocks, clean tool_use → tool_result linking.
 
 ### Models
@@ -126,7 +126,7 @@ LiteLLM ships its own pricing registry. Cost display reads from `litellm.model_c
 ### Tool calling
 
 - **Native tool use**: when no text format is configured, Alan sends `tools=[...]` to the backend and parses structured streamed tool calls.
-- **Text-based fallback**: for models without native function calling, set `--tool-call-format hermes|glm|alan`. The schema is rendered as text in the system prompt; output is parsed with regex. See [reference/cli.md](cli.md) for details.
+- **Text-based fallback**: for models without native function calling, set `--tool-call-format` to a registered format (or `auto`). The schema is rendered as text in the system prompt and output is parsed strictly. See [reference/cli.md](cli.md) for details.
 
 ### Text-based tool calling
 
@@ -136,6 +136,7 @@ For models without native tool calling support, set `--tool-call-format` to enab
 --tool-call-format hermes   # Hermes <tool_call> format
 --tool-call-format glm      # GLM XML format
 --tool-call-format alan     # Alan's own format (most portable)
+--tool-call-format auto     # Teach bash_block; accept any registered format
 ```
 
 When `--tool-call-format` is not set (default), Alan uses native function calling.

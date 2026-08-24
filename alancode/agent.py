@@ -205,8 +205,13 @@ def _create_backend_from_settings(settings: dict[str, Any], **extra) -> LLMBacke
     """
     # "auto" (the default) means resolve from registry/server/probe.
     cw = settings.get("context_window")
+    backend_name = settings.get("backend", "auto")
+    # Only the LiteLLM transport forwards chat-template controls; sending
+    # this to any other backend would be an unexpected keyword argument.
+    if settings.get("disable_thinking") and backend_name == "auto":
+        extra.setdefault("chat_template_kwargs", {"enable_thinking": False})
     return _resolve_backend(
-        settings.get("backend", "auto"),
+        backend_name,
         model=settings.get("model"),
         api_key=settings.get("api_key"),
         base_url=settings.get("base_url"),
@@ -252,23 +257,37 @@ class AlanCodeAgent:
     permission_mode : str
         Permission mode: ``"yolo"``, ``"edit"``, ``"safe"``.
     max_iterations_per_turn : int, optional
-        Maximum agentic iterations per turn.
-    max_output_tokens : int, optional
+        Maximum completed model→tool execution cycles per turn. Recovery-only
+        model calls do not consume this counter.
+    max_output_tokens : int or "auto", optional
         Max tokens per LLM response. Acts as a starting budget: on a
         length-truncated response the loop escalates once to the
         ``escalated_max_tokens`` setting (default 64000) when that is
         higher. Set ``escalated_max_tokens`` at or below this value to
         keep it a hard ceiling.
+    escalated_max_tokens : int, optional
+        Retry budget after a response hits its output limit. Defaults to
+        64000 and is always clamped to the legal room in the context window.
     empty_response_retries : int, optional
-        In-send corrective nudges when a response has reasoning but no
-        visible answer or tool call (default 2, 0 disables). After
+        In-send corrective nudges when a wholly empty or reasoning-only
+        response has no visible answer or tool call (default 2, 0 disables). After
         exhaustion the turn surfaces with ``api_error="empty_response"``
         (not flagged as an API error - the backend answered fine).
+    no_verbalize_warning : bool, optional
+        Remind the model to narrate when it answers a turn with tool calls
+        and no visible text (default False). The reminder rides into the
+        next request as a ``<system-reminder>``; it is not a retry, so the
+        tool results of the silent turn are kept.
     persist_thinking : bool, optional
         Re-render past turns' thinking as inline ``<think>`` text in the
         API history (default False), so models whose plan lives in their
         reasoning can re-see it across turns. Reasoning is otherwise
         stripped from history.
+    disable_thinking : bool, optional
+        Ask the server to stop emitting reasoning by sending
+        ``chat_template_kwargs={"enable_thinking": false}`` (default False).
+        Only reaches the LiteLLM (``backend="auto"``) transport; the native
+        Anthropic backend has no chat template and ignores it.
     custom_system_prompt : str, optional
         Replace Alan's normal system prompt.
     append_system_prompt : str, optional
@@ -298,14 +317,17 @@ class AlanCodeAgent:
         cwd: str | None = None,
         permission_mode: str | None = None,
         max_iterations_per_turn: int | None = None,
-        max_output_tokens: int | None = None,
+        max_output_tokens: int | str | None = None,
+        escalated_max_tokens: int | None = None,
         empty_response_retries: int | None = None,
+        no_verbalize_warning: bool | None = None,
         persist_thinking: bool | None = None,
+        disable_thinking: bool | None = None,
         memory: str | None = None,
         tool_call_format: str | None = None,
         session_id: str | None = None,
         ask_callback: Callable | None = None,
-        verbose: bool = False,
+        verbose: bool | None = None,
         extra_tools: list | None = None,
         custom_system_prompt: str | None = None,
         append_system_prompt: str | None = None,
@@ -362,16 +384,23 @@ class AlanCodeAgent:
             "permission_mode": permission_mode,
             "max_iterations_per_turn": max_iterations_per_turn,
             "max_output_tokens": max_output_tokens,
+            "escalated_max_tokens": escalated_max_tokens,
             "empty_response_retries": empty_response_retries,
+            "no_verbalize_warning": no_verbalize_warning,
             "persist_thinking": persist_thinking,
+            "disable_thinking": disable_thinking,
             "memory": memory,
             "tool_call_format": tool_call_format,
+            "verbose": verbose,
             "custom_system_prompt": custom_system_prompt,
             "append_system_prompt": append_system_prompt,
         }
         backend_explicit = backend_setting is not None or backend_instance is not None
         for k, v in constructor_overrides.items():
             if v is not None:
+                error = validate_setting(k, v)
+                if error:
+                    raise ValueError(error)
                 self._settings[k] = v
 
         # Inference: if the caller set ``model`` but not ``backend``, pick
@@ -380,9 +409,6 @@ class AlanCodeAgent:
         # decided what transport to use.
         if backend_instance is None and not backend_explicit and model is not None:
             self._settings["backend"] = infer_backend(model)
-
-        if verbose: # verbose=True should override; verbose=False (the default) should not
-            self._settings["verbose"] = True
 
         # Resolve key fields
         if backend_instance is not None:
@@ -497,7 +523,8 @@ class AlanCodeAgent:
     #   |------------|----------------------|-------------------------------|
     #   | text       | query(msg) → str     | query_async(msg) → str        |
     #   | events     | query_events(msg)    | query_events_async(msg)       |
-    #   |            | → list[Event]        | → AsyncGenerator[Event]       |
+    #   |            | → list[StreamEvent   | → AsyncGenerator[StreamEvent  |
+    #   |            |        | Message]    |        | Message]             |
 
     def query(self, message: str) -> str:
         """Send a message and return the final assistant text.
@@ -513,7 +540,7 @@ class AlanCodeAgent:
         """
         return _run_async(self.query_async(message))
 
-    def query_events(self, message: str) -> list:
+    def query_events(self, message: str) -> list[StreamEvent | Message]:
         """Send a message and return the complete list of events.
 
         Blocks until the full turn completes. Returns every event
@@ -525,7 +552,7 @@ class AlanCodeAgent:
             for event in events:
                 print(type(event).__name__)
         """
-        async def _collect() -> list:
+        async def _collect() -> list[StreamEvent | Message]:
             return [event async for event in self.query_events_async(message)]
 
         return _run_async(_collect())
@@ -552,7 +579,9 @@ class AlanCodeAgent:
     ) -> AsyncGenerator[StreamEvent | Message, None]:
         """Send a message and yield events as they stream (async generator).
 
-        For real-time streaming to a UI, WebSocket, or custom handler.
+        For real-time streaming to a UI, WebSocket, or custom handler. Consume
+        the generator to exhaustion: a final AssistantMessage may still be
+        followed by tool execution and additional model iterations.
 
         Example::
 
@@ -682,7 +711,7 @@ class AlanCodeAgent:
                 if answer == "Deny":
                     return PermissionBehavior.DENY
                 if answer == allow_always_label and allow_always_pattern:
-                    # Add a session-scoped allow rule for this command prefix
+                    # Add a project-scoped allow rule for this command prefix
                     rule = PermissionRule(
                         tool_name="Bash",
                         rule_content=f"{allow_always_pattern} *",
@@ -810,12 +839,12 @@ class AlanCodeAgent:
             self._active_skill_filter = None
 
     def build_system_prompt(self) -> tuple[list[str], int]:
-        """Assemble the full system prompt exactly as sent to the API.
+        """Assemble the backend-independent system-prompt sections.
 
         The single source of truth for prompt assembly: used by
         ``query_events_async`` at the start of every turn, and by UIs for
-        previews (the GUI "LLM Perspective" panel) so what is displayed
-        can never drift from what is sent.
+        previews (the GUI "LLM Perspective" panel). Backends may subsequently
+        reshape these sections and add cache markers or request parameters.
 
         Returns:
             (sections, static_boundary) - the list of system prompt
@@ -1037,9 +1066,9 @@ class AlanCodeAgent:
         """Validate, update a setting for this session in-memory + on disk.
 
         All settings can be changed mid-session. Backend-related settings
-        (``backend``, ``model``, ``api_key``, ``base_url``) trigger a
-        fresh ``LLMBackend`` instance. All others take effect on the
-        next turn.
+        (``backend``, ``model``, ``api_key``, ``base_url``,
+        ``request_timeout``, ``context_window``) trigger a fresh
+        ``LLMBackend`` instance. All others take effect on the next turn.
 
         Updating ``model`` alone also re-infers ``backend`` (a bare Claude
         name flips the backend to ``anthropic-native``; anything else flips
@@ -1100,6 +1129,11 @@ class AlanCodeAgent:
         attr = field_map.get(key)
         if attr:
             setattr(self, attr, value)
+        if key == "permission_mode":
+            # Permission checks read the long-lived context created during
+            # construction, not just ``_permission_mode``. Keep both views in
+            # sync so /settings takes effect in the current session.
+            self._permission_context.mode = PermissionMode(value)
 
         if candidate_backend is not None:
             self._backend = candidate_backend

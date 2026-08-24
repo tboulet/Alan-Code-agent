@@ -7,6 +7,7 @@ import tempfile
 
 from alancode.settings import (
     SETTINGS_DEFAULTS,
+    SUPPORTED_TOOL_CALL_FORMATS,
     coerce_value,
     load_projects_settings_and_maybe_init,
     load_settings,
@@ -178,13 +179,29 @@ class TestValidation:
         error = validate_setting("model", 123)
         assert error is not None
 
-    def test_none_accepted_for_typed(self):
-        """None is always accepted (means 'unset')."""
-        assert validate_setting("model", None) is None
+    def test_none_is_only_accepted_for_nullable_settings(self):
+        assert validate_setting("base_url", None) is None
+        assert validate_setting("tool_call_format", None) is None
+        assert validate_setting("max_iterations_per_turn", None) is None
+        assert validate_setting("model", None) is not None
+        assert validate_setting("permission_mode", None) is not None
 
     def test_no_validator(self):
         """Keys without a validator always pass."""
-        assert validate_setting("max_tool_concurrency", 999) is None
+        assert validate_setting("unknown_internal_setting", object()) is None
+
+    def test_boolean_is_not_a_positive_integer(self):
+        for key in (
+            "max_iterations_per_turn",
+            "escalated_max_tokens",
+            "max_consecutive_compact_failures",
+            "max_compact_ptl_retries",
+            "max_output_tokens_recovery_limit",
+            "max_tool_concurrency",
+            "memory_reminder_threshold",
+            "max_scratchpad_sessions",
+        ):
+            assert validate_setting(key, True) is not None
 
     def test_permission_mode(self):
         assert validate_setting("permission_mode", "yolo") is None
@@ -215,9 +232,13 @@ class TestBuiltinDefaults:
     def test_tuning_keys_present(self):
         """All tuning knobs are top-level."""
         assert "max_tool_concurrency" in SETTINGS_DEFAULTS
-        assert "thinking_budget_default" in SETTINGS_DEFAULTS
         assert "compact_max_output_tokens" in SETTINGS_DEFAULTS
         assert "memory_reminder_threshold" in SETTINGS_DEFAULTS
         assert "compaction_threshold_percent" in SETTINGS_DEFAULTS
         assert "max_consecutive_compact_failures" in SETTINGS_DEFAULTS
         assert "max_compact_ptl_retries" in SETTINGS_DEFAULTS
+
+    def test_every_registered_tool_call_format_is_valid(self):
+        """Settings and the CLI share the parser registry's format list."""
+        for format_name in SUPPORTED_TOOL_CALL_FORMATS:
+            assert validate_setting("tool_call_format", format_name) is None

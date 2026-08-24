@@ -57,7 +57,10 @@ class ThinkThenAnswerBackend(LLMBackend):
             yield StreamThinkingDelta(thinking="Deep thought, no action")
         else:
             yield StreamTextDelta(text="Recovered answer.")
-        yield StreamMessageDelta(stop_reason="end_turn")
+        yield StreamMessageDelta(
+            stop_reason="end_turn",
+            usage={"input_tokens": self.calls, "output_tokens": 1},
+        )
         yield StreamMessageStop()
 
     def get_model_info(self, model=None):
@@ -89,6 +92,10 @@ async def test_nudge_recovers_a_thinking_only_turn(tmp_path):
     final = _final_assistant(events)
     assert final.api_error is None
     assert "Recovered answer." in final.text
+    # The thinking-only call that triggered the nudge is still billable and
+    # must not disappear from session accounting.
+    assert agent.usage.input_tokens == 3
+    assert agent.usage.output_tokens == 2
     await agent.close()
 
 

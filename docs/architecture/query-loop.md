@@ -125,7 +125,10 @@ The limit is the point where the reserved response no longer fits (`alancode/bud
 
 ```python
 api_messages = normalize_messages_for_api(messages_for_query)
-api_messages_dicts = messages_to_openai_dicts(api_messages)
+api_messages_dicts = messages_to_openai_dicts(
+    api_messages,
+    include_thinking=bool(params.settings.get("persist_thinking")),
+)
 
 if params.llm_perspective_callback is not None:
     params.llm_perspective_callback(api_messages_dicts, params.system_prompt)
@@ -143,10 +146,15 @@ async for event in stream:
     # dispatch into current_usage / text / tool_use accumulation
 ```
 
-- `normalize_messages_for_api` strips hidden messages, merges same-role neighbours, drops orphan tool_results. See [architecture/messages-and-api.md](messages-and-api.md).
+- `normalize_messages_for_api` strips `hide_in_api` virtual messages, merges same-role neighbours, and drops orphan tool results. `hide_in_ui` reminders remain model-facing. See [architecture/messages-and-api.md](messages-and-api.md).
+- The LLM Perspective callback receives these normalized dicts and the system sections. Tool schemas, max tokens, stops, cache markers, and backend-specific reshaping are applied outside that snapshot.
 - `stream_with_retry` handles retryable rate limits, overloads, timeouts, connection failures, and HTTP 5xx errors with exponential backoff and jitter. It retries only before response content is emitted; a partial stream is never replayed. After persistent pre-content HTTP 5xx failures, the loop makes one emergency-compaction attempt because some local servers report context overflow as an opaque 500. The partial-stream marker also prevents this higher-level recovery from replaying content.
 - Malformed native tool arguments are fed back to the model for a corrected call, with a bounded retry count. They do not end the turn immediately.
 - Events are dispatched into `current_usage` (from `message_delta`), `TextBlock` / `ThinkingBlock` / `ToolUseBlock` accumulators.
+- On normal stream exhaustion, `_record_completed_call` immediately stores
+  reported usage/cost and the estimate seed, before response parsing can enter
+  a corrective retry. Known usage reported before malformed native JSON is
+  recorded in that exception path.
 
 ## Phase 5 — Response assembly
 
@@ -162,50 +170,47 @@ assistant_msg = AssistantMessage(
 
 All the streamed bits become a single `AssistantMessage`. Text blocks have been streamed with `hide_in_api=True`; the final message is yielded with `hide_in_api=False` — the final view the caller stores.
 
-Inline `<think>` content is separated into `ThinkingBlock`. When a text-tool protocol is active, parsing checks visible text first and then thinking/reasoning content, so a call buried by a reasoning model is still executed without exposing private reasoning. A response with no visible text and no tool call becomes an `empty_response` assistant error rather than a successful blank turn.
+Inline `<think>` content is separated into `ThinkingBlock`. When a text-tool protocol is active, parsing checks visible text first and then thinking/reasoning content when that format permits it, so a call buried by a reasoning model can still execute without exposing private reasoning. `bash_block` is the deliberate exception: shell drafts in reasoning never execute. A response with no visible text and no tool call gets up to `empty_response_retries` corrective nudges (default 2), then surfaces with `api_error="empty_response"` rather than looking like a successful blank turn.
 
-## Phase 6 — Yield + calibration
+## Phase 6 - Yield + post-response abort checkpoint
 
 ```python
 yield assistant_msg
 
-params.cost_tracker.add_usage(current_usage, current_model)
-if current_usage.input_tokens > 0:
-    state.last_input_tokens = current_usage.input_tokens
-    state.last_output_tokens = current_usage.output_tokens
-    state.messages_len_at_last_call = len(state.messages)
+if params.abort_event and params.abort_event.is_set():
+    yield synthetic_results_for_unstarted_tools
+    yield create_user_interruption_message(...)
+    return
 ```
 
-Store the reported usage for next iteration's pre-call estimate.
+Usage is already recorded before this event. The final assembled assistant is
+yielded, and only when the consumer advances the generator does Alan check the
+cooperative abort signal, close any unstarted tool calls with synthetic error
+results, and proceed to truncation handling or tools.
 
-## Phase 7 — Abort & recovery (no tool use path)
+## Phase 7 - Truncation recovery and completion
 
 ```python
-if params.abort_event and params.abort_event.is_set():
-    # Close every unexecuted tool call with a synthetic error result.
-    yield interruption_results
-    yield create_user_interruption_message(tool_use=bool(tool_use_blocks))
-    return
+if stop_reason == "max_tokens":
+    # Never execute calls assembled from a truncated response.
+    yield synthetic_error_results_for(tool_use_blocks)
+    if (
+        state.max_output_tokens_override is None
+        and budget.max_output_tokens < escalated_max_tokens
+    ):
+        state.max_output_tokens_override = escalated_max_tokens
+        continue
+    if state.max_output_tokens_recovery_count < limit:
+        state.max_output_tokens_recovery_count += 1
+        yield recovery_msg   # "Resume directly..."
+        continue
 
 if not tool_use_blocks:
-    # Possibly recover from max_output_tokens mid-thought
-    if stop_reason == "max_tokens":
-        # Escalate the automatic budget from 8k -> 64k
-        if not state.max_output_tokens_override and not params.max_output_tokens:
-            state.max_output_tokens_override = escalated_max_tokens
-            state.transition = "max_output_tokens_escalation"
-            continue
-        # Multi-turn "Resume directly" recovery
-        if state.max_output_tokens_recovery_count < limit:
-            state.max_output_tokens_recovery_count += 1
-            yield recovery_msg   # "Resume directly..."
-            continue
-
     # Normal completion
     return
 ```
 
-If the automatically sized output is cut off, Alan first retries the original request with `escalated_max_tokens` (64,000 by default, clamped to legal room). An explicit `max_output_tokens` is never escalated. If the larger/explicit call is still cut off, Alan stores the partial assistant response and injects a hidden "Resume directly" user turn, up to `max_output_tokens_recovery_limit`. Prompt-too-long errors trigger one emergency-compaction attempt around the backend stream.
+If the output is cut off, every assembled tool call is invalidated and paired with a synthetic error result; none executes. When the resolved starting budget is below `escalated_max_tokens` (64,000 by default), Alan first retries the original request at that larger target, clamped to legal room. This applies to explicit starting budgets too; set the escalation target at or below the starting value for a hard ceiling. If the larger call is still cut off, Alan stores the partial assistant response plus any synthetic results and injects a hidden, model-facing "Resume directly" user turn, up to `max_output_tokens_recovery_limit`. Prompt-too-long errors trigger one emergency-compaction attempt around the backend stream.
 
 ## Phase 8 — Tool execution
 
@@ -267,13 +272,15 @@ Hard cap to prevent runaway loops.
 
 ```python
 state.messages = list(messages_for_query) + [assistant_msg, *tool_results]
-state.transition = None
+state.transition = "next_iteration"
 state.max_output_tokens_override = None
 iteration += 1
 # loop
 ```
 
-Assemble next iteration's starting state. Carry over `transition` for logging only.
+Assemble the next iteration's starting state and label the diagnostic
+transition. The continuation counter and temporary escalation override reset
+after a completed tool cycle.
 
 ## Where the loop exits
 

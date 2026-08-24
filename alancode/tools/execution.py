@@ -27,9 +27,11 @@ async def run_tool_use(
 
     Steps:
     1. Validate input via tool.validate_input()
-    2. Check permissions via permission_callback (if provided)
-    3. Execute tool via tool.call()
-    4. Build and return tool_result message
+    2. Run pre-tool hooks
+    3. Check permissions via permission_callback (if provided)
+    4. Execute tool via tool.call()
+    5. Run post-tool hooks
+    6. Build and return tool_result message
 
     On any error, returns an error tool_result message.
     """

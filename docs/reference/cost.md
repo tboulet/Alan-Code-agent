@@ -37,8 +37,8 @@ Alan Code computes cost client-side from token counts × registered per-token pr
 
 Key settings that affect cost behavior (see [`cli.md`](cli.md)):
 
-- `max_iterations_per_turn` — hard cap on how many API calls a single user message can consume.
-- `max_output_tokens` — ceiling on per-call output, with internal escalation up to `escalated_max_tokens` when the model hits the limit and needs to recover.
+- `max_iterations_per_turn` - hard cap on completed model→tool cycles for one user message; recovery-only calls are not counted.
+- `max_output_tokens` - starting per-call output budget, with internal escalation to the higher `escalated_max_tokens` target when the model hits the limit and needs to recover.
 - `compaction_threshold_percent` - at what fraction of the usable input budget Alan starts summarizing.
 - `context_window` - normally automatic; override it only when model or server detection is wrong.
 

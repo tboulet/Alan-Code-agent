@@ -16,8 +16,10 @@ Alan Code uses Hatchling and reads its version from `alancode/__version__.py`.
 4. Build and inspect the artifacts:
 
    ```bash
-   python -m build
-   python -m twine check dist/*
+   VERSION=$(python -c 'from alancode import __version__; print(__version__)')
+   OUT_DIR="dist/${VERSION}"
+   python -m build --outdir "${OUT_DIR}"
+   python -m twine check "${OUT_DIR}"/*
    ```
 
 ## Publish
@@ -25,9 +27,11 @@ Alan Code uses Hatchling and reads its version from `alancode/__version__.py`.
 Publishing and tagging affect external state. Do them only with explicit release-owner approval:
 
 ```bash
-python -m twine upload dist/*
-git tag v1.3.0
-git push origin v1.3.0
+VERSION=$(python -c 'from alancode import __version__; print(__version__)')
+OUT_DIR="dist/${VERSION}"
+python -m twine upload "${OUT_DIR}"/*
+git tag "v${VERSION}"
+git push origin "v${VERSION}"
 ```
 
 After publishing, install the wheel in a fresh virtual environment and verify `alancode --version` plus one `ScriptedBackend` smoke turn.

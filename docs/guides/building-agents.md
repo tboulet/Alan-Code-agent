@@ -13,7 +13,7 @@ agent = AlanCodeAgent()
 print(agent.query("What does this project do?"))
 ```
 
-That works identically to `alancode` on the CLI — same tools, same permission pipeline (default `edit` mode, so writes need stdin approval), same compaction.
+That uses the same tools, permission pipeline, and compaction as the CLI. Default `edit` mode auto-allows file writes and asks before exec tools; without an `ask_callback`, anything requiring approval is denied. Use `safe` plus a callback when you need per-mutation approval.
 
 ## The four query APIs
 
@@ -22,9 +22,11 @@ That works identically to `alancode` on the CLI — same tools, same permission 
 |  | Sync | Async |
 |---|---|---|
 | **Final text only** | `query(prompt) -> str` | `query_async(prompt) -> str` (awaitable) |
-| **All events (streaming)** | `query_events(prompt) -> list[Event]` | `query_events_async(prompt) -> AsyncGenerator[Event]` |
+| **All events** | `query_events(prompt) -> list[StreamEvent \| Message]` | `query_events_async(prompt) -> AsyncGenerator[StreamEvent \| Message, None]` (live) |
 
-Only `query_events_async` does real work — the others are thin adapters around it.
+Only `query_events_async` does real work and streams events live; the others
+are thin adapters around it, and synchronous `query_events` returns only after
+the complete event list has been collected.
 
 ### Sync, final text
 
@@ -87,7 +89,7 @@ Each runs against real LLMs or against the `ScriptedBackend` (no API needed) for
 
 ## Configuration
 
-Pass anything you'd set in `settings.json` as a constructor kwarg:
+Pass the explicitly declared constructor options directly:
 
 ```python
 agent = AlanCodeAgent(
@@ -95,6 +97,9 @@ agent = AlanCodeAgent(
     permission_mode="yolo",
     max_iterations_per_turn=15,
     max_output_tokens=16_000,
+    escalated_max_tokens=16_000,  # same value makes the output cap hard
+    empty_response_retries=2,
+    persist_thinking=False,
     memory="off",
     cwd="/path/to/project",
     session_id=None,     # None = new session
@@ -106,6 +111,8 @@ agent = AlanCodeAgent(
     ask_callback=None,   # Custom permission prompt; see below
 )
 ```
+
+Advanced settings that are not explicit constructor parameters should be placed in `.alan/settings.json` or applied with `agent.update_session_setting(name, value)`. Unknown constructor keywords are backend options, not arbitrary Alan settings.
 
 The transport backend is inferred from `model` — pass `backend="anthropic-native" | "auto" | "scripted"` (or an `LLMBackend` instance) only when you need to override the inference.
 

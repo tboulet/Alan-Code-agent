@@ -12,7 +12,8 @@ class ToolResult:
     """Result of a tool execution."""
     data: Any  # The tool's output (usually str)
     is_error: bool = False
-    # Additional messages to inject after the result
+    # Reserved for compatibility with the v1 custom-tool API. The execution
+    # pipeline currently persists only data/is_error and ignores this field.
     new_messages: list = field(default_factory=list)
 
 
@@ -83,7 +84,8 @@ class Tool(ABC):
     def permission_level(self, args: dict[str, Any]) -> Literal["read", "write", "exec"]:
         """Permission level for this invocation.
 
-        - ``"read"``  — read-only, can run concurrently, always allowed
+        - ``"read"``  - read-only and concurrent; auto-allowed by every mode,
+          but explicit rules and pre-tool hooks still take precedence
         - ``"write"`` — mutates files, runs serially, needs permission in ``safe`` mode
         - ``"exec"``  — arbitrary execution (Bash), runs serially, needs permission
           in both ``edit`` and ``safe`` modes
@@ -122,10 +124,10 @@ class Tool(ABC):
 
     @property
     def max_result_size_chars(self) -> int | float:
-        """Maximum result size in characters before disk persistence.
+        """Reserved compatibility hook; execution currently ignores it.
 
         Returns:
-            Size cap. Use ``float('inf')`` to disable disk persistence.
+            Historical default. It is not currently enforced.
         """
         return 50_000
 

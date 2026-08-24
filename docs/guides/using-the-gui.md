@@ -34,13 +34,15 @@ Shortcut: **Shift+Enter** inserts a newline, **Enter** submits.
 
 ### LLM Perspective
 
-Shows the **exact payload** Alan sent to the model on each turn — the system prompt plus the full `messages=[...]` list. This is the definitive debugging view when the agent's response surprises you:
+Shows Alan's **normalized pre-backend view** for each model call - the system prompt plus the `messages=[...]` list after filtering, role merging, and optional thinking re-injection. This is the most useful conversation-level debugging view when the agent's response surprises you:
 
 - "Why did it call that tool?" → check the system prompt section for tools.
 - "Why did it forget what we talked about?" → check if compaction happened (look for a `COMPACT_BOUNDARY` system message).
-- "What context did the model actually see?" → read the rendered messages.
+- "What conversation did Alan hand to the backend?" → read the rendered messages.
 
 Useful when tuning skills, diagnosing hallucinations, or reverse-engineering weird model behaviour.
+
+This is not a wire capture. It does not show tool schemas, the output budget, stop sequences, cache markers, or the Anthropic/LiteLLM backend's final provider-specific reshaping.
 
 ## Showing and hiding panels
 

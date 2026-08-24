@@ -89,16 +89,21 @@ class AuditedBackend(LLMBackend):
         context_window: int,
         *,
         fail_summarizer: bool = False,
+        model_max_output_tokens: int = 8_192,
     ) -> None:
         self.inner = inner
         self.cw = context_window
         self.fail_summarizer = fail_summarizer
+        self.model_max_output_tokens = model_max_output_tokens
         self.violations: list[dict] = []
         self.calls: list[dict] = []
         self.summarizer_calls = 0
 
     def get_model_info(self, model: str | None = None) -> ModelInfo:
-        return ModelInfo(context_window=self.cw, max_output_tokens=8_192)
+        return ModelInfo(
+            context_window=self.cw,
+            max_output_tokens=self.model_max_output_tokens,
+        )
 
     @staticmethod
     def _estimate(messages: list[dict], system: list[str]) -> int:
@@ -321,6 +326,48 @@ class TestEscalationClamp:
 
 class TestEscalationPastPin:
     @pytest.mark.asyncio
+    async def test_auto_setting_uses_resolved_budget_for_escalation(self, tmp_path):
+        """The string ``auto`` must not be compared directly with an int."""
+        inner = ScriptedBackend.from_responses(
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
+            fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=200_000)
+        agent = make_agent(tmp_path, backend, max_output_tokens="auto")
+
+        events = await run_turn(agent, "write something long")
+        assert_survived(backend, events)
+        assert final_text(events) == "recovered fully"
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
+        assert [c["max_tokens"] for c in main_calls] == [8_192, 64_000]
+
+    @pytest.mark.asyncio
+    async def test_model_default_at_target_does_not_retry_as_escalation(self, tmp_path):
+        """A resolved 64k starting budget goes straight to continuation."""
+        inner = ScriptedBackend.from_responses(
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
+            fallback=text("All done."),
+        )
+        backend = AuditedBackend(
+            inner,
+            context_window=1_000_000,
+            model_max_output_tokens=64_000,
+        )
+        agent = make_agent(tmp_path, backend)
+
+        events = await run_turn(agent, "write something long")
+        assert_survived(backend, events)
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
+        assert [c["max_tokens"] for c in main_calls] == [64_000, 64_000]
+        assert "Output token limit hit" in str(main_calls[1]["messages"])
+
+    @pytest.mark.asyncio
     async def test_pin_below_target_escalates(self, tmp_path):
         """An explicit max_output_tokens below escalated_max_tokens is a
         starting budget: a truncation escalates past it (window-clamped)."""
@@ -344,6 +391,28 @@ class TestEscalationPastPin:
         assert main_calls[0]["max_tokens"] == 3_000
         assert main_calls[1]["max_tokens"] > 3_000
         assert main_calls[1]["max_tokens"] < cw
+
+    @pytest.mark.asyncio
+    async def test_constructor_can_set_escalation_target(self, tmp_path):
+        inner = ScriptedBackend.from_responses(
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
+            fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=32_768)
+        agent = make_agent(
+            tmp_path,
+            backend,
+            max_output_tokens=3_000,
+            escalated_max_tokens=5_000,
+        )
+
+        events = await run_turn(agent, "write something long")
+        assert_survived(backend, events)
+        main_calls = [c for c in backend.calls if c["kind"] == "main"]
+        assert [c["max_tokens"] for c in main_calls] == [3_000, 5_000]
 
     @pytest.mark.asyncio
     async def test_pin_at_target_stays_hard_ceiling(self, tmp_path):

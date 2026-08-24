@@ -20,12 +20,17 @@ AlanCodeAgent(
     cwd: str | None = None,
     permission_mode: str | None = None,
     max_iterations_per_turn: int | None = None,
-    max_output_tokens: int | None = None,
+    max_output_tokens: int | str | None = None,
+    escalated_max_tokens: int | None = None,
+    empty_response_retries: int | None = None,
+    no_verbalize_warning: bool | None = None,
+    persist_thinking: bool | None = None,
+    disable_thinking: bool | None = None,
     memory: str | None = None,
     tool_call_format: str | None = None,
     session_id: str | None = None,
     ask_callback: Callable | None = None,
-    verbose: bool = False,
+    verbose: bool | None = None,
     extra_tools: list[Tool] | None = None,
     custom_system_prompt: str | None = None,
     append_system_prompt: str | None = None,
@@ -37,7 +42,10 @@ AlanCodeAgent(
 )
 ```
 
-All settings omitted (`None`) fall through to `.alan/settings.json` → built-in defaults. See [guides/configuration.md](../guides/configuration.md).
+All settings omitted (`None`) fall through to the resumed session snapshot when
+`session_id` is supplied, otherwise `.alan/settings.json`, then built-in
+defaults. Explicitly supplied declared settings pass through their registered
+per-key validators. See [guides/configuration.md](../guides/configuration.md).
 
 Key arguments:
 
@@ -45,6 +53,12 @@ Key arguments:
 - **`backend`** — either a string (`"auto"`, `"anthropic-native"`, `"scripted"`) or a concrete `LLMBackend` instance. If omitted, it is inferred from `model`.
 - **`request_timeout`** — positive seconds or `"auto"`. A custom `base_url` gets a 3,600-second automatic timeout for slow local inference.
 - **`context_window`** — positive token count or `"auto"`; also exposed as the resolved `agent.context_window` property.
+- **`max_output_tokens`** - starting per-call output budget. `"auto"`/`None` uses the model default capped at one quarter of its context window.
+- **`escalated_max_tokens`** - retry budget used after output truncation when it is higher than the resolved starting budget. Set it at or below `max_output_tokens` for a hard ceiling.
+- **`empty_response_retries`** - corrective retries for wholly empty or reasoning-only replies with no visible answer/tool (`2` by default; `0` disables).
+- **`no_verbalize_warning`** - when a turn calls tools with no visible text, send a `<system-reminder>` asking the model to narrate (`False` by default). Not a retry: the tool calls still run and their results are kept.
+- **`persist_thinking`** - re-inject reasoning already returned by the backend into subsequent requests and compaction summaries (`False` by default). It does not enable provider-side thinking.
+- **`disable_thinking`** - send `chat_template_kwargs={"enable_thinking": false}` to ask a server-side chat template to stop emitting reasoning (`False` by default). LiteLLM (`backend="auto"`) only; the native Anthropic backend ignores it.
 - **`session_id`** — if set, resume an existing session; otherwise a new session ID is generated.
 - **`ask_callback`** — `async def callback(question: str, options: list[str]) -> str`. Called when a tool needs user approval. Return the chosen option text (or any string to use as a free-text answer).
 - **`extra_tools`** — additional tools appended to the agent's tool list. See [guides/building-agents.md](../guides/building-agents.md) for embedding patterns.
@@ -62,7 +76,7 @@ The 2×2 matrix:
 |  | Sync | Async |
 |---|---|---|
 | **Final text only** | `query(prompt) -> str` | `query_async(prompt) -> str` |
-| **Streaming events** | `query_events(prompt) -> list[Event]` | `query_events_async(prompt) -> AsyncGenerator[Event]` |
+| **All events** | `query_events(prompt) -> list[StreamEvent \| Message]` | `query_events_async(prompt) -> AsyncGenerator[StreamEvent \| Message, None]` |
 
 ### `query(prompt: str) -> str`
 
@@ -82,13 +96,13 @@ Same as `query` but awaitable.
 answer = await agent.query_async("Explain the compaction system")
 ```
 
-### `query_events(prompt: str) -> list[Event]`
+### `query_events(prompt: str) -> list[StreamEvent | Message]`
 
 Synchronous; returns a full list of events after the turn completes. Useful for post-hoc inspection.
 
-### `async query_events_async(prompt: str) -> AsyncGenerator[Event, None]`
+### `async query_events_async(prompt: str) -> AsyncGenerator[StreamEvent | Message, None]`
 
-The real primitive. Yields events as they're produced:
+The real primitive and the only live-streaming query method. Yields events as they're produced:
 
 ```python
 async for event in agent.query_events_async("Summarize README.md"):
@@ -96,7 +110,7 @@ async for event in agent.query_events_async("Summarize README.md"):
     pass
 ```
 
-Events are message dataclasses from `alancode.messages.types`:
+The union aliases and message dataclasses live in `alancode.messages.types`:
 
 | Event | When |
 |---|---|
@@ -106,9 +120,13 @@ Events are message dataclasses from `alancode.messages.types`:
 | `UserMessage` | Injected (interactive system reminders, tool results). The automatic date/time reminder is omitted with `programmatic=True`. |
 | `SystemMessage` | Informational (compaction markers, etc.). |
 | `AttachmentMessage` | Structured metadata (e.g., `max_iterations_per_turn_reached`). |
-| `ProgressMessage` | Long-running operation updates. |
+| `ProgressMessage` | Reserved public/serialization type for long-running updates; the current query/tool path does not construct one. |
 
 Filter on `hide_in_api` to distinguish streaming deltas from final messages — see the streaming example in [guides/building-agents.md](../guides/building-agents.md).
+
+`query_async()` is asynchronous in the normal Python sense (it does not block the event loop), but it still waits for the whole turn and returns one final string. For live text, iterate `query_events_async()` and select virtual `AssistantMessage` text deltas. There is currently no separate `query_stream()` convenience method.
+
+Consume `query_events_async()` to exhaustion. A final assembled `AssistantMessage` is an event within an iteration, not necessarily the end of the turn: usage for that completed call is already recorded, but advancing the generator after the event performs requested tools and reaches later model rounds. If a caller intentionally stops early, it must `await stream.aclose()`; breaking at the first final assistant can otherwise skip tools and leave cleanup deferred.
 
 ## State inspection
 
@@ -152,7 +170,7 @@ if error:
     print("Invalid:", error)
 ```
 
-Validates and updates a setting in memory and on disk. Returns an error message string on validation/backend-creation failure, or `None` on success. `backend`, `model`, `api_key`, `base_url`, and `request_timeout` trigger transactional backend recreation.
+Validates and updates a setting in memory and on disk. Returns an error message string on validation/backend-creation failure, or `None` on success. `backend`, `model`, `api_key`, `base_url`, `request_timeout`, and `context_window` trigger transactional backend recreation.
 
 ## Lifecycle
 

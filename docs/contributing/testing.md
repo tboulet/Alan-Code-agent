@@ -42,7 +42,7 @@ Key files:
 - `test_session.py` — `SessionState`, transcript roundtrip, locking, and session lookup.
 - `test_settings.py` — defaults, validators, save/load.
 - `test_tools.py` — tool input validation, schemas.
-- `test_text_tool_parser.py` — hermes/hermes_xml/glm/alan/meta_json format parsers.
+- `test_text_tool_parser.py` - registered text tool-call format parsers.
 - `test_hooks.py` — pre/post hook execution, timeout, action fallback.
 - `test_skills.py` — frontmatter parser, registry, validation.
 - `test_compaction_upgrade.py` — format_compact_summary, the 9-section prompt.

@@ -12,6 +12,7 @@ from alancode.session.session import (
     generate_session_id,
     get_last_session_id,
     get_session_dir,
+    get_session_settings_path,
     load_session_settings,
     save_session_settings,
 )
@@ -188,6 +189,20 @@ class TestSessionSettings:
             assert loaded["model"] == "test-model"
             assert loaded["verbose"] is True
             assert loaded["max_iterations_per_turn"] == 10
+
+    def test_retired_settings_are_not_restored_on_resume(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sid = generate_session_id()
+            path = get_session_settings_path(tmpdir, sid)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({
+                "model": "test-model",
+                "thinking_budget_default": 10_000,
+                "capped_default_max_tokens": 8_000,
+            }))
+
+            loaded = load_session_settings(tmpdir, sid)
+            assert loaded == {"model": "test-model"}
 
     def test_ephemeral_fields_excluded(self):
         """api_key should not appear in saved session settings."""

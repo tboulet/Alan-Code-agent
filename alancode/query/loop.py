@@ -191,6 +191,25 @@ class QueryParams:
 # ---------------------------------------------------------------------------
 
 
+def _record_completed_call(
+    params: QueryParams,
+    state: LoopState,
+    usage: Usage,
+    model: str | None,
+) -> None:
+    """Persist known usage and calibrate estimates for one model call.
+
+    Successful responses can immediately continue into a corrective retry
+    (malformed text tools or an empty-response nudge). Recording at the stream
+    boundary ensures those calls are not lost before response reinterpretation.
+    """
+    params.cost_tracker.add_usage(usage, model or "")
+    if usage.input_tokens > 0:
+        state.last_input_tokens = usage.input_tokens
+        state.last_output_tokens = usage.output_tokens
+        state.messages_len_at_last_call = len(state.messages)
+
+
 async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
     """The main agentic loop. Yields stream events and messages.
 
@@ -581,6 +600,12 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     return
 
         except InvalidToolCallError as e:
+            # A provider may report input/cache usage in StreamMessageStart
+            # before discovering malformed tool JSON. Preserve whatever it
+            # reported even though no executable assistant message exists.
+            _record_completed_call(
+                params, state, current_usage, current_model,
+            )
             if state.native_tool_retries < MAX_NATIVE_TOOL_RETRIES:
                 state.native_tool_retries += 1
                 logger.warning(
@@ -605,9 +630,14 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 MAX_NATIVE_TOOL_RETRIES,
                 e,
             )
-            yield create_assistant_error_message(
+            error_msg = create_assistant_error_message(
                 str(e), api_error="invalid_tool_call"
             )
+            # Surface the final malformed call's reported usage so the outer
+            # agent updates last_usage and persists the next-turn estimate
+            # seed, not only the cumulative CostTracker total.
+            error_msg.usage = current_usage
+            yield error_msg
             return
 
         except Exception as e:
@@ -665,6 +695,11 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 ),
             )
             return
+
+        # The backend stream completed normally. Account exactly once before
+        # response parsing, because several semantic recovery paths below
+        # yield an intermediate assistant and immediately continue.
+        _record_completed_call(params, state, current_usage, current_model)
 
         # -- Phase 5: Build final assistant message ----------------------
         assistant_msg = AssistantMessage(
@@ -891,10 +926,10 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         request_id=request_id,
                     )
 
-        # A response containing only private reasoning (including reasoning
-        # extracted from inline <think> tags) must not look like successful
-        # empty completion to a caller. Run this after text-tool parsing so a
-        # tool call buried in reasoning still gets a chance to execute.
+        # A response with no visible action - whether wholly empty or containing
+        # only private reasoning (including inline <think> content) - must not
+        # look like successful completion. Run this after text-tool parsing so
+        # a tool call buried in reasoning still gets a chance to execute.
         has_visible_text = any(
             isinstance(block, TextBlock) and block.text.strip()
             for block in assistant_msg.content
@@ -946,15 +981,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # Yield the (possibly rebuilt) assistant message
         yield assistant_msg
 
-        # Track cost and remember last-call usage for next iteration's
-        # pre-call estimate (see predicted_next_call_tokens).
-        params.cost_tracker.add_usage(current_usage, current_model)
-        if current_usage.input_tokens > 0:
-            state.last_input_tokens = current_usage.input_tokens
-            state.last_output_tokens = current_usage.output_tokens
-            state.messages_len_at_last_call = len(state.messages)
-
-        # -- Phase 6: Check abort after streaming ------------------------
+        # -- Phase 6: Check abort after yielding the response ------------
         if params.abort_event and params.abort_event.is_set():
             for block in tool_use_blocks:
                 yield create_tool_result_message(
@@ -997,7 +1024,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             escalated = params.settings.get("escalated_max_tokens", 64000)
             if (
                 state.max_output_tokens_override is None
-                and (params.max_output_tokens or 0) < escalated
+                and budget.max_output_tokens < escalated
             ):
                 logger.info("Escalating max_tokens to %d", escalated)
                 state.max_output_tokens_override = escalated
@@ -1076,7 +1103,27 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             yield memory_reminder
             state.turns_since_memory_update = 0
 
-        # -- Phase 9: Check max turns ------------------------------------
+        # -- Phase 8.6: No-verbalization reminder ------------------------
+        # Acting with no visible text leaves nothing in the conversation once
+        # reasoning is stripped. Unlike the empty-response nudge this is not a
+        # retry: the tool calls were valid and their results are kept.
+        if (
+            params.settings.get("no_verbalize_warning")
+            and tool_use_blocks
+            and not has_visible_text
+        ):
+            no_verbalize_reminder = create_user_message(
+                "<system-reminder>\n"
+                "Your last response called tools without any visible text. "
+                "Reasoning is not preserved between turns, so state briefly "
+                "what you are doing and why alongside your tool calls.\n"
+                "</system-reminder>",
+                hide_in_ui=True,
+            )
+            tool_results.append(no_verbalize_reminder)
+            yield no_verbalize_reminder
+
+        # -- Phase 9: Check completed tool-cycle cap ---------------------
         state.iteration_count += 1
         if params.max_iterations_per_turn and state.iteration_count >= params.max_iterations_per_turn:
             yield create_attachment_message(
@@ -1092,6 +1139,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         state.messages = list(messages_for_query) + [assistant_msg] + tool_results
         state.max_output_tokens_recovery_count = 0
         state.max_output_tokens_override = None
-        state.transition = "next_turn"
+        state.transition = "next_iteration"
         iteration += 1
     # end while True

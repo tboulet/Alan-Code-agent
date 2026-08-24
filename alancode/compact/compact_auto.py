@@ -141,15 +141,20 @@ async def compaction_auto(
     # 3. Build compact user message
     compact_prompt = get_compact_prompt(custom_instructions)
 
-    # 4. Normalize messages for API
+    # 4. Normalize messages for API.  When persist_thinking is enabled, the
+    # summarizer must see the same reasoning-bearing history as the main loop;
+    # otherwise compaction silently breaks the promised cross-turn continuity.
+    s = settings or {}
+    include_thinking = bool(s.get("persist_thinking"))
     api_messages = normalize_messages_for_api(truncated_messages)
-    api_messages_dicts = messages_to_openai_dicts(api_messages)
+    api_messages_dicts = messages_to_openai_dicts(
+        api_messages, include_thinking=include_thinking,
+    )
 
     # Add compact prompt as the final user message
     api_messages_dicts.append({"role": "user", "content": compact_prompt})
 
     # 4. PTL retry loop
-    s = settings or {}
     max_ptl_retries = s.get("max_compact_ptl_retries", 3)
     compact_max_output_tokens = s.get(
         "compact_max_output_tokens", DEFAULT_SUMMARY_MAX_TOKENS
@@ -215,7 +220,9 @@ async def compaction_auto(
                 logger.error("Too few messages to truncate for PTL retry")
                 return None
             api_messages = truncated
-            api_messages_dicts = messages_to_openai_dicts(api_messages)
+            api_messages_dicts = messages_to_openai_dicts(
+                api_messages, include_thinking=include_thinking,
+            )
             api_messages_dicts.append({"role": "user", "content": compact_prompt})
             logger.info(
                 "PTL retry %d: truncated to %d messages",

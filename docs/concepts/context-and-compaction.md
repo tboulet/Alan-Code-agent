@@ -2,7 +2,11 @@
 
 Every model has a finite context window shared by the system prompt, conversation, tool definitions, and the model's next response. A long session or a burst of tool output can exhaust that space.
 
-Alan Code solves this with a three-layer compaction pipeline that runs **before every API call**, progressively freeing space only when needed. You almost never have to think about it — but when you do, here's how it works.
+Alan Code solves this with a three-layer compaction pipeline that runs **before
+every main query-loop model call**, progressively freeing space only when
+needed. Compaction's own summarizer calls and context-window probes are separate
+operations. You almost never have to think about it - but when you do, here's how
+it works.
 
 ## The one-line summary you see after each turn
 
@@ -114,7 +118,7 @@ The blocking limit is no longer a setting: it is derived as `context_window - ma
 
 ## Inspecting what happened
 
-In the GUI, the **LLM Perspective** panel shows you the exact payload sent on each call, including any post-compact summary injected as a user message. This is the best debugging view when you want to understand what Alan remembers and what got compacted away.
+In the GUI, the **LLM Perspective** panel shows the normalized system prompt and conversation for each call, including any post-compact summary injected as a user message. This is the best view for understanding what Alan remembers and what got compacted away. It is not a wire capture: backend-specific reshaping, tool schemas, output budgets, stop sequences, and cache markers are not shown.
 
 From the CLI, `/status` shows the current `Conversation` tokens, and the session transcript on disk (`.alan/sessions/<id>/transcript.jsonl`) records every message including compaction boundaries.
 

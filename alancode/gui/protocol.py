@@ -34,7 +34,7 @@ class OutputEvent:
     - ``"progress_message"`` — real-time tool progress
     - ``"request_start"`` — new API call starting
     - ``"cost_summary"`` — token usage and cost after a turn
-    - ``"llm_perspective"`` — snapshot of messages sent to the API
+    - ``"llm_perspective"`` - normalized pre-backend system/messages snapshot
     - ``"local_output"`` — slash command output (Rich renderables as text)
     - ``"welcome"`` — session welcome banner
     - ``"error"`` — error display

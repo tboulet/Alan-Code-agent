@@ -2,8 +2,9 @@
 
 Implements the configuration priority chain:
 1. CLI kwargs / AlanCodeAgent() constructor args  — Always win
-2. Project settings (.alan/settings.json)         — Per-project defaults
-3. Alan Code built-in defaults                    — Hardcoded fallback
+2. Resumed-session settings snapshot               - When session_id is used
+3. Project settings (.alan/settings.json)          - New-session defaults
+4. Alan Code built-in defaults                     - Hardcoded fallback
 
 On first use in a project, .alan/settings.json is generated with built-in defaults.
 """
@@ -15,6 +16,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from alancode.tools.text_tool_parser import SUPPORTED_TOOL_CALL_FORMATS
 from alancode.utils.atomic_io import atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -40,11 +42,11 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "api_key": None,  # None = read from env var
     "base_url": None,  # None = use backend default. Set for local servers (e.g., http://localhost:8000/v1)
     "request_timeout": "auto",  # seconds; auto = 1h for custom endpoints, otherwise SDK default
-    "tool_call_format": None,  # Text-based tool call format: "hermes", "hermes_xml", "glm", "alan", "meta_json", "bash_block", "kimi", "kimi_k3", "deepseek", "minimax", "auto" (accept any), or None (native)
+    "tool_call_format": None,  # One of SUPPORTED_TOOL_CALL_FORMATS, or None (native)
     # Session
     "permission_mode": "edit",  # 'yolo', 'edit', 'safe'
-    "max_iterations_per_turn": None,  # None = unlimited. Caps API calls per user message.
-    "max_output_tokens": None,  # None = backend default
+    "max_iterations_per_turn": None,  # None = unlimited. Caps completed tool-use cycles.
+    "max_output_tokens": None,  # None = min(model-declared max, context window / 4)
     # System prompt
     "custom_system_prompt": None,
     "append_system_prompt": None,
@@ -59,22 +61,22 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     # the auto formulas) or an explicit positive integer.
     "context_window": "auto",  # "auto" = resolve from registry/server/probe; int = trust this value
     "compact_max_output_tokens": "auto",  # Summarizer output budget (auto: min(20k, CW - T - m))
-    "capped_default_max_tokens": 8_000,  # Default max_tokens (slot reservation optimization)
     "escalated_max_tokens": 64_000,  # Retry budget on length-truncation, overrides a lower max_output_tokens (clamped to the window)
-    "auto_compact_buffer_tokens": 13_000,  # Buffer below context window that triggers auto-compact
-    "warning_threshold_buffer_tokens": 20_000,  # Remaining tokens to trigger warning
     "max_consecutive_compact_failures": 3,  # Circuit breaker for auto-compact retries
     "compaction_threshold_percent": "auto",  # T as % of usable input (auto: 80)
     "max_compact_ptl_retries": 3,  # Max prompt-too-long retries during compaction summarize
     # Error recovery
     "max_output_tokens_recovery_limit": 3,  # Max multi-turn recovery attempts on output limit hit
     "empty_response_retries": 2,  # In-send nudges for reasoning-only/empty turns before surfacing (0 = off)
+    "no_verbalize_warning": False,  # Remind the model to narrate when it calls tools with no visible text
     # Tool execution
     "max_tool_concurrency": 10,  # Max parallel read-only tool executions
     "tool_result_max_chars": "auto",  # Per-result cap (auto: min(10k, 10% of T in chars))
-    # Thinking
-    "thinking_budget_default": 10_000,  # Default thinking token budget (when model supports it)
+    # Thinking returned by the backend
     "persist_thinking": False,  # Re-render past turns' thinking as inline <think> text in API history
+    # Server-side thinking. Only the LiteLLM ("auto") path can carry it; the
+    # native Anthropic backend has no chat template to disable.
+    "disable_thinking": False,  # Send chat_template_kwargs={"enable_thinking": false}
     # Memory
     "memory_reminder_threshold": 10,  # Iterations between memory reminders (intensive mode)
     "max_scratchpad_sessions": 5,  # Max scratchpad session dirs to keep
@@ -87,9 +89,28 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
 # Fields that should NOT be written to settings.json (ephemeral / per-invocation only)
 _EPHEMERAL_FIELDS = {"api_key"}
 
-# Settings removed by the budget redesign; stripped (with a notice) when
-# found in an existing settings.json.
-_DEPRECATED_KEYS = {"blocking_limit_buffer_tokens", "compact_clear_keep_recent"}
+# Settings that never affected the current loop, or were superseded by the
+# budget redesign.  Strip them from old project/session snapshots instead of
+# continuing to advertise inert controls.
+_DEPRECATED_KEYS = {
+    "auto_compact_buffer_tokens",
+    "blocking_limit_buffer_tokens",
+    "capped_default_max_tokens",
+    "compact_clear_keep_recent",
+    "thinking_budget_default",
+    "warning_threshold_buffer_tokens",
+}
+
+
+def strip_deprecated_settings(
+    settings: dict[str, Any], *, source: str | Path | None = None,
+) -> dict[str, Any]:
+    """Remove retired keys from a loaded settings mapping in place."""
+    for key in _DEPRECATED_KEYS & settings.keys():
+        settings.pop(key)
+        location = f" in {source}" if source is not None else ""
+        logger.info("Ignoring retired setting %r%s.", key, location)
+    return settings
 
 
 def get_alan_dir(cwd: str | None = None) -> Path:
@@ -106,7 +127,8 @@ def get_settings_path(cwd: str | None = None) -> Path:
 def load_settings(cwd: str | None = None) -> dict[str, Any]:
     """Load project settings from .alan/settings.json.
 
-    If the file doesn't exist or is corrupt/invalid, returns empty dict.
+    If the file is missing, unreadable, invalid JSON, or not an object,
+    returns an empty dict. Individual values are not validated here.
     """
     path = get_settings_path(cwd)
     if not path.exists():
@@ -123,29 +145,23 @@ def load_settings(cwd: str | None = None) -> dict[str, Any]:
         logger.warning("Invalid settings format in %s. Using defaults.", path)
         return {}
 
-    # Strip keys removed by the budget redesign (their behaviour is now
-    # derived - see alancode/budget.py). Old settings.json files were
-    # initialized with the full defaults, so they all carry these.
-    for key in _DEPRECATED_KEYS & settings.keys():
-        settings.pop(key)
-        logger.info(
-            "%s contains the removed setting '%s' (superseded by the "
-            "auto-computed budget) - ignored.", path, key,
-        )
-
-    return settings
+    return strip_deprecated_settings(settings, source=path)
 
 
 def save_settings(settings: dict[str, Any], cwd: str | None = None) -> None:
     """Write settings to .alan/settings.json.
 
-    Creates .alan/ directory if needed. Excludes ephemeral fields.
+    Creates .alan/ directory if needed. Excludes ephemeral and retired fields.
     """
     path = get_settings_path(cwd)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     # Filter out ephemeral fields
-    to_write = {k: v for k, v in settings.items() if k not in _EPHEMERAL_FIELDS}
+    to_write = {
+        k: v
+        for k, v in settings.items()
+        if k not in _EPHEMERAL_FIELDS and k not in _DEPRECATED_KEYS
+    }
 
     try:
         atomic_write_json(path, to_write, indent=2)
@@ -195,7 +211,7 @@ def coerce_value(raw: str) -> Any:
 # ── Setting validators ──────────────────────────────────────────────────────
 # Each entry is (check_fn, error_message).
 # - check_fn(value) -> bool: returns True if valid
-# - None values always pass (means "unset")
+# - Nullability is declared by each key's validator
 # - Keys without an entry are not validated.
 
 def _one_of(*vals):
@@ -203,10 +219,22 @@ def _one_of(*vals):
 
 
 _is_str = (lambda v: isinstance(v, str), "Must be a string")
+_is_str_or_none = (
+    lambda v: v is None or isinstance(v, str),
+    "Must be a string or null",
+)
 _is_bool = (lambda v: isinstance(v, bool), "Must be a boolean")
-_is_pos_int = (lambda v: isinstance(v, int) and v > 0, "Must be a positive integer")
+_is_dict = (lambda v: isinstance(v, dict), "Must be an object")
+_is_pos_int = (
+    lambda v: isinstance(v, int) and not isinstance(v, bool) and v > 0,
+    "Must be a positive integer",
+)
 _is_nonneg_int = (lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0, "Must be a non-negative integer")
-_is_pos_int_or_none = (lambda v: v is None or (isinstance(v, int) and v > 0), "Must be a positive integer or null")
+_is_pos_int_or_none = (
+    lambda v: v is None
+    or (isinstance(v, int) and not isinstance(v, bool) and v > 0),
+    "Must be a positive integer or null",
+)
 
 
 def _is_auto(v):
@@ -221,25 +249,24 @@ _is_pos_int_or_auto = (
 SETTING_VALIDATORS: dict[str, tuple] = {
     "backend": _one_of("auto", "anthropic-native", "scripted"),
     "model": _is_str,
-    "base_url": _is_str,
+    "api_key": _is_str_or_none,
+    "base_url": _is_str_or_none,
     "request_timeout": _is_pos_int_or_auto,
-    "tool_call_format": _one_of("hermes", "hermes_xml", "glm", "alan", "meta_json", "bash_block", "kimi", "kimi_k3", "deepseek", "minimax", "auto"),
+    "tool_call_format": _one_of(None, *SUPPORTED_TOOL_CALL_FORMATS),
     "permission_mode": _one_of("yolo", "edit", "safe"),
     "max_iterations_per_turn": _is_pos_int_or_none,
     "max_output_tokens": (
         lambda v: v is None or _is_pos_int_or_auto[0](v),
         'Must be a positive integer, "auto", or null',
     ),
-    "custom_system_prompt": _is_str,
-    "append_system_prompt": _is_str,
+    "custom_system_prompt": _is_str_or_none,
+    "append_system_prompt": _is_str_or_none,
     "memory": _one_of("on", "off", "intensive"),
     "verbose": _is_bool,
+    "hooks": _is_dict,
     "context_window": _is_pos_int_or_auto,
     "compact_max_output_tokens": _is_pos_int_or_auto,
-    "capped_default_max_tokens": _is_pos_int,
     "escalated_max_tokens": _is_pos_int,
-    "auto_compact_buffer_tokens": _is_pos_int,
-    "warning_threshold_buffer_tokens": _is_pos_int,
     "max_consecutive_compact_failures": _is_pos_int,
     "compaction_threshold_percent": (
         lambda v: _is_auto(v) or (isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 99),
@@ -248,10 +275,11 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "max_compact_ptl_retries": _is_pos_int,
     "max_output_tokens_recovery_limit": _is_pos_int,
     "empty_response_retries": _is_nonneg_int,
+    "no_verbalize_warning": _is_bool,
     "max_tool_concurrency": _is_pos_int,
     "tool_result_max_chars": _is_pos_int_or_auto,
-    "thinking_budget_default": _is_pos_int,
     "persist_thinking": _is_bool,
+    "disable_thinking": _is_bool,
     "memory_reminder_threshold": _is_pos_int,
     "max_scratchpad_sessions": _is_pos_int,
     "compaction_truncate_enabled": _is_bool,
@@ -264,14 +292,12 @@ def validate_setting(key: str, value: Any) -> str | None:
     """Validate a setting value against its validator.
 
     Returns an error message if invalid, or None if valid.
-    None values always pass (they mean "unset").
+    Nullability is part of each key's validator rather than a global escape.
     """
     entry = SETTING_VALIDATORS.get(key)
     if entry is None:
         return None  # no validator for this key
     check_fn, error_msg = entry
-    if value is None:
-        return None  # None always accepted
     if not check_fn(value):
         return f"Invalid value {value!r} for '{key}': {error_msg}"
     return None

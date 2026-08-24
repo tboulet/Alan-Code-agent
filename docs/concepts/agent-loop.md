@@ -18,7 +18,7 @@ So:
 - Inside the turn, Alan may run multiple **iterations**: call the LLM → get a `tool_use` → run the tool → call the LLM again with the result → ... → final text reply.
 - The whole conversation history across turns is the **session**.
 
-This terminology is why `max_iterations_per_turn` (the setting formerly called `max_turns`) is named the way it is — it caps how many API calls a single user message can trigger, not how many user messages a session can have.
+This terminology explains the name `max_iterations_per_turn` (formerly `max_turns`), but the exact implementation is narrower: it counts completed model→tool execution cycles, not recovery-only model calls and not user messages in the session.
 
 ## The loop structure
 
@@ -66,16 +66,16 @@ The stream is driven by `backend.stream(...)` which yields structured events: `S
 
 Three kinds of errors the loop handles transparently:
 
-1. **Output token limit hit mid-thought**: the assistant gets cut off. The loop escalates `max_tokens` from 8k → 64k and retries. If still cut off, injects "Resume directly, no apology, pick up mid-thought" up to 3 times.
+1. **Output token limit hit mid-thought**: the assistant gets cut off. If the resolved starting budget is below `escalated_max_tokens` (64k by default), the loop retries at that higher, window-clamped target. If still cut off, it injects "Resume directly, no apology, pick up mid-thought" up to 3 times. Suspect truncated tool calls are answered with synthetic errors and never executed.
 2. **Prompt too long (413)**: triggers an emergency compaction and re-runs with the summarized history.
 3. **Retryable network errors (rate limits, timeouts, 529)**: handled in `alancode/api/retry.py` with exponential backoff.
 
-Non-retryable errors (400, 401, 403) propagate immediately — they're user-actionable (wrong key, bad request shape).
+Non-retryable errors (400, 401, 403) skip transport retries. The query loop normally turns them into a final assistant error event; unexpected exceptions still propagate to the caller.
 
 ## Abort handling
 
-Ctrl+C at any point:
-- Sets an `asyncio.Event` the loop checks at phase 1 and phase 7.
+Ctrl+C / `abort()`:
+- Sets an `asyncio.Event` the loop checks before a model call, after a complete stream, and after a tool batch. It is cooperative and does not forcibly cancel an in-flight backend request or a tool that does not poll the signal.
 - Causes `ask_user_callback` to raise `CancelledError`, which propagates through the tool execution layer.
 - The REPL catches it, prints "Turn interrupted.", clears the abort flag, and waits for new input.
 
@@ -86,11 +86,11 @@ The session's `_last_usage` and `turn_count` are still flushed to disk via a bes
 Between iterations the loop carries a `LoopState` (`alancode/query/state.py`):
 
 - `messages` — the full list.
-- `iteration_count` — how many API calls this turn has made.
-- `max_output_tokens_recovery_count` — for the 8k→64k escalation.
+- `iteration_count` - how many tool-execution cycles this turn has completed (not every recovery-only API call).
+- `max_output_tokens_recovery_count` - how many hidden "Resume directly" continuation turns were attempted.
 - `has_attempted_emergency_compact` — one-shot per turn.
 - `last_input_tokens` / `last_output_tokens` — used by the pre-call compaction estimate.
-- `cached_model_info` — avoid re-querying backend for context window each iteration.
+- `max_output_tokens_override` - temporary escalation target for the next retry.
 
 When a turn ends, `LoopState` is discarded. The durable state is `self._messages` on the agent and `SessionState` on disk.
 

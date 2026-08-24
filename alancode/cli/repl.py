@@ -378,8 +378,9 @@ def _handle_model(agent: AlanCodeAgent, console, arg: str) -> None:
 def _handle_backend(agent: AlanCodeAgent, console, arg: str) -> None:
     """Show or change the current transport backend.
 
-    Unlike ``/model``, no ``<system-reminder>`` is injected — the backend
-    is transport routing and doesn't affect what the model sees.
+    Unlike ``/model``, no ``<system-reminder>`` is injected: switching the
+    transport does not change Alan's logical conversation or model identity.
+    Provider serialization and cache/tool representation may still differ.
 
     """
     current = agent._settings.get("backend")
@@ -503,8 +504,9 @@ def _handle_settings(agent: AlanCodeAgent, console, arg: str) -> None:
 
     With no argument, prints the effective settings dict as JSON. With
     ``key=value``, validates and applies the change. Backend-related
-    keys (``backend``, ``model``, ``api_key``, ``base_url``) trigger a
-    fresh ``LLMBackend`` instance for the rest of the session.
+    keys (``backend``, ``model``, ``api_key``, ``base_url``,
+    ``request_timeout``, ``context_window``) trigger a fresh
+    ``LLMBackend`` instance for the rest of the session.
     """
     if not arg:
         formatted = json.dumps(agent._settings, indent=2, default=str)

@@ -23,11 +23,11 @@ For models without native tool support, use **text-based tool calling** — Alan
 alancode --model openai/<model> --base-url http://localhost:8000/v1 --tool-call-format hermes
 ```
 
-Available formats: `hermes`, `hermes_xml`, `glm`, `alan`, `meta_json`.
+Available formats: `hermes`, `hermes_xml`, `glm`, `alan`, `meta_json`, `bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, and `auto`.
 
-Text-tool parsing examines both visible content and separate reasoning content. This matters for Qwen and other reasoning models that place `<tool_call>` markup inside `<think>` or `reasoning_content`. Thinking stays private while the structured call is executed. A response containing only private reasoning and no answer/tool is surfaced as an `empty_response` error instead of looking like a successful blank turn.
+Text-tool parsing examines visible content and, for formats that permit it, separate reasoning content. This matters for Qwen and other reasoning models that place structured markup inside `<think>` or `reasoning_content`. Thinking stays private while the structured call executes. `bash_block` never parses reasoning, so shell drafts cannot become actions. A wholly empty or reasoning-only response gets up to `empty_response_retries` corrective nudges (default 2); if still empty, it surfaces with `api_error="empty_response"` instead of looking successful.
 
-As practical starting points, use `hermes` for Qwen3-family JSON-in-tag output, `hermes_xml` for function-tag variants, `glm` for GLM output, and `meta_json` for Llama JSON output. The exact format remains model/template dependent.
+As practical starting points, use `hermes` for Qwen3-family JSON-in-tag output, `hermes_xml` for function-tag variants, `glm` for GLM output, `meta_json` for Llama JSON output, or `bash_block` for models reliably trained to emit one shell block. `auto` teaches `bash_block` but strict-parses every registered format, which is useful when a model ignores the requested convention. The exact format remains model/template dependent.
 
 ## Model name format
 

@@ -73,7 +73,7 @@ Session: 8,118 in + 153 out = $0.0082 (estimated) | Conversation: 8,271 / 200,00
 > Add a docstring to the public functions in alancode/agent.py
 ```
 
-Now Alan will want to use `Edit` — a write tool. By default Alan runs in `edit` permission mode, which asks for approval before write/exec operations:
+Now Alan will want to use `Edit` - a write tool. Default `edit` mode runs file edits automatically and asks only before `exec` tools such as `Bash`. To review every mutation before it happens, start Alan with `--permission-mode safe`; then the prompt looks like this:
 
 ```
 ? Allow Edit?
@@ -144,7 +144,7 @@ alancode --gui
 
 Opens `http://localhost:8420/`. Two panels:
 - **Chat** — same as the CLI, but with in-place diff rendering.
-- **LLM Perspective** — the exact payload sent to the model each turn (for debugging).
+- **LLM Perspective** - Alan's normalized system prompt and conversation before backend-specific request shaping (for debugging).
 
 ## 10. Give Alan project-specific context
 

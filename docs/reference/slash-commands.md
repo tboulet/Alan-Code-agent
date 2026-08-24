@@ -34,9 +34,9 @@ Typing `/help` in a session prints the currently-registered list.
 | Command | Description |
 |---|---|
 | `/settings` | Show current session settings. |
-| `/settings <key> <value>` | Update a session setting (e.g. `/settings permission_mode yolo`). Takes effect immediately; backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`) recreate the underlying `LLMBackend`. |
+| `/settings <key>=<value>` | Update a session setting (e.g. `/settings permission_mode=yolo`). Takes effect immediately; backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`, `context_window`) recreate the underlying `LLMBackend`. |
 | `/settings-project` | Show project settings from `.alan/settings.json`. |
-| `/settings-project <key> <value>` | Update a project-level default. |
+| `/settings-project <key>=<value>` | Update a project-level default. |
 
 ## Memory
 

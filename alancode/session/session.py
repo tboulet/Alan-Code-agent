@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from alancode.settings import _DEPRECATED_KEYS, strip_deprecated_settings
 from alancode.utils.atomic_io import atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -118,16 +119,24 @@ def load_session_settings(cwd: str, session_id: str) -> dict[str, Any]:
         return {}
     try:
         with open(path) as f:
-            return json.load(f)
+            settings = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read session settings %s: %s", path, exc)
         return {}
+    if not isinstance(settings, dict):
+        logger.warning("Invalid session settings format in %s. Using defaults.", path)
+        return {}
+    return strip_deprecated_settings(settings, source=path)
 
 
 def save_session_settings(cwd: str, session_id: str, settings: dict[str, Any]) -> None:
     """Save settings snapshot for a session atomically."""
     path = get_session_settings_path(cwd, session_id)
-    to_write = {k: v for k, v in settings.items() if k not in _EPHEMERAL_FIELDS}
+    to_write = {
+        k: v
+        for k, v in settings.items()
+        if k not in _EPHEMERAL_FIELDS and k not in _DEPRECATED_KEYS
+    }
     atomic_write_json(path, to_write, indent=2)
 
 

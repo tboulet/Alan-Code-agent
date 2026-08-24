@@ -42,7 +42,10 @@ class MalformedThenValidBackend(LLMBackend):
         **kwargs: Any,
     ) -> AsyncGenerator[BackendStreamEvent, None]:
         self.calls.append(messages)
-        yield StreamMessageStart(model="test")
+        yield StreamMessageStart(
+            model="test",
+            usage={"input_tokens": len(self.calls) * 10},
+        )
         if len(self.calls) == 1:
             yield StreamToolUseStart(id="call_1", name="Read")
             yield StreamToolUseInputDelta(
@@ -54,8 +57,32 @@ class MalformedThenValidBackend(LLMBackend):
             )
             return
         yield StreamTextDelta(text="recovered")
-        yield StreamMessageDelta(stop_reason="end_turn")
+        yield StreamMessageDelta(
+            stop_reason="end_turn",
+            usage={"output_tokens": 3},
+        )
         yield StreamMessageStop()
+
+
+class AlwaysMalformedBackend(MalformedThenValidBackend):
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: list[str],
+        tools: list[ToolSchema],
+        **kwargs: Any,
+    ) -> AsyncGenerator[BackendStreamEvent, None]:
+        self.calls.append(messages)
+        yield StreamMessageStart(
+            model="test",
+            usage={"input_tokens": len(self.calls) * 10},
+        )
+        yield StreamToolUseStart(id="bad", name="Read")
+        yield StreamToolUseInputDelta(id="bad", partial_json="not-json")
+        yield StreamError(
+            error="Tool call 'Read' returned invalid JSON arguments.",
+            error_type="invalid_tool_call",
+        )
 
 
 class OpaqueServerFailureBackend(LLMBackend):
@@ -149,6 +176,36 @@ async def test_malformed_native_tool_call_gets_feedback_and_retry(tmp_path):
         if isinstance(event, AssistantMessage) and not event.hide_in_api
     ]
     assert finals[-1].text == "recovered"
+    # The malformed first response was still a billable model call. Preserve
+    # the input usage reported before native JSON validation failed.
+    assert agent.usage.input_tokens == 30
+    assert agent.usage.output_tokens == 3
+
+
+@pytest.mark.asyncio
+async def test_exhausted_native_recovery_updates_last_usage(tmp_path):
+    backend = AlwaysMalformedBackend()
+    agent = AlanCodeAgent(
+        backend=backend,
+        cwd=str(tmp_path),
+        programmatic=True,
+        custom_system_prompt="test",
+    )
+
+    events = [
+        event async for event in agent.query_events_async("read a file")
+    ]
+
+    assert len(backend.calls) == 3
+    assert agent.usage.input_tokens == 60
+    assert agent.last_usage.input_tokens == 30
+    final = [
+        event
+        for event in events
+        if isinstance(event, AssistantMessage) and not event.hide_in_api
+    ][-1]
+    assert final.api_error == "invalid_tool_call"
+    assert final.usage.input_tokens == 30
 
 
 @pytest.mark.asyncio

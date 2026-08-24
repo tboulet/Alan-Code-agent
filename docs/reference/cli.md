@@ -2,7 +2,7 @@
 
 Every parameter follows the same priority chain:
 
-> **CLI flag > `.alan/settings.json` (per-project) > built-in defaults**
+> **CLI flag > resumed-session snapshot (with `--resume`/`--continue`) > `.alan/settings.json` (new-session project defaults) > built-in defaults**
 
 So anything you can pass on the command line can also be put in `.alan/settings.json` once per project, and you only need the flag when you want to override that default.
 
@@ -34,15 +34,18 @@ By default, Alan uses native structured tool calling. If your model/server combi
 
 | Flag | Description | Default |
 |---|---|---|
-| `--tool-call-format` | Text-based tool-call format for models without native tool calling: `hermes`, `hermes_xml`, `glm`, `alan`, or `meta_json`. | *(none - uses native)* |
+| `--tool-call-format` | Text-based tool-call format for models without native tool calling: `hermes`, `hermes_xml`, `glm`, `alan`, `meta_json`, `bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, or `auto`. | *(none - uses native)* |
 
 ## Session behavior
 
 | Flag | Description | Default |
 |---|---|---|
-| `--permission-mode` | `safe` (ask for every tool), `edit` (ask for writes + exec), `yolo` (allow everything). | `edit` |
-| `--max-iterations-per-turn` | Hard cap on model calls per user message. | unlimited |
-| `--max-output-tokens` | Explicit per-call output token ceiling. Automatic first-retry escalation is disabled when this is set. | automatic (normally capped at 8,000) |
+| `--permission-mode` | `safe` (auto-read, ask for writes + exec), `edit` (auto-read/write, ask for exec), `yolo` (allow everything). | `edit` |
+| `--max-iterations-per-turn` | Hard cap on completed model→tool cycles per user message; recovery-only calls are not counted. | unlimited |
+| `--max-output-tokens` | Starting output budget per model call. A length-truncated response may retry at `escalated_max_tokens`; set that setting at or below this value for a hard ceiling. | automatic (model default, capped at 25% of the context window) |
+| `--escalated-max-tokens` | Retry budget after output truncation; set at/below the starting budget for a hard ceiling. | `64,000` |
+| `--empty-response-retries` | Corrective retries for wholly empty or reasoning-only replies with no visible answer/tool. | `2` |
+| `--persist-thinking`, `--no-persist-thinking` | Re-inject or omit prior reasoning in later requests. Does not enable provider-side thinking. | disabled |
 | `--memory` | Memory mode: `off` (default), `on`, `intensive`. | `off` |
 | `--verbose` | Enable debug-level logging. | `false` |
 
@@ -87,4 +90,4 @@ Example:
 
 ## Modifying at runtime
 
-Use the `/settings <key> <value>` slash command (see [`slash-commands.md`](slash-commands.md)) to change a setting mid-session. Backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`) create a fresh `LLMBackend` and close the old one; a failed recreation leaves the active settings and backend unchanged. Other settings take effect on the next turn. Changing `model` also re-infers the backend per the rule above.
+Use the `/settings <key>=<value>` slash command (see [`slash-commands.md`](slash-commands.md)) to change a setting mid-session. Backend-related changes (`backend`, `model`, `api_key`, `base_url`, `request_timeout`, `context_window`) create a fresh `LLMBackend` and close the old one; a failed recreation leaves the active settings and backend unchanged. Other settings take effect on the next turn. Changing `model` also re-infers the backend per the rule above.

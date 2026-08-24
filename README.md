@@ -2,7 +2,7 @@
 
 An open-source python coding agent, inspired by Claude Code. Usable in CLI, GUI, or as a Python library to build upon.
 
-Alan Code implements many features of modern CLI agents, such as tool use, hooks, skills, context compaction and more, and adds cross-session memory, live cost tracking, and a GUI with Chat and the model's exact perspective.
+Alan Code implements many features of modern CLI agents, such as tool use, hooks, skills, context compaction and more, and adds cross-session memory, live cost tracking, and a GUI with Chat and an LLM perspective.
 
 Works with LiteLLM-compatible model providers and local OpenAI-compatible servers.
 
@@ -12,7 +12,7 @@ Works with LiteLLM-compatible model providers and local OpenAI-compatible server
 
 ## Highlights
 
-- **Browser GUI** - Chat plus *LLM Perspective*, the model's exact view of the conversation. `--gui`
+- **Browser GUI** - Chat plus *LLM Perspective*, showing the normalized system prompt and conversation before backend-specific shaping. `--gui`
 - **Cross-session memory** — per-project and global memory the agent reads/writes between sessions, with three modes (`off` / `on` / `intensive`).
 - **Live cost + token tracking** — estimated $ and token usage per API call, visible in-session.
 - **Broad model support** - Anthropic direct, any LiteLLM backend (OpenAI, OpenRouter, Gemini, ...), or local models via vLLM / SGLang / Ollama, with a text-based tool-call fallback for models without native tool use.
@@ -54,7 +54,7 @@ For LiteLLM routes, the model provider goes inside the model string (`ollama/...
   <img src="assets/images/cli_screen.png" alt="Alan Code CLI" width="100%"/>
 </p>
 
-A terminal-based chat interface. Type a prompt and press Enter; Alan will stream its reply, request permission before running tools, and persist the session so you can `--resume` later.
+A terminal-based chat interface. Type a prompt and press Enter; Alan will stream its reply, apply the configured permission policy before tools, and persist the session so you can `--resume` later. In default `edit` mode, reads and writes run automatically while exec tools ask.
 
 ### Commands
 
@@ -71,7 +71,7 @@ A terminal-based chat interface. Type a prompt and press Enter; Alan will stream
 | `/diff` | Show git diff of uncommitted changes |
 | `/skill` | Run a skill — `/skill list`, `/skill <name>`, `/skill create` |
 | `/settings` | Show or update session settings |
-| `/settings-project` | Show project settings. Edit `.alan/settings.json` to change |
+| `/settings-project` | Show or update project defaults in `.alan/settings.json` |
 | `/exit` | Quit the session |
 
 Other commands in [`docs/reference/slash-commands.md`](docs/reference/slash-commands.md).
@@ -100,7 +100,7 @@ Parameters can also be set in `.alan/settings.json` (auto-generated on first run
 
 Argument `--gui` launches a local GUI interface, with a <b>Chat panel</b>.
 
-It can also show an <b>LLM Perspective</b> panel containing the exact conversation and system prompt sent to the model.
+It can also show an <b>LLM Perspective</b> panel containing the normalized conversation and system prompt immediately before the backend call.
 
 ## As a python library
 
@@ -216,7 +216,7 @@ See [docs/reference/python-api.md#programmatic-mode](docs/reference/python-api.m
 | Feature | What it does | How to use |
 |---|---|---|
 | Browser GUI | Chat + **LLM Perspective** panels on localhost | `--gui` |
-| LLM Perspective panel | See the model's exact view of the conversation — debug prompts, tool calls, compaction | `--gui`, then toggle panel |
+| LLM Perspective panel | See Alan's normalized system prompt and conversation - debug prompts, tool calls, compaction | `--gui`, then toggle panel |
 | Cross-session memory | Per-project + global memory the agent reads/writes between sessions. Modes: `off` (default), `on` (read at start, write on `/save`), `intensive` (read at start, write after every significant response) | Set memory with `/memory [on/intensive]` or `/save` |
 | Live cost tracking | Estimated $ and token usage per API call | default ([docs](docs/reference/cost.md)) |
 
@@ -225,7 +225,7 @@ See [docs/reference/python-api.md#programmatic-mode](docs/reference/python-api.m
 | Feature | What it does | How to use |
 |---|---|---|
 | Session persistence | Sessions saved to disk; resume any time | `--resume`, `--continue <id>` |
-| Permission modes | Per-tool gating with project-scoped rules — `safe` (ask each), `edit` (ask edits), `yolo` (no checks) | `--permission-mode <mode>` |
+| Permission modes | Per-tool gating with project-scoped rules - `safe` (auto-read; ask write/exec), `edit` (auto-read/write; ask exec), `yolo` (auto-all) | `--permission-mode <mode>` |
 | Git integration | AI-written commit messages, diffs | `/commit`, `/diff` |
 | Project + global instructions | Auto-loaded into the system prompt | `ALAN.md`, `~/.alan/ALAN.md` |
 | Python library API | Sync `query()`, async `query_async()`, streaming `query_events_async()` — build loops, orchestrators, or custom UIs on top | `from alancode import AlanCodeAgent` |
@@ -248,6 +248,8 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
+- **2026-08-24 - Alan Code 1.3.12** - Added two optional controls for local reasoning models: `no_verbalize_warning` (remind a model that acts without narrating) and `disable_thinking` (ask a server-side chat template to stop emitting reasoning). Also a documentation and code cleanup pass, including a CLI that no longer lags settings on tool-call formats.
+- **2026-08-19 - Alan Code 1.3.11** - Added optional cross-turn reasoning re-injection (`persist_thinking`) and bounded recovery for reasoning-only/empty replies. The 1.3.2-1.3.11 series also hardened max-output recovery and added `bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, and auto-detected text tool-call formats for local models.
 - **2026-08-10 - Alan Code 1.3.1** - Fixed multi-turn tool use with Ollama and other strict OpenAI-compatible servers by serializing tool-only assistant messages with empty-string content instead of JSON `null`. Programmatic mode no longer injects the automatic date/time reminder.
 - **2026-08-08 - Alan Code 1.3** - Hardened slow/offline local-model operation, tool calls embedded in reasoning streams, timeout and context-window controls, backend lifecycle cleanup, concurrent shared-state writes, and error reporting. Internal transport terminology is now consistently `backend`, with obsolete GUI, REPL, and session complexity removed.
 - **2026-07-25 - Alan Code 1.2** - Context budgets now adapt to the model and reserve legal output space on every call. Long sessions recover from aggregate tool-output growth, prompt-too-long responses, and failed summarization through context-scaled truncation, retrying compaction, and a deterministic last-resort fallback. Local-model context windows can be resolved from server metadata or a cached probe, and interrupted turns retain valid tool-call history.
@@ -268,5 +270,5 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 # Notes
 
 - This project is inspired by the Claude Code npm package, but is built from the ground up in python with our own architecture, and include additional features.
-- We are not responsible for any damage caused by the agent in `yolo` permission mode, although models are instructed to be cautious about destructive actions.
+- Tools can modify your machine: default `edit` mode auto-allows write tools and `yolo` auto-allows everything. Use `safe` for per-mutation approval, review the working tree, and run autonomous agents only in environments you trust.
 - The name "Alan" comes from Alan Turing, a father of computer science along Claude Shannon.

@@ -6,7 +6,7 @@ Hooks are **shell commands Alan runs at specific lifecycle events**. They let yo
 
 | Event | When it fires | Can block? |
 |---|---|---|
-| `pre_tool_use` | Before a tool runs, after permission approval. | ✅ Yes — exit with `{"action": "deny"}`. |
+| `pre_tool_use` | After input validation, before the permission pipeline and tool call. | ✅ Yes - return `{"action": "deny"}`. |
 | `post_tool_use` | After a tool runs. | No. Informational only. |
 | `session_start` | When a session begins. | No. |
 | `session_end` | When a session ends. | No. |
@@ -47,7 +47,7 @@ Each hook entry supports:
 |---|---|---|---|
 | `command` | yes | — | Command to run. Tokenised via `shlex.split` by default (argv-style, no shell interpretation). |
 | `tools` | no | `null` (all) | List of tool names this hook applies to. |
-| `timeout` | no | `5` | Seconds before the hook is killed. |
+| `timeout` | no | `30` | Seconds before the hook is killed. |
 | `shell` | no | `false` | Opt-in shell interpretation (pipes, redirects, globs). **Documented as the risky path** — use only when necessary. |
 
 ## How a hook sees the event
@@ -83,13 +83,19 @@ The hook's stdout is parsed as JSON:
 
 - `allow` — tool runs normally.
 - `deny` — tool is blocked; the `message` is fed back to the model so it can adapt.
-- `ask` — force a user permission prompt, even if mode is `yolo` or a rule would otherwise auto-allow. Useful as a "confirm-for-this-pattern" guard.
+- `ask` - fall through to the ordinary permission pipeline. It reaches a user prompt when that pipeline requires one, but an auto-allowing mode can still allow the tool without prompting. Use `deny` when a hook must block execution.
 
 If the hook prints non-JSON, or doesn't print anything, the action defaults to `allow` **unless** the hook exited non-zero — in which case Alan denies with the exit-code message.
 
 ### Timeouts and errors
 
-If the hook times out (default 5 s) or crashes, Alan falls back to **`ask`** for `pre_tool_use` — a broken safety-critical hook must not silently allow. For `post_tool_use` / session events (informational), timeout falls back to `allow` since there's nothing to block.
+If the hook times out (default 30 s) or its subprocess fails, its result falls
+back to **`ask`** for `pre_tool_use`. That then follows the same ordinary
+permission pipeline described above; it is not a forced prompt under an
+auto-allowing mode. For `post_tool_use` / session events (informational), the
+fallback is `allow` since there is nothing to block. An unexpected Python
+exception escaping the hook registry is logged by the tool layer and treated
+as no hook result.
 
 This fallback behaviour was tightened in response to an audit: originally timeouts defaulted to `allow` everywhere, which made broken security hooks invisible.
 
