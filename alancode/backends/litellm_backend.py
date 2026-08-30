@@ -48,6 +48,7 @@ from alancode.backends.base import (
     ToolSchema,
 )
 from alancode.backends import cw_probe
+from alancode.backends.wire import log_wire_request
 
 logger = logging.getLogger(__name__)
 
@@ -492,6 +493,9 @@ class LiteLLMBackend(LLMBackend):
             completion_kwargs["api_base"] = self._api_base
         if self._request_timeout is not None:
             completion_kwargs["timeout"] = self._request_timeout
+        if os.environ.get("ALANCODE_DISABLE_STREAM") == "1":
+            completion_kwargs["stream"] = False
+            completion_kwargs.pop("stream_options", None)
 
         # OpenRouter-specific: use max_completion_tokens instead of max_tokens
         if "openrouter" in resolved_model:
@@ -500,8 +504,62 @@ class LiteLLMBackend(LLMBackend):
             completion_kwargs.setdefault("drop_params", True)
 
         request_id = str(uuid4())
+        log_wire_request("litellm", completion_kwargs)
 
         try:
+            if not completion_kwargs.get("stream", True):
+                # Non-streaming path: one completion, parsed once. Avoids
+                # servers whose *streaming* incremental parser is buggy
+                # (e.g. llama.cpp --jinja on reasoning models: 'Invalid diff').
+                resp = await litellm.acompletion(**completion_kwargs)
+                yield StreamMessageStart(model=resolved_model, request_id=request_id)
+                ns_usage: dict[str, int] | None = None
+                if getattr(resp, "usage", None):
+                    u = resp.usage
+                    ns_cw = getattr(u, "cache_creation_input_tokens", 0) or 0
+                    ns_cr = getattr(u, "cache_read_input_tokens", 0) or 0
+                    ns_det = getattr(u, "prompt_tokens_details", None)
+                    if ns_det and (not ns_cw and not ns_cr):
+                        ns_cr = getattr(ns_det, "cached_tokens", 0) or 0
+                    ns_usage = {
+                        "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                        "output_tokens": getattr(u, "completion_tokens", 0) or 0,
+                        "cache_creation_input_tokens": ns_cw,
+                        "cache_read_input_tokens": ns_cr,
+                    }
+                ns_msg = resp.choices[0].message if getattr(resp, "choices", None) else None
+                ns_finish = resp.choices[0].finish_reason if getattr(resp, "choices", None) else None
+                ns_tool_calls: dict[int, dict[str, Any]] = {}
+                if ns_msg is not None:
+                    ns_reason = getattr(ns_msg, "reasoning_content", None) or getattr(ns_msg, "reasoning", None)
+                    if ns_reason:
+                        yield StreamThinkingDelta(thinking=ns_reason)
+                    if getattr(ns_msg, "content", None):
+                        yield StreamTextDelta(text=ns_msg.content)
+                    for _i, _tc in enumerate(getattr(ns_msg, "tool_calls", None) or []):
+                        _fn = getattr(_tc, "function", None)
+                        _tid = getattr(_tc, "id", None) or f"call_{uuid4().hex[:8]}"
+                        _tname = getattr(_fn, "name", None) or ""
+                        _args = getattr(_fn, "arguments", None) or ""
+                        if not isinstance(_args, str):
+                            _args = json.dumps(_args)
+                        yield StreamToolUseStart(id=_tid, name=_tname)
+                        if _args:
+                            yield StreamToolUseInputDelta(id=_tid, partial_json=_args)
+                        ns_tool_calls[_i] = {"id": _tid, "name": _tname, "arguments_json": _args, "start_emitted": True}
+                if ns_tool_calls:
+                    ns_events, ns_err = _finalize_tool_calls(ns_tool_calls)
+                    if ns_err:
+                        yield StreamError(error=ns_err, error_type="invalid_tool_call")
+                        return
+                    for _fe in ns_events:
+                        yield _fe
+                    ns_stop = _map_finish_reason(ns_finish) if ns_finish else "tool_use"
+                else:
+                    ns_stop = _map_finish_reason(ns_finish)
+                yield StreamMessageDelta(stop_reason=ns_stop, usage=ns_usage)
+                yield StreamMessageStop()
+                return
             response = await litellm.acompletion(**completion_kwargs)
             # Do not announce a started message until the request has
             # successfully returned a stream. This keeps pre-stream failures
