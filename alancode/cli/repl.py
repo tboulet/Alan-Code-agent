@@ -332,6 +332,7 @@ async def _handle_compact(agent: AlanCodeAgent, console, arg: str = "") -> None:
             memory_mode=agent._memory_mode,
             settings=agent._settings,
             budget=_budget,
+            cost_tracker=agent._cost_tracker,
         )
         if result:
             agent._messages = [result.boundary_message] + result.summary_messages

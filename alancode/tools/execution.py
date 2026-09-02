@@ -3,7 +3,12 @@
 import logging
 from typing import Callable, Awaitable
 
-from alancode.tools.base import Tool, ToolResult, ToolUseContext
+from alancode.tools.base import (
+    DEFAULT_MAX_RESULT_SIZE_CHARS,
+    Tool,
+    ToolResult,
+    ToolUseContext,
+)
 from alancode.messages.types import ToolUseBlock, UserMessage
 from alancode.messages.factory import create_tool_result_message
 from alancode.permissions.context import PermissionResult, PermissionBehavior
@@ -15,6 +20,35 @@ logger = logging.getLogger(__name__)
 PermissionCallback = Callable[
     [Tool, dict, ToolUseContext], Awaitable[PermissionResult]
 ]
+
+# Tool names already warned about inert compatibility fields (once per process).
+_inert_field_warned: set[str] = set()
+
+
+def _warn_inert_fields(tool: Tool, result: ToolResult) -> None:
+    """Warn once per tool about v1 compatibility fields execution ignores.
+
+    Both fields are kept so custom-tool sources still import, but nothing
+    reads them: a tool relying on either is silently not getting it.
+    """
+    if tool.name in _inert_field_warned:
+        return
+    inert = []
+    if getattr(result, "new_messages", None):
+        inert.append("ToolResult.new_messages")
+    cap = getattr(tool, "max_result_size_chars", DEFAULT_MAX_RESULT_SIZE_CHARS)
+    if cap != DEFAULT_MAX_RESULT_SIZE_CHARS:
+        inert.append("Tool.max_result_size_chars")
+    if not inert:
+        return
+    _inert_field_warned.add(tool.name)
+    logger.warning(
+        "Tool %s sets %s, which the execution pipeline ignores. Result size is "
+        "capped by the context budget instead (compaction Layer A); extra "
+        "messages must be returned in the tool result itself.",
+        tool.name,
+        " and ".join(inert),
+    )
 
 
 async def run_tool_use(
@@ -106,6 +140,8 @@ async def run_tool_use(
         except Exception:
             logger.debug("Post-tool hook error (ignored)", exc_info=True)
         return _error_result(tool_use_id, f"Tool execution error: {exc}")
+
+    _warn_inert_fields(tool, result)
 
     # 5. Post-tool-use hooks (fire-and-forget)
     content = _result_to_str(result)

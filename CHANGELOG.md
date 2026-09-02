@@ -1,5 +1,10 @@
 # Changelog
 
+- **2026-08-25 - Alan Code 1.3.13**
+  - Compaction (Layer C) summarizer calls now reach cost tracking. The summarizer spends real tokens - including the attempts a prompt-too-long retry discards - and none of it was counted in session totals. It records cost only: the summarizer payload is not the conversation, so it never seeds the loop's next-call token estimate.
+  - New `ALANCODE_WIRE_LOG` environment variable: set it to a file path and every outgoing provider request is appended as one JSON line, after backend shaping, with `api_key` and headers redacted. The GUI's LLM perspective is rendered before that shaping, so it could not prove what was actually sent. Off by default; an unopenable path warns instead of raising.
+  - A custom tool that sets `ToolResult.new_messages` or overrides `Tool.max_result_size_chars` now logs a warning the first time it runs. Both fields are kept for v1 custom-tool source compatibility but execution reads neither, so relying on them used to fail silently.
+  - New [docs/reference/limitations.md](docs/reference/limitations.md) collecting the documented sharp edges: what `max_iterations_per_turn` actually counts, cooperative abort, estimate-based token counts, `ask` hooks not forcing a prompt, skill `allowed-tools` being a name filter rather than a sandbox, and unknown constructor kwargs reaching backend construction instead of raising.
 - **2026-08-24 - Alan Code 1.3.12**
   - New `no_verbalize_warning` setting/constructor param (default off): a turn that calls tools with no visible text gets a `<system-reminder>` asking the model to narrate, carried into the next request with the tool results. Unlike `empty_response_retries` it is not a retry - the tool calls were valid, so they still run.
   - New `disable_thinking` setting/constructor param (default off): sends `chat_template_kwargs={"enable_thinking": false}` so a server-side chat template stops emitting reasoning. Applies to the LiteLLM (`backend="auto"`) transport only; the native Anthropic backend has no chat template and is left untouched, and an explicit caller-supplied `chat_template_kwargs` still wins.

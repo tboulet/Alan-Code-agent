@@ -106,6 +106,24 @@ class Usage:
         self.cache_read_input_tokens += other.cache_read_input_tokens
 
 
+def usage_from_stream(reported: dict[str, int] | None) -> Usage:
+    """Build a Usage from a stream event's usage dict, ignoring unknown keys.
+
+    Backends report usage as a plain dict whose keys vary by provider. Every
+    consumer of a backend stream must read it through here so the main loop
+    and the compaction summarizer account calls identically.
+    """
+    if not reported:
+        return Usage()
+    return Usage(
+        **{
+            k: v
+            for k, v in reported.items()
+            if k in Usage.__dataclass_fields__
+        }
+    )
+
+
 # ── Message origin ───────────────────────────────────────────────────────────
 
 

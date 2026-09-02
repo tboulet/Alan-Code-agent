@@ -27,6 +27,7 @@ from alancode.backends.base import (
     ToolSchema,
 )
 from alancode.backends.anthropic_models import lookup_anthropic_model
+from alancode.backends.wire import log_wire_request
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ class AnthropicBackend(LLMBackend):
 
         # Merge any extra kwargs (e.g. metadata, temperature)
         params.update(kwargs)
+        log_wire_request("anthropic", params)
 
         try:
             async with self._client.messages.stream(**params) as raw_stream:

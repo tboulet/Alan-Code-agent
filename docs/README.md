@@ -44,6 +44,7 @@ Welcome. Alan Code is a Python coding agent you can use as a **CLI**, a **browse
 - [Backends and model providers](reference/backends.md) — `auto` (LiteLLM), `anthropic-native` (direct SDK for Claude), `scripted`
 - [Local models](reference/local-models.md) — vLLM / SGLang / Ollama / llama.cpp
 - [Cost tracking](reference/cost.md) — what the "Session" line means
+- [Known limitations](reference/limitations.md) - documented sharp edges and what to do instead
 - [Python API](reference/python-api.md) — `AlanCodeAgent` and related
 
 ## Architecture (for contributors)

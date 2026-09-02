@@ -30,6 +30,7 @@ from alancode.messages.types import (
     Usage,
     UserMessage,
     get_messages_after_compact_boundary,
+    usage_from_stream,
 )
 from alancode.messages.factory import (
     create_assistant_error_message,
@@ -370,6 +371,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         memory_mode=params.memory_mode,
                         settings=params.settings,
                         budget=budget,
+                        cost_tracker=params.cost_tracker,
                     )
                     if result:
                         # Yield compaction artefacts so the caller can display/store them
@@ -532,13 +534,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     current_model = event.model
                     request_id = event.request_id
                     if event.usage:
-                        current_usage = Usage(
-                            **{
-                                k: v
-                                for k, v in event.usage.items()
-                                if k in Usage.__dataclass_fields__
-                            }
-                        )
+                        current_usage = usage_from_stream(event.usage)
 
                 # --- Text delta ---
                 elif isinstance(event, StreamTextDelta):
@@ -584,13 +580,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 elif isinstance(event, StreamMessageDelta):
                     stop_reason = event.stop_reason
                     if event.usage:
-                        for k, v in event.usage.items():
-                            if hasattr(current_usage, k):
-                                setattr(
-                                    current_usage,
-                                    k,
-                                    getattr(current_usage, k) + v,
-                                )
+                        current_usage.accumulate(usage_from_stream(event.usage))
 
                 # --- Stream error ---
                 elif isinstance(event, StreamError):
@@ -669,6 +659,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         memory_mode=params.memory_mode,
                         settings=params.settings,
                         budget=budget,
+                        cost_tracker=params.cost_tracker,
                     )
                     if emergency_result:
                         yield emergency_result.boundary_message

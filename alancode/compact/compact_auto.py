@@ -16,9 +16,16 @@ from alancode.messages.types import (
     UserMessage,
     AssistantMessage,
     SystemMessage,
+    Usage,
     get_messages_after_compact_boundary,
+    usage_from_stream,
 )
-from alancode.backends.base import StreamTextDelta, StreamError
+from alancode.backends.base import (
+    StreamError,
+    StreamMessageDelta,
+    StreamMessageStart,
+    StreamTextDelta,
+)
 from alancode.messages.factory import (
     create_compact_boundary_message,
     create_user_message,
@@ -103,6 +110,7 @@ async def compaction_auto(
     memory_mode: str = "on",
     settings: dict | None = None,
     budget: Any = None,  # ContextBudget | None - sizes the summarizer call
+    cost_tracker: Any = None,  # CostTracker | None - records the summarizer's own calls
 ) -> CompactionResult | None:
     """Compact the conversation by summarizing it via LLM (Layer C).
 
@@ -179,6 +187,8 @@ async def compaction_auto(
             call_max_tokens = compact_max_output_tokens
 
         response_text = ""
+        call_usage = Usage()
+        call_model = model
         try:
             if call_max_tokens < MIN_SUMMARY_OUTPUT_TOKENS:
                 # No legal room for a useful summary: route through the same
@@ -194,6 +204,13 @@ async def compaction_auto(
             ):
                 if isinstance(event, StreamTextDelta):
                     response_text += event.text
+                elif isinstance(event, StreamMessageStart):
+                    call_model = event.model or call_model
+                    if event.usage:
+                        call_usage = usage_from_stream(event.usage)
+                elif isinstance(event, StreamMessageDelta):
+                    if event.usage:
+                        call_usage.accumulate(usage_from_stream(event.usage))
                 elif isinstance(event, StreamError):
                     error_msg = event.error or ""
                     if is_prompt_too_long(error_msg):
@@ -234,6 +251,16 @@ async def compaction_auto(
         except Exception as e:
             logger.error("Compaction failed with exception: %s", e)
             return None
+
+        finally:
+            # The summarizer is billed like any other call, including the
+            # attempts a PTL retry throws away. Cost only: this payload is not
+            # the conversation, so it must never seed the loop's next-call
+            # token estimate.
+            if cost_tracker is not None and (
+                call_usage.total_input or call_usage.output_tokens
+            ):
+                cost_tracker.add_usage(call_usage, call_model or "")
 
     if not response_text.strip():
         logger.error("LLM returned empty response for compaction")

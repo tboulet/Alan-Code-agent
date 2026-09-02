@@ -33,6 +33,16 @@ Alan Code computes cost client-side from token counts × registered per-token pr
 - Cost is unknown for models LiteLLM doesn't price (local models, recent releases, fine-tunes).
 - Cache-pricing math is applied when the backend's cache metadata is returned on the response. The Anthropic backend reports cache tokens accurately. LiteLLM's streaming mode may not propagate the cache token breakdown from some backends (e.g., OpenRouter) — in that case, `/status` shows zero for cache tokens even though caching is active and savings are applied on the backend's billing side.
 
+## What is counted
+
+Every model call the agent makes is recorded, not just the ones whose answer you see:
+
+- normal turns;
+- recovery calls - output-truncation escalation and continuation, malformed-tool-call retries, and the empty-response nudge;
+- compaction (Layer C) summarizer calls, including attempts a prompt-too-long retry discards.
+
+A session that compacts often therefore costs more than its visible turns suggest. Cost tracking is not a budget enforcer - see [limitations.md](limitations.md).
+
 ## Tuning the budget
 
 Key settings that affect cost behavior (see [`cli.md`](cli.md)):

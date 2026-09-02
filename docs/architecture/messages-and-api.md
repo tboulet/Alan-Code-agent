@@ -147,9 +147,21 @@ agent._llm_perspective_callback = on_perspective
 
 Called before each main-model API call. This underscored callback is an internal GUI hook, not part of the stable public constructor API.
 
+### The actual wire
+
+To audit what the provider SDK really received, set `ALANCODE_WIRE_LOG` to a file path. Each outgoing request is appended as one JSON line - after backend shaping, with `api_key` and headers redacted:
+
+```bash
+ALANCODE_WIRE_LOG=/tmp/wire.jsonl alancode
+jq -r '.request | "\(.model) tools=\(.tools | length) stop=\(.stop)"' /tmp/wire.jsonl
+```
+
+Compaction summarizer calls appear here too - they go through the same backend.
+
 ## Related
 
 - [architecture/query-loop.md](query-loop.md) — where normalization happens (phase 4).
 - [architecture/system-prompt.md](system-prompt.md) — how the system half of the payload is built.
 - [concepts/context-and-compaction.md](../concepts/context-and-compaction.md) — how compaction reshapes the messages list.
+- [reference/limitations.md](../reference/limitations.md) - what this panel can and cannot prove.
 - `alancode/messages/` — implementation.

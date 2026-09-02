@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal
 
 
+# Historical default of Tool.max_result_size_chars. Execution does not enforce
+# it; a tool overriding it is reported once by run_tool_use.
+DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000
+
+
 @dataclass
 class ToolResult:
     """Result of a tool execution."""
@@ -129,7 +134,7 @@ class Tool(ABC):
         Returns:
             Historical default. It is not currently enforced.
         """
-        return 50_000
+        return DEFAULT_MAX_RESULT_SIZE_CHARS
 
     def matches_name(self, name: str) -> bool:
         """Check if this tool responds to ``name`` (primary or alias).
