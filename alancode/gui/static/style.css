@@ -48,6 +48,14 @@ body {
     font-weight: bold;
     color: var(--blue);
     font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.topbar-title .mascot {
+    height: 22px;
+    image-rendering: pixelated;  /* keep the sprite crisp when scaled */
 }
 
 .topbar-status {

@@ -14,8 +14,11 @@ from typing import Any
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
+from alancode.__version__ import __version__
+from alancode.cli.mascot import render_mascot
 from alancode.memory.memdir import ALAN_MD
 from alancode.messages.types import (
     AssistantMessage,
@@ -131,6 +134,42 @@ def _stream_text_delta(text: str, console, state: dict) -> None:
         i += 1
 
 
+def _short_tokens(count: int) -> str:
+    """Render a token count as 128K / 1.0M."""
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count // 1_000}K"
+    return str(count)
+
+
+def _git_branch(cwd: str) -> str | None:
+    """Current branch name, or None outside a repo / on a detached HEAD.
+
+    Read straight from .git/HEAD: the banner must not spawn a subprocess on
+    every startup, and a worktree's .git is a file pointing elsewhere.
+    """
+    try:
+        git = Path(cwd, ".git")
+        if git.is_file():
+            git = Path(git.read_text().split("gitdir:", 1)[1].strip())
+        head = (git / "HEAD").read_text().strip()
+    except (OSError, IndexError):
+        return None
+    return head.split("refs/heads/", 1)[1] if "refs/heads/" in head else None
+
+
+def _context_line(agent: Any) -> str:
+    """Window size plus the fraction of it that triggers compaction."""
+    from alancode.budget import resolve_context_budget
+
+    budget = resolve_context_budget(
+        agent._backend.get_model_info(agent._model), agent._settings,
+    )
+    percent = round(100 * budget.threshold_compaction / budget.context_window)
+    return f"Context: {_short_tokens(budget.context_window)} window, compacts at ~{percent}%"
+
+
 def display_welcome(console: Console, agent: Any) -> None:
     """Show the welcome banner at the start of a session."""
     model = agent._model
@@ -138,18 +177,57 @@ def display_welcome(console: Console, agent: Any) -> None:
     cwd = agent._cwd or ""
     has_alan_md = Path(cwd, ALAN_MD).is_file() if cwd else False
 
-    hint = ""
-    if not has_alan_md:
-        hint = f"\n[dim]Tip: create {ALAN_MD} (or use /init) to give Alan project context[/dim]"
+    branch = _git_branch(cwd) if cwd else None
+    where = cwd.replace(str(Path.home()), "~", 1) if cwd else "(no directory)"
+    if branch:
+        where = f"{where} ({branch})"
 
-    console.print(
-        Panel.fit(
-            f"[bold blue]Alan Code[/bold blue] -- Open-source coding agent\n"
-            f"Session: {session_short}... | Model: {model}\n"
-            f"Type /help for commands, Ctrl+C to interrupt{hint}",
-            border_style="blue",
+    try:
+        context = _context_line(agent)
+    except Exception:
+        # A banner must never be the reason a session fails to start.
+        logger.debug("Could not resolve context for the banner", exc_info=True)
+        context = "Context: resolving on first call"
+
+    memory = agent._memory_mode
+    project = ALAN_MD if has_alan_md else f"no {ALAN_MD}, /init to add one"
+
+    endpoint = agent._settings.get("base_url") or agent._settings.get("api_base")
+    backend = agent._settings.get("backend") or "auto"
+    backend_line = f"Backend: {backend}"
+    if endpoint:
+        backend_line += f" -> {endpoint}"
+
+    info = Text.from_markup(
+        f"Session: {session_short}... | Model: {model}\n"
+        f"Dir: {where}\n"
+        f"{context}\n"
+        f"Memory: {memory} | {project}\n"
+        f"{backend_line}\n"
+        f"[dim]/help for commands, /exit to quit, Ctrl+C interrupts a turn[/dim]"
+    )
+
+    # Rich already decided whether this console gets color, so the mascot is
+    # told rather than sniffing the stream itself.
+    mascot = Text.from_ansi(
+        render_mascot(force_color=console.is_terminal and not console.no_color)
+    )
+
+    body = Table.grid(padding=(0, 2))
+    body.add_column(vertical="middle")
+    body.add_column(vertical="middle")
+    body.add_row(mascot, info)
+
+    layout = Table.grid()
+    layout.add_column()
+    layout.add_row(
+        Text.from_markup(
+            f"[bold blue]Alan Code {__version__}[/bold blue] -- Open-source coding agent"
         )
     )
+    layout.add_row(body)
+
+    console.print(Panel.fit(layout, border_style="blue"))
 
 
 def display_event(

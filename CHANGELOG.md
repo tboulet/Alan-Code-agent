@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-09-02 - Alan Code 1.3.14**
+  - The CLI welcome banner now reports what the session actually resolved to: version, working directory and git branch, context window with the percentage that triggers compaction, memory mode and whether `ALAN.md` was found, and the backend with its endpoint. It also stops telling people `Ctrl+C` quits - at the prompt that only prints "Use /exit to quit."; `Ctrl+C` interrupts a running turn.
+  - Alan the jellyfish now appears in all three surfaces: the CLI welcome banner renders him as terminal pixel art beside the session/model lines (two sprite rows per terminal cell, truecolor when the terminal has it, half-block silhouette when piped or under `NO_COLOR`), the GUI shows him in the top bar and as the favicon, and the README leads with him.
 - **2026-08-25 - Alan Code 1.3.13**
   - Compaction (Layer C) summarizer calls now reach cost tracking. The summarizer spends real tokens - including the attempts a prompt-too-long retry discards - and none of it was counted in session totals. It records cost only: the summarizer payload is not the conversation, so it never seeds the loop's next-call token estimate.
   - New `ALANCODE_WIRE_LOG` environment variable: set it to a file path and every outgoing provider request is appended as one JSON line, after backend shaping, with `api_key` and headers redacted. The GUI's LLM perspective is rendered before that shaping, so it could not prove what was actually sent. Off by default; an unopenable path warns instead of raising.

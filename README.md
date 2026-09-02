@@ -1,5 +1,9 @@
 # Alan Code
 
+<p align="center">
+  <img src="assets/images/alan_mascot_pixelart.png" alt="Alan, the Alan Code jellyfish" width="120"/>
+</p>
+
 An open-source python coding agent, inspired by Claude Code. Usable in CLI, GUI, or as a Python library to build upon.
 
 Alan Code implements many features of modern CLI agents, such as tool use, hooks, skills, context compaction and more, and adds cross-session memory, live cost tracking, and a GUI with Chat and an LLM perspective.
@@ -248,6 +252,7 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
+- **2026-09-02 - Alan Code 1.3.14** - Alan the jellyfish joins the CLI banner, the GUI top bar, and this README.
 - **2026-08-25 - Alan Code 1.3.13** - Compaction summarizer calls now show up in cost tracking, `ALANCODE_WIRE_LOG=<path>` dumps the exact provider request as JSONL for wire audits, and a tool relying on an inert v1 compatibility field says so. New [known-limitations reference](docs/reference/limitations.md).
 - **2026-08-24 - Alan Code 1.3.12** - Added two optional controls for local reasoning models: `no_verbalize_warning` (remind a model that acts without narrating) and `disable_thinking` (ask a server-side chat template to stop emitting reasoning). Also a documentation and code cleanup pass, including a CLI that no longer lags settings on tool-call formats.
 - **2026-08-19 - Alan Code 1.3.11** - Added optional cross-turn reasoning re-injection (`persist_thinking`) and bounded recovery for reasoning-only/empty replies. The 1.3.2-1.3.11 series also hardened max-output recovery and added `bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, and auto-detected text tool-call formats for local models.
