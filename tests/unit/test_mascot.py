@@ -1,5 +1,6 @@
 """The jellyfish: terminal rendering, and the PNG the GUI and README point at."""
 
+import struct
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from alancode.settings import SETTINGS_DEFAULTS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GUI_STATIC = REPO_ROOT / "alancode" / "gui" / "static"
 MASCOT_PNG = "alan_mascot_pixelart.png"
+TITLED_PNG = "alan_mascot_pixelart_with_text.png"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
@@ -109,7 +111,26 @@ def test_endpoint_is_shown_only_when_one_is_configured():
     assert "Backend: auto -> http://localhost:8000/v1" in _banner(Remote())
 
 
-def test_a_broken_budget_does_not_stop_the_session():
+def test_a_bad_budget_config_is_reported_not_hidden():
+    # Regression: the banner used to swallow ConfigError behind a bland
+    # placeholder, so the first prompt was what discovered the broken session.
+    from alancode.budget import ConfigError
+
+    class BadConfig(FakeAgent):
+        class _backend:
+            @staticmethod
+            def get_model_info(model):
+                raise ConfigError(
+                    "compact_max_output_tokens (20000) must be smaller "
+                    "than the context window (16384)."
+                )
+
+    out = _banner(BadConfig())
+    assert "invalid budget configuration" in out
+    assert "compact_max_output_tokens (20000)" in out
+
+
+def test_an_unexpected_failure_does_not_stop_the_session():
     class Exploding(FakeAgent):
         class _backend:
             @staticmethod
@@ -134,7 +155,19 @@ def test_gui_markup_references_the_mascot():
     assert 'rel="icon"' in index
 
 
-def test_readme_references_the_mascot():
+def test_readme_uses_the_titled_mascot():
+    # The GUI keeps the bare sprite; only the README carries the titled card.
     readme = (REPO_ROOT / "README.md").read_text()
-    assert f"assets/images/{MASCOT_PNG}" in readme
-    assert (REPO_ROOT / "assets" / "images" / MASCOT_PNG).is_file()
+    assert f"assets/images/{TITLED_PNG}" in readme
+    assert (REPO_ROOT / "assets" / "images" / TITLED_PNG).is_file()
+
+
+def test_titled_mascot_is_a_wide_rgba_png():
+    # Read IHDR directly: Pillow is not an alancode dependency, and the two
+    # facts that matter here are in the header.
+    raw = (REPO_ROOT / "assets" / "images" / TITLED_PNG).read_bytes()
+    assert raw[:8] == PNG_MAGIC
+    width, height = struct.unpack(">II", raw[16:24])
+    colour_type = raw[25]
+    assert colour_type == 6                 # RGBA: the soft edge needs alpha
+    assert width > height                   # sprite beside the text, not above it

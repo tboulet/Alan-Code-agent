@@ -42,6 +42,23 @@ LiteLLM uses the model name prefix to determine the API protocol:
 
 For local servers, use `openai/<model>` + `--base-url`.
 
+## Worked example: a 27B GGUF on a 12 GB laptop GPU
+
+Serving `Qwen3.8-27B` (Q4_K_M, 16 GB of weights) on a 12 GB card, with the parts that are easy to get wrong:
+
+```bash
+llama-server -m ~/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf \
+  --n-gpu-layers 36 --ctx-size 16384 --host 127.0.0.1 --port 8080 --jinja
+
+alancode --model openai/qwen3.8-27b --base-url http://127.0.0.1:8080/v1 \
+  --cw 16384 --tool-call-format auto
+```
+
+- **`--tool-call-format auto` is doing real work here.** Qwen-family models served locally often emit a tool call as plain text that the server never converts into OpenAI `tool_calls`, so native tool calling silently produces no action. `auto` strict-parses every registered format and executes whichever one parses. A single named format is a worse bet: the same model may emit a fenced bash block on one turn and function-tag markup on the next.
+- **`--cw` is not optional.** Alan probes llama.cpp's `/props` for the served window, but a value you set on the server is authoritative; passing it avoids a budget resolved against the model's theoretical 262K maximum.
+- **Weights larger than VRAM are fine**, at a price. Layers that do not fit run on the CPU, so throughput falls to a few tokens per second and an agent turn takes tens of seconds. Raise `--n-gpu-layers` until the server reports an allocation failure, then step back one.
+- **A GGUF may carry layers your runtime rejects.** Multi-token-prediction builds ship an extra speculative block (`nextn_predict_layers` in the header, an extra index in `block_count`). llama.cpp logs `unused tensor blk.N.* -- ignoring` and loads; other runtimes refuse the file outright with a missing-projection error. Check the header before assuming the download is corrupt.
+
 ## Context-window detection
 
 Alan needs the model's real context window to reserve output space and compact at a safe point. With the default `context_window: "auto"`, it tries model-registry data, server metadata, and a one-time backend probe, then caches a successful probe in `~/.alan/context_windows.json`.

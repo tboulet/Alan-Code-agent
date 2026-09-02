@@ -18,6 +18,7 @@ from rich.table import Table
 from rich.text import Text
 
 from alancode.__version__ import __version__
+from alancode.budget import ConfigError
 from alancode.cli.mascot import render_mascot
 from alancode.memory.memdir import ALAN_MD
 from alancode.messages.types import (
@@ -182,8 +183,14 @@ def display_welcome(console: Console, agent: Any) -> None:
     if branch:
         where = f"{where} ({branch})"
 
+    # A bad budget configuration fails every turn, so say so here rather than
+    # letting the first prompt be the one to discover it.
+    config_error: str | None = None
     try:
         context = _context_line(agent)
+    except ConfigError as e:
+        config_error = str(e)
+        context = "Context: [red]invalid budget configuration[/red]"
     except Exception:
         # A banner must never be the reason a session fails to start.
         logger.debug("Could not resolve context for the banner", exc_info=True)
@@ -228,6 +235,8 @@ def display_welcome(console: Console, agent: Any) -> None:
     layout.add_row(body)
 
     console.print(Panel.fit(layout, border_style="blue"))
+    if config_error:
+        console.print(f"[red]{config_error}[/red] Fix it in .alan/settings.json.")
 
 
 def display_event(

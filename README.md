@@ -1,7 +1,7 @@
 # Alan Code
 
 <p align="center">
-  <img src="assets/images/alan_mascot_pixelart.png" alt="Alan, the Alan Code jellyfish" width="120"/>
+  <img src="assets/images/alan_mascot_pixelart_with_text.png" alt="Alan Code" width="260"/>
 </p>
 
 An open-source python coding agent, inspired by Claude Code. Usable in CLI, GUI, or as a Python library to build upon.
