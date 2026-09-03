@@ -35,5 +35,6 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from alancode.__version__ import __version__
 from alancode.agent import AlanCodeAgent
+from alancode.provenance import get_provenance, provenance_string
 
-__all__ = ["AlanCodeAgent", "__version__"]
+__all__ = ["AlanCodeAgent", "__version__", "get_provenance", "provenance_string"]

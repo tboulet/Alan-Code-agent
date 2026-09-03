@@ -304,7 +304,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # -- Phase 2: Message preparation (compaction pipeline) ----------
         messages_for_query = get_messages_after_compact_boundary(state.messages)
         fallback_result: HardTruncationResult | None = None
-        compaction_failed = False
 
         # Layer A: per-result size cap (always on, middle-out truncation)
         a_truncated = 0
@@ -389,7 +388,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                             "consecutive_failures": 0,
                         }
                     else:
-                        compaction_failed = True
                         state.auto_compact_tracking = {
                             "compacted": False,
                             "turn_counter": 0,
@@ -397,7 +395,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         }
                 except Exception as e:
                     logger.warning("Auto-compact failed: %s", e)
-                    compaction_failed = True
                     state.auto_compact_tracking = {
                         "compacted": False,
                         "turn_counter": 0,
@@ -422,14 +419,13 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             new_messages_since_last_call=None,
         )
 
-        # If summarization failed and the request still cannot legally be
-        # sent, use the deterministic fallback now instead of ending the turn.
-        # A request over the blocking limit cannot wait for later turns.
-        if (
-            fallback_result is None
-            and compaction_failed
-            and current_tokens >= blocking_limit
-        ):
+        # If the request still cannot legally be sent, use the deterministic
+        # fallback now instead of ending the turn. A request over the blocking
+        # limit cannot wait for later turns. This must not be gated on
+        # compaction having FAILED: a summary that succeeds and still leaves the
+        # payload over the limit is just as fatal, and that path used to fall
+        # through to the blocking error and kill the session.
+        if fallback_result is None and current_tokens >= blocking_limit:
             failures = (state.auto_compact_tracking or {}).get(
                 "consecutive_failures", 1,
             )

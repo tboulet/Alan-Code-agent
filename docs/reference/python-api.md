@@ -182,6 +182,29 @@ await agent.close()
 
 Idempotently fires `session_end` hooks, closes the backend's owned client/server resources, and releases the session lock. Call it when done; the CLI does this on `/exit`.
 
+## Recording which alancode produced a run
+
+```python
+import alancode
+
+alancode.get_provenance()
+# {'version': '1.3.15', 'path': '/home/you/projects/Alan-Code-agent/alancode',
+#  'git_sha': 'a2b0affa18c0', 'git_dirty': True, 'git_branch': 'main'}
+
+alancode.provenance_string()   # '1.3.15 (a2b0affa18c0, dirty)'
+```
+
+Use this rather than `importlib.metadata.version("alancode")` in anything that
+records what produced a result. An editable install (`pip install -e`) keeps the
+dist-info written at install time, so package metadata can report a version the
+running code has not been for many releases, and it never changes as the source
+does.
+
+`git_dirty` is the field that matters for reproducibility: when true, the run
+used uncommitted edits and `git_sha` alone does not identify the code. Outside a
+git checkout the three `git_*` fields are `None` and `version` plus `path` still
+apply.
+
 ## Programmatic mode
 
 Use `programmatic=True` when Alan is being driven by another program (a benchmark harness, a parent agent, an automated pipeline) rather than a developer at a terminal. It detaches Alan from project- and host-level state that's normally helpful for an interactive assistant but contaminates a controlled run.

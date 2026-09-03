@@ -48,14 +48,17 @@ Serving `Qwen3.8-27B` (Q4_K_M, 16 GB of weights) on a 12 GB card, with the parts
 
 ```bash
 llama-server -m ~/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf \
-  --n-gpu-layers 36 --ctx-size 16384 --host 127.0.0.1 --port 8080 --jinja
+  --n-gpu-layers 36 --parallel 1 --ctx-size 65536 \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --host 127.0.0.1 --port 8080 --jinja
 
 alancode --model openai/qwen3.8-27b --base-url http://127.0.0.1:8080/v1 \
-  --cw 16384 --tool-call-format auto
+  --cw 65536 --tool-call-format auto
 ```
 
 - **`--tool-call-format auto` is doing real work here.** Qwen-family models served locally often emit a tool call as plain text that the server never converts into OpenAI `tool_calls`, so native tool calling silently produces no action. `auto` strict-parses every registered format and executes whichever one parses. A single named format is a worse bet: the same model may emit a fenced bash block on one turn and function-tag markup on the next.
 - **`--cw` is not optional.** Alan probes llama.cpp's `/props` for the served window, but a value you set on the server is authoritative; passing it avoids a budget resolved against the model's theoretical 262K maximum.
+- **`--parallel 1` and quantized KV buy most of the context back.** llama-server reserves a KV cache per slot and defaults to several; one interactive user needs one. Adding `--cache-type-k/-v q8_0` roughly halves what remains. On a 12 GB card those two changes took the same model from a 16K window to 65K *and* made generation about three times faster, because a smaller cache means less memory traffic per token.
 - **Weights larger than VRAM are fine**, at a price. Layers that do not fit run on the CPU, so throughput falls to a few tokens per second and an agent turn takes tens of seconds. Raise `--n-gpu-layers` until the server reports an allocation failure, then step back one.
 - **A GGUF may carry layers your runtime rejects.** Multi-token-prediction builds ship an extra speculative block (`nextn_predict_layers` in the header, an extra index in `block_count`). llama.cpp logs `unused tensor blk.N.* -- ignoring` and loads; other runtimes refuse the file outright with a missing-projection error. Check the header before assuming the download is corrupt.
 

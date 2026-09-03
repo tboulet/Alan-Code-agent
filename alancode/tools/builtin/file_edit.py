@@ -75,20 +75,14 @@ class FileEditTool(Tool):
             given_keys = list(args.keys())
             return ToolResult(
                 data=f"Error: 'file_path' parameter is required but was not provided. "
-                     f"Got parameters: {given_keys}. "
-                     f"Use <arg_key>file_path</arg_key><arg_value>/absolute/path/to/file</arg_value> "
-                     f"<arg_key>old_string</arg_key><arg_value>TEXT_TO_FIND</arg_value> "
-                     f"<arg_key>new_string</arg_key><arg_value>REPLACEMENT_TEXT</arg_value>",
+                     f"Got parameters: {given_keys}.",
                 is_error=True,
             )
         if not old_string:
             given_keys = list(args.keys())
             return ToolResult(
                 data=f"Error: 'old_string' parameter is required but was not provided. "
-                     f"Got parameters: {given_keys}. "
-                     f"Use <arg_key>file_path</arg_key><arg_value>/absolute/path/to/file</arg_value> "
-                     f"<arg_key>old_string</arg_key><arg_value>TEXT_TO_FIND</arg_value> "
-                     f"<arg_key>new_string</arg_key><arg_value>REPLACEMENT_TEXT</arg_value>",
+                     f"Got parameters: {given_keys}.",
                 is_error=True,
             )
         if old_string == new_string:

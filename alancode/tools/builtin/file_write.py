@@ -58,9 +58,7 @@ class FileWriteTool(Tool):
             given_keys = list(args.keys())
             return ToolResult(
                 data=f"Error: 'file_path' parameter is required but was not provided. "
-                     f"Got parameters: {given_keys}. "
-                     f"Use <arg_key>file_path</arg_key><arg_value>/absolute/path/to/file</arg_value> "
-                     f"and <arg_key>content</arg_key><arg_value>FILE_CONTENT</arg_value>",
+                     f"Got parameters: {given_keys}.",
                 is_error=True,
             )
 

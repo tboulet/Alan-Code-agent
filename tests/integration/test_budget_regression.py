@@ -89,11 +89,15 @@ class AuditedBackend(LLMBackend):
         context_window: int,
         *,
         fail_summarizer: bool = False,
+        summary_chars: int = 0,
         model_max_output_tokens: int = 8_192,
     ) -> None:
         self.inner = inner
         self.cw = context_window
         self.fail_summarizer = fail_summarizer
+        # >0 makes the summarizer SUCCEED with an oversized summary, modelling
+        # compaction that works and still leaves the payload unsendable.
+        self.summary_chars = summary_chars
         self.model_max_output_tokens = model_max_output_tokens
         self.violations: list[dict] = []
         self.calls: list[dict] = []
@@ -142,9 +146,11 @@ class AuditedBackend(LLMBackend):
                     error="scripted summarizer failure", error_type="api_error",
                 )
                 return
-            yield StreamTextDelta(
-                text="<summary>Compact summary of the prior work.</summary>"
+            body = (
+                flood_payload(self.summary_chars) if self.summary_chars
+                else "Compact summary of the prior work."
             )
+            yield StreamTextDelta(text=f"<summary>{body}</summary>")
             yield StreamMessageStop()
             return
 
@@ -540,6 +546,35 @@ class TestConfigErrorGraceful:
 
 class TestBreakerFallbackLiveness:
     @pytest.mark.asyncio
+    async def test_successful_but_insufficient_summary_still_survives(self, tmp_path):
+        """Compaction SUCCEEDS and the payload is still over the blocking limit.
+
+        Found on a live JZ benchmark run: 25 successful summaries alongside 25
+        'Conversation too long' hard stops. The liveness fallback used to be
+        gated on compaction having FAILED, so a summary that worked and was
+        merely too big fell through to the blocking error and killed the turn.
+        A session must never die of context, whatever the reason it is over.
+        """
+        cw = 32_768
+        inner = ScriptedBackend.from_responses(
+            [tool_call("Dummy", {}) for _ in range(14)],
+            fallback=text("All done."),
+        )
+        # The summarizer returns a summary far too large to fit under the
+        # blocking limit: compaction reports success, the payload stays illegal.
+        backend = AuditedBackend(inner, context_window=cw, summary_chars=90_000)
+        agent = make_agent(tmp_path, backend)
+
+        events = await run_turn(agent, "flood me")
+
+        assert backend.summarizer_calls >= 1, "compaction never ran"
+        assert final_text(events) != "", "the turn produced no answer at all"
+        assert "Conversation too long" not in final_text(events), (
+            "a successful-but-oversized summary still killed the turn: the "
+            "liveness fallback is gated on compaction FAILING"
+        )
+        assert_survived(backend, events)
+
     async def test_failing_summarizer_hard_truncates_and_survives(self, tmp_path):
         """Layer C fails every time: after 3 attempts the breaker trips,
         the fallback hard-truncates with a visible notice, and the session

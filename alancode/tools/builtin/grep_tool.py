@@ -93,8 +93,7 @@ class GrepTool(Tool):
             given_keys = list(args.keys())
             return ToolResult(
                 data=f"Error: 'pattern' parameter is required but was not provided. "
-                     f"Got parameters: {given_keys}. "
-                     f"Use <arg_key>pattern</arg_key><arg_value>YOUR_REGEX_PATTERN</arg_value>",
+                     f"Got parameters: {given_keys}.",
                 is_error=True,
             )
 

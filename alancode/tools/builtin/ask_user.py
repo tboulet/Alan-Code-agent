@@ -50,17 +50,13 @@ class AskUserQuestionTool(Tool):
         if not isinstance(options, list) or len(options) < 1:
             return (
                 f"Error: 'options' parameter must be a list with at least 1 item. "
-                f"Got parameters: {given_keys}. "
-                f"Use <arg_key>question</arg_key><arg_value>YOUR_QUESTION</arg_value> "
-                f"<arg_key>options</arg_key><arg_value>[\"Option A\", \"Option B\"]</arg_value>"
+                f"Got parameters: {given_keys}."
             )
         question = args.get("question", "")
         if not question or not question.strip():
             return (
                 f"Error: 'question' parameter is required but was not provided. "
-                f"Got parameters: {given_keys}. "
-                f"Use <arg_key>question</arg_key><arg_value>YOUR_QUESTION</arg_value> "
-                f"<arg_key>options</arg_key><arg_value>[\"Option A\", \"Option B\"]</arg_value>"
+                f"Got parameters: {given_keys}."
             )
         return None
 
