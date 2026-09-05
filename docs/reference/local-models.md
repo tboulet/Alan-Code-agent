@@ -15,9 +15,18 @@ Ollama uses the `ollama/` prefix — LiteLLM auto-detects `localhost:11434`, no 
 
 ## Tool calling
 
-By default, Alan uses **native tool calling**: schemas are sent in the request and streamed OpenAI-compatible `tool_calls` are assembled by ID/index before execution. This works with servers that support it, including SimpleLM with `--tool-parser universal`, vLLM with a matching `--tool-call-parser`, and tool-capable Ollama models.
+Which mode you need is decided by **the server, not the model**. A model that emits perfectly good tool markup still produces zero executed calls if the two layers disagree:
 
-For models without native tool support, use **text-based tool calling** — Alan injects tool schemas into the system prompt and parses tool calls from the model's text output:
+```
+parser on the server  ->  native, NEVER a text format
+no parser             ->  a text format, NEVER native
+```
+
+Server-side parsing and client-side extraction are mutually exclusive, and enabling both is worse than enabling neither - the server consumes the markup it half-recognises and returns neither a structured `tool_call` nor the text, so neither layer sees a complete signal. Both failure directions are silent: the turn looks clean, the model looks capable, and nothing runs.
+
+By default, Alan uses **native tool calling**: schemas are sent in the request and streamed OpenAI-compatible `tool_calls` are assembled by ID/index before execution. Use it when the server does the parsing - SimpleLM with `--tool-parser universal`, vLLM or SGLang with a matching `--tool-call-parser`, tool-capable Ollama models.
+
+When the server has no parser, Alan must do the extraction itself: **text-based tool calling** injects tool schemas into the system prompt and parses tool calls out of the model's text output. This is the required mode for llama.cpp and for SimpleLM with `--tool-parser=none`, whatever the model is capable of:
 
 ```bash
 alancode --model openai/<model> --base-url http://localhost:8000/v1 --tool-call-format hermes
