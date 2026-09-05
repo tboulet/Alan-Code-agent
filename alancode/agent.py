@@ -1062,6 +1062,18 @@ class AlanCodeAgent:
         model_info = self._backend.get_model_info(self._model)
         return resolve_context_budget(model_info, self._settings).context_window
 
+    @property
+    def context_window_source(self) -> str:
+        """Where ``context_window`` came from: ``override``, ``registry``,
+        ``server``, ``known_table``, ``cache`` or ``fallback``.
+
+        ``fallback`` means nothing resolved and the window is a conservative
+        guess - the value alone cannot be distinguished from a real one, so a
+        harness recording the number should record this beside it.
+        """
+        info = self._backend.get_model_info(self._model)
+        return getattr(info, "cw_source", "registry")
+
     def update_session_setting(self, key: str, value: Any) -> str | None:
         """Validate, update a setting for this session in-memory + on disk.
 

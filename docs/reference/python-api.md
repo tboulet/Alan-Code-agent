@@ -182,6 +182,25 @@ await agent.close()
 
 Idempotently fires `session_end` hooks, closes the backend's owned client/server resources, and releases the session lock. Call it when done; the CLI does this on `/exit`.
 
+## Recording the resolved context window
+
+```python
+agent.context_window          # 32768
+agent.context_window_source   # 'fallback'  <- it was a GUESS, not a fact
+```
+
+`context_window_source` is one of `override`, `registry`, `server`,
+`known_table`, `cache` or `fallback`. Only `fallback` is an alarm: nothing
+resolved, so Alan assumed a conservative 32768 and the number is
+indistinguishable from a real one in a log.
+
+This matters for a served model a registry has never heard of. Alan warns on
+stderr once per model, but in a batch run nobody reads stderr: the run looks
+normal, compacts early and often, and a long-context task silently gets a
+fraction of the hardware. Record both values in your run metadata and treat
+`fallback` as a configuration error - pass `context_window` explicitly, sized
+against the server's real KV pool rather than the model's advertised length.
+
 ## Recording which alancode produced a run
 
 ```python
