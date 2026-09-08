@@ -36,7 +36,9 @@ Available formats: `hermes`, `hermes_xml`, `glm`, `alan`, `meta_json`, `bash_blo
 
 Text-tool parsing examines visible content and, for formats that permit it, separate reasoning content. This matters for Qwen and other reasoning models that place structured markup inside `<think>` or `reasoning_content`. Thinking stays private while the structured call executes. `bash_block` never parses reasoning, so shell drafts cannot become actions. A wholly empty or reasoning-only response gets up to `empty_response_retries` corrective nudges (default 2); if still empty, it surfaces with `api_error="empty_response"` instead of looking successful.
 
-As practical starting points, use `hermes` for Qwen3-family JSON-in-tag output, `hermes_xml` for function-tag variants, `glm` for GLM output, `meta_json` for Llama JSON output, or `bash_block` for models reliably trained to emit one shell block. `auto` teaches `bash_block` but strict-parses every registered format, which is useful when a model ignores the requested convention. The exact format remains model/template dependent.
+As practical starting points, use `hermes` for Qwen3-family JSON-in-tag output, `hermes_xml` for function-tag variants, `glm` for GLM output, `meta_json` for Llama JSON output, or `bash_block` for models reliably trained to emit one shell block.
+
+One property worth choosing on when the agent writes code: **whether argument values travel as raw text or as JSON**. `hermes_xml`, `glm` and `bash_block` carry the value verbatim between markers, so a heredoc with embedded quotes, backslashes and newlines arrives byte-for-byte. `hermes`, `alan` and `meta_json` put arguments in a JSON object, so the model must escape them correctly - and a shell snippet is exactly where models get that wrong. If a model emits either dialect, prefer the raw-text one for a code-writing agent. `auto` teaches `bash_block` but strict-parses every registered format, which is useful when a model ignores the requested convention. The exact format remains model/template dependent.
 
 ## Model name format
 
