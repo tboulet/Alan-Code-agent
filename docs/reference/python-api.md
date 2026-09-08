@@ -199,11 +199,18 @@ agent.context_window_source   # 'fallback'  <- it was a GUESS, not a fact
 `max_model_len` from `/v1/models`, which is the model's *configured* context
 length - not necessarily what the server can actually allocate. A serve that
 caps its KV pool below that (measured on one multinode SGLang serve:
-`max_model_len` 262144, usable pool 220649) reports the larger number, so
-compaction is sized against space that does not exist and the conversation
-overflows before Alan believes it is close. The pool size is not in the API; only
-the operator knows it. On a self-served endpoint, pass `context_window`
-explicitly and treat `server` as an estimate.
+`max_model_len` 262144, usable pool 220643) reports the larger number, so
+compaction is sized against space that does not exist. The pool size is not in
+the API; only the operator knows it. On a self-served endpoint, pass
+`context_window` explicitly and treat `server` as an estimate.
+
+Alan does not fail silently when it happens. The server refuses with an explicit
+error naming its real ceiling (`Input length (235012 tokens) exceeds the maximum
+allowed length (220643 tokens)`), `is_prompt_too_long()` matches it, and the
+turn recovers through emergency compaction and a retry. So an over-estimated
+window costs a wasted round trip and a summarization per overflow rather than a
+failed run - worth fixing for cost and latency, not because it silently breaks
+long tasks.
 
 This matters for a served model a registry has never heard of. Alan warns on
 stderr once per model, but in a batch run nobody reads stderr: the run looks
