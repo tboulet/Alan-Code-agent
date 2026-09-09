@@ -77,14 +77,15 @@ class TextTurnsBackend(LLMBackend):
         return ModelInfo(context_window=131_072)
 
 
-def make_agent(tmp_path, backend, tool, tool_call_format="bash_block"):
+def make_agent(tmp_path, backend, tool, tool_call_format="bash_block",
+               programmatic=True):
     return AlanCodeAgent(
         backend=backend,
         cwd=str(tmp_path),
         tools=[tool],
         tool_call_format=tool_call_format,
         permission_mode="yolo",
-        programmatic=True,
+        programmatic=programmatic,
     )
 
 
@@ -157,7 +158,7 @@ async def test_truncation_trumps_malformed_detection(tmp_path):
         (None, "recovered"),
     ])
     tool = RecordingBashTool()
-    agent = make_agent(tmp_path, backend, tool, tool_call_format="auto")
+    agent = make_agent(tmp_path, backend, tool, tool_call_format="auto", programmatic=False)
 
     events = [event async for event in agent.query_events_async("go")]
 
@@ -179,7 +180,7 @@ async def test_max_tokens_cut_fence_not_repaired(tmp_path):
         (None, "recovered"),
     ])
     tool = RecordingBashTool()
-    agent = make_agent(tmp_path, backend, tool)
+    agent = make_agent(tmp_path, backend, tool, programmatic=False)
 
     events = [event async for event in agent.query_events_async("go")]
 
