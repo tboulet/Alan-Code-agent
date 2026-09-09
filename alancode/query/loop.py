@@ -1004,22 +1004,10 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             for result in truncated_tool_results:
                 yield result
 
-            # Try escalation first. An explicit max_output_tokens is a
-            # starting budget, not a recovery ceiling: escalate whenever
-            # the target is higher (clamp_output_budget still bounds the
-            # actual call to the window).
-            escalated = params.settings.get("escalated_max_tokens", 64000)
-            if (
-                state.max_output_tokens_override is None
-                and budget.max_output_tokens < escalated
-            ):
-                logger.info("Escalating max_tokens to %d", escalated)
-                state.max_output_tokens_override = escalated
-                state.messages = list(messages_for_query)
-                state.transition = "max_output_tokens_escalate"
-                continue
-
-            # Multi-turn recovery
+            # Recovery before escalation: recovery resumes from the text
+            # already generated, while escalation re-sends the same prompt
+            # and pays for that text again, so escalating first costs more
+            # even when it succeeds.
             if state.max_output_tokens_recovery_count < params.settings.get("max_output_tokens_recovery_limit", 3):
                 state.max_output_tokens_recovery_count += 1
                 recovery_msg = create_user_message(
@@ -1037,7 +1025,22 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 state.transition = "max_output_tokens_recovery"
                 continue
 
-            # Recovery exhausted: end the turn with the truncated response.
+            # Recovery exhausted: one escalated attempt, which buys a single
+            # clean generation for work that resuming could not finish. An
+            # explicit max_output_tokens is a starting budget, not a ceiling
+            # (clamp_output_budget still bounds the call to the window).
+            escalated = params.settings.get("escalated_max_tokens", 64000)
+            if (
+                state.max_output_tokens_override is None
+                and budget.max_output_tokens < escalated
+            ):
+                logger.info("Escalating max_tokens to %d", escalated)
+                state.max_output_tokens_override = escalated
+                state.messages = list(messages_for_query)
+                state.transition = "max_output_tokens_escalate"
+                continue
+
+            # Both paths exhausted: end the turn with the truncated response.
             return
 
         # -- Phase 7b: No tool use -> normal completion ------------------
