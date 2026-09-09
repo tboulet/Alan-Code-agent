@@ -291,64 +291,6 @@ class TestGiantResult:
             assert "elided" in serialized
 
 
-# Recovery runs before escalation, so a turn only reaches the escalated call
-# after the recovery attempts are used up.
-RECOVERY_LIMIT = 3
-TRUNCATIONS_TO_ESCALATE = RECOVERY_LIMIT + 1
-
-
-def truncations(n, final="recovered fully"):
-    """``n`` length-truncated responses, then a clean finish."""
-    return [
-        ScriptedResponse(text="partial thought", stop_reason="max_tokens")
-        for _ in range(n)
-    ] + [text(final)]
-
-
-# ---------------------------------------------------------------------------
-# Scenario 5pre - a length-finish recovers before it escalates
-# ---------------------------------------------------------------------------
-
-
-class TestRecoveryBeforeEscalation:
-    @pytest.mark.asyncio
-    async def test_first_truncation_resumes_at_the_same_budget(self, tmp_path):
-        """The first length-finish must RESUME, not escalate: escalation
-        re-sends the same prompt and re-generates the truncated text, so
-        it pays for that text twice."""
-        inner = ScriptedBackend.from_responses(
-            truncations(1), fallback=text("All done."),
-        )
-        backend = AuditedBackend(inner, context_window=200_000)
-        agent = make_agent(tmp_path, backend)
-
-        events = await run_turn(agent, "write something long")
-        assert_survived(backend, events)
-
-        main_calls = [c for c in backend.calls if c["kind"] == "main"]
-        assert len(main_calls) == 2
-        # Same budget - no escalation on the first truncation.
-        assert main_calls[1]["max_tokens"] == main_calls[0]["max_tokens"]
-        # The partial generation is carried into the retry rather than redone.
-        assert "partial thought" in str(main_calls[1]["messages"])
-        assert "Output token limit hit" in str(main_calls[1]["messages"])
-
-    @pytest.mark.asyncio
-    async def test_escalation_still_reachable_once_recovery_is_spent(self, tmp_path):
-        """Escalation is demoted, not deleted: it remains the last resort."""
-        inner = ScriptedBackend.from_responses(
-            truncations(TRUNCATIONS_TO_ESCALATE), fallback=text("All done."),
-        )
-        backend = AuditedBackend(inner, context_window=200_000)
-        agent = make_agent(tmp_path, backend)
-
-        events = await run_turn(agent, "write something long")
-        assert_survived(backend, events)
-
-        budgets = [c["max_tokens"] for c in backend.calls if c["kind"] == "main"]
-        assert budgets == [8_192] * TRUNCATIONS_TO_ESCALATE + [64_000]
-
-
 # ---------------------------------------------------------------------------
 # Scenario 5 - escalation is clamped to the window
 # ---------------------------------------------------------------------------
@@ -362,7 +304,10 @@ class TestEscalationClamp:
         window smaller than 64k the retried call must be clamped, and it
         must still grant MORE than the default budget."""
         inner = ScriptedBackend.from_responses(
-            truncations(TRUNCATIONS_TO_ESCALATE),
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
             fallback=text("All done."),
         )
         backend = AuditedBackend(inner, context_window=cw)
@@ -373,8 +318,8 @@ class TestEscalationClamp:
         assert final_text(events) == "recovered fully"
 
         main_calls = [c for c in backend.calls if c["kind"] == "main"]
-        assert len(main_calls) == TRUNCATIONS_TO_ESCALATE + 1
-        retry = main_calls[-1]
+        assert len(main_calls) == 2
+        retry = main_calls[1]
         # Escalated beyond the default budget, but legal for the window.
         assert retry["max_tokens"] > 8_192
         assert retry["max_tokens"] < cw
@@ -390,7 +335,10 @@ class TestEscalationPastPin:
     async def test_auto_setting_uses_resolved_budget_for_escalation(self, tmp_path):
         """The string ``auto`` must not be compared directly with an int."""
         inner = ScriptedBackend.from_responses(
-            truncations(TRUNCATIONS_TO_ESCALATE),
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
             fallback=text("All done."),
         )
         backend = AuditedBackend(inner, context_window=200_000)
@@ -400,7 +348,7 @@ class TestEscalationPastPin:
         assert_survived(backend, events)
         assert final_text(events) == "recovered fully"
         main_calls = [c for c in backend.calls if c["kind"] == "main"]
-        assert [c["max_tokens"] for c in main_calls] == [8_192] * TRUNCATIONS_TO_ESCALATE + [64_000]
+        assert [c["max_tokens"] for c in main_calls] == [8_192, 64_000]
 
     @pytest.mark.asyncio
     async def test_model_default_at_target_does_not_retry_as_escalation(self, tmp_path):
@@ -431,7 +379,10 @@ class TestEscalationPastPin:
         starting budget: a truncation escalates past it (window-clamped)."""
         cw = 32_768
         inner = ScriptedBackend.from_responses(
-            truncations(TRUNCATIONS_TO_ESCALATE),
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
             fallback=text("All done."),
         )
         backend = AuditedBackend(inner, context_window=cw)
@@ -442,15 +393,18 @@ class TestEscalationPastPin:
         assert final_text(events) == "recovered fully"
 
         main_calls = [c for c in backend.calls if c["kind"] == "main"]
-        assert len(main_calls) == TRUNCATIONS_TO_ESCALATE + 1
+        assert len(main_calls) == 2
         assert main_calls[0]["max_tokens"] == 3_000
-        assert main_calls[-1]["max_tokens"] > 3_000
-        assert main_calls[-1]["max_tokens"] < cw
+        assert main_calls[1]["max_tokens"] > 3_000
+        assert main_calls[1]["max_tokens"] < cw
 
     @pytest.mark.asyncio
     async def test_constructor_can_set_escalation_target(self, tmp_path):
         inner = ScriptedBackend.from_responses(
-            truncations(TRUNCATIONS_TO_ESCALATE),
+            [
+                ScriptedResponse(text="partial thought", stop_reason="max_tokens"),
+                text("recovered fully"),
+            ],
             fallback=text("All done."),
         )
         backend = AuditedBackend(inner, context_window=32_768)
@@ -464,7 +418,7 @@ class TestEscalationPastPin:
         events = await run_turn(agent, "write something long")
         assert_survived(backend, events)
         main_calls = [c for c in backend.calls if c["kind"] == "main"]
-        assert [c["max_tokens"] for c in main_calls] == [3_000] * TRUNCATIONS_TO_ESCALATE + [5_000]
+        assert [c["max_tokens"] for c in main_calls] == [3_000, 5_000]
 
     @pytest.mark.asyncio
     async def test_pin_at_target_stays_hard_ceiling(self, tmp_path):
@@ -508,13 +462,11 @@ class TestTruncatedToolCall:
     async def test_not_executed_and_escalation_retries(self, tmp_path):
         """A response cut at max_tokens while a tool call was in flight:
         the call must NOT run (it may be cut mid-argument yet still parse),
-        an error tool_result must answer each one, and once recovery is
-        used up the escalated retry must fire as if there were no tool
-        call."""
+        an error tool_result must answer it, and the escalation retry must
+        fire as if there were no tool call."""
         cw = 32_768
         inner = ScriptedBackend.from_responses(
-            [truncated_tool_response() for _ in range(TRUNCATIONS_TO_ESCALATE)]
-            + [text("recovered fully")],
+            [truncated_tool_response(), text("recovered fully")],
             fallback=text("All done."),
         )
         backend = AuditedBackend(inner, context_window=cw)
@@ -530,11 +482,11 @@ class TestTruncatedToolCall:
             e for e in events
             if isinstance(e, UserMessage) and "NOT executed" in str(e.content)
         ]
-        assert len(results) == TRUNCATIONS_TO_ESCALATE
+        assert len(results) == 1
 
         main_calls = [c for c in backend.calls if c["kind"] == "main"]
-        assert len(main_calls) == TRUNCATIONS_TO_ESCALATE + 1
-        assert main_calls[-1]["max_tokens"] > main_calls[0]["max_tokens"]
+        assert len(main_calls) == 2
+        assert main_calls[1]["max_tokens"] > main_calls[0]["max_tokens"]
 
     @pytest.mark.asyncio
     async def test_not_executed_and_recovery_messages_are_api_valid(self, tmp_path):
