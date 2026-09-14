@@ -21,6 +21,7 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `verbose` | bool | `false` | Logging |
 | `hooks` | object | `{}` | Hooks |
 | `context_window` | int \| `"auto"` | `"auto"` | Budget |
+| `context_window_fallback` | int \| `null` | `null` | Budget |
 | `compact_max_output_tokens` | int \| `"auto"` | `"auto"` | Compaction |
 | `escalated_max_tokens` | int | `64_000` | Output control |
 | `max_consecutive_compact_failures` | int | `3` | Compaction |
@@ -128,7 +129,10 @@ Dict mapping hook-type name to list of hook configs. See [guides/hooks.md](../gu
 ## Compaction
 
 ### `context_window`
-Overrides the model's detected context window. `"auto"` (default) resolves it from the model registry, the serving endpoint's metadata, or a one-time probe (see `alancode/budget.py` and `alancode/backends/cw_probe.py`). Set an integer only when detection is wrong.
+Overrides the model's detected context window. `"auto"` (default) resolves it from the model registry, the serving endpoint's metadata, or a one-time probe (see `alancode/budget.py` and `alancode/backends/cw_probe.py`). Set an integer only when detection is wrong. If nothing resolves, Alan raises rather than guessing - see `context_window_fallback`.
+
+### `context_window_fallback`
+Window to assume when every discovery source fails. Unset (default) makes an undeterminable window a `ConfigError` naming the model and each source tried. Set an integer only to allow a deliberate guess; the resulting window is unverified and `context_window_source` reports `fallback`.
 
 ### `compaction_threshold_percent`
 When Layer C (auto-compact) kicks in, as a percentage of the *usable input budget* (context window minus output reservation and margin). `"auto"` = 80.

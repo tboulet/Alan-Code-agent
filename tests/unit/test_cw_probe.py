@@ -19,6 +19,7 @@ from alancode.backends.cw_probe import (
     save_cached_context_window,
 )
 from alancode.backends.litellm_backend import LiteLLMBackend
+from alancode.budget import ConfigError
 
 
 # ---------------------------------------------------------------------------
@@ -190,8 +191,19 @@ class TestResolutionChain:
         assert info.cw_source == "known_table"
         assert info.context_window == 128_000
 
-    def test_fallback_is_conservative_and_warns_once(self, caplog):
+    def test_undeterminable_window_raises_by_default(self):
+        # Every budget derives from this number and a wrong one is invisible
+        # in the results, so an unresolvable window must refuse to run.
         p = LiteLLMBackend(model="totally-unknown-xyz")
+        with pytest.raises(ConfigError) as exc:
+            p.get_model_info()
+        msg = str(exc.value)
+        assert "totally-unknown-xyz" in msg
+        for source in ("registry", "known-models table", "probe cache"):
+            assert source in msg
+
+    def test_fallback_is_used_only_when_named_and_warns_once(self, caplog):
+        p = LiteLLMBackend(model="totally-unknown-xyz", context_window_fallback=32_768)
         with caplog.at_level(logging.WARNING):
             info1 = p.get_model_info()
             info2 = p.get_model_info()
@@ -215,7 +227,9 @@ class TestResolutionChain:
 
         monkeypatch.setattr(cw_probe, "probe_context_window", fake_probe)
         p = LiteLLMBackend(model="totally-unknown-xyz")
-        assert p.get_model_info().cw_source == "fallback"
+        # Undetermined until the probe runs - the probe is what rescues it.
+        with pytest.raises(ConfigError):
+            p.get_model_info()
 
         detected = await p.probe_and_cache_context_window()
         assert detected == 65_536
@@ -234,7 +248,10 @@ class TestResolutionChain:
         monkeypatch.setattr(cw_probe, "probe_context_window", fake_probe)
         p = LiteLLMBackend(model="totally-unknown-xyz")
         assert await p.probe_and_cache_context_window() is None
-        assert p.get_model_info().cw_source == "fallback"
+        # A server that truncates silently proves nothing, so it is still
+        # undetermined - not an excuse to proceed on a number nobody verified.
+        with pytest.raises(ConfigError):
+            p.get_model_info()
 
 
 # ---------------------------------------------------------------------------

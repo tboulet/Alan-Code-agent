@@ -25,7 +25,7 @@ from typing import Any, AsyncGenerator, Callable
 from uuid import uuid4
 
 from alancode.api.cost_tracker import CostTracker
-from alancode.budget import resolve_context_budget
+from alancode.budget import resolve_context_budget, ConfigError
 from alancode.memory.memdir import (
     cleanup_old_scratchpads,
     ensure_memory_structure,
@@ -129,6 +129,7 @@ def _resolve_backend(
     base_url: str | None = None,
     request_timeout: int | str | None = None,
     context_window: int | None = None,
+    context_window_fallback: int | None = None,
     **kwargs: Any,
 ) -> LLMBackend:
     """Resolve a backend string (or pre-built ``LLMBackend``) into an
@@ -164,6 +165,7 @@ def _resolve_backend(
             api_base=base_url,
             request_timeout=request_timeout,
             context_window=context_window,
+            context_window_fallback=context_window_fallback,
             **kwargs,
         )
 
@@ -217,6 +219,7 @@ def _create_backend_from_settings(settings: dict[str, Any], **extra) -> LLMBacke
         base_url=settings.get("base_url"),
         request_timeout=settings.get("request_timeout"),
         context_window=cw if isinstance(cw, int) else None,
+        context_window_fallback=settings.get("context_window_fallback"),
         **extra,
     )
 
@@ -250,6 +253,10 @@ class AlanCodeAgent:
         Custom API endpoint, typically an OpenAI-compatible local server.
     request_timeout : int or "auto", optional
         Model request timeout. Custom endpoints use one hour in auto mode.
+    context_window_fallback : int, optional
+        Window to assume when discovery fails. Unset (the default) makes an
+        undeterminable window raise instead of guessing: every budget derives
+        from this number, and a wrong one is invisible in the results.
     context_window : int or "auto", optional
         Override the model/server context-window resolution.
     cwd : str, optional
@@ -314,6 +321,7 @@ class AlanCodeAgent:
         base_url: str | None = None,
         request_timeout: int | str | None = None,
         context_window: int | str | None = None,
+        context_window_fallback: int | None = None,
         cwd: str | None = None,
         permission_mode: str | None = None,
         max_iterations_per_turn: int | None = None,
@@ -381,6 +389,7 @@ class AlanCodeAgent:
             "base_url": base_url,
             "request_timeout": request_timeout,
             "context_window": context_window,
+            "context_window_fallback": context_window_fallback,
             "permission_mode": permission_mode,
             "max_iterations_per_turn": max_iterations_per_turn,
             "max_output_tokens": max_output_tokens,
@@ -612,39 +621,47 @@ class AlanCodeAgent:
 
         try:
             # --- context-window probe (unknown local models, one-time) ---
-            # When get_model_info could not resolve the context window
-            # (cw_source == "fallback"), actively probe the server once and
-            # cache the result; every budget derivation depends on this
-            # value being real. Best-effort: a failed probe leaves the
-            # conservative fallback in effect.
+            # The probe is the last source that can still produce a real
+            # number, so it runs both when the backend fell back and when it
+            # refused outright; only after it fails does the turn surface the
+            # refusal from whichever call needs the budget next.
+            _needs_probe = False
             try:
                 _mi = self._backend.get_model_info(self._model)
-                if (
-                    getattr(_mi, "cw_source", "registry") == "fallback"
-                    and not isinstance(self._settings.get("context_window"), int)
-                    and hasattr(self._backend, "probe_and_cache_context_window")
-                    and not getattr(self._backend, "_cw_probe_attempted", False)
-                ):
-                    yield create_system_message(
-                        "Context window unknown for this model - probing the "
-                        "server (one-time, cached afterwards)..."
-                    )
+                _needs_probe = getattr(_mi, "cw_source", "registry") == "fallback"
+            except ConfigError:
+                _needs_probe = True
+            except Exception:
+                logger.warning("Context-window lookup failed", exc_info=True)
+
+            if (
+                _needs_probe
+                and not isinstance(self._settings.get("context_window"), int)
+                and hasattr(self._backend, "probe_and_cache_context_window")
+                and not getattr(self._backend, "_cw_probe_attempted", False)
+            ):
+                yield create_system_message(
+                    "Context window unknown for this model - probing the "
+                    "server (one-time, cached afterwards)..."
+                )
+                try:
                     _detected = await self._backend.probe_and_cache_context_window(
                         self._model
                     )
-                    if _detected:
-                        yield create_system_message(
-                            f"Context window detected: {_detected:,} tokens."
-                        )
-                    else:
-                        yield create_system_message(
-                            "Context window probe inconclusive - assuming "
-                            "32,768 tokens. Set the 'context_window' setting "
-                            "to override.",
-                            level="warning",
-                        )
-            except Exception:
-                logger.debug("CW probe skipped (non-critical)", exc_info=True)
+                except Exception:
+                    _detected = None
+                    logger.warning("Context-window probe failed", exc_info=True)
+                if _detected:
+                    yield create_system_message(
+                        f"Context window detected: {_detected:,} tokens."
+                    )
+                else:
+                    yield create_system_message(
+                        "Context window probe inconclusive - the real window "
+                        "is still unknown. Set 'context_window' to the real "
+                        "value, or 'context_window_fallback' to assume one.",
+                        level="warning",
+                    )
 
             # --- user message ---
             user_msg = create_user_message(message)

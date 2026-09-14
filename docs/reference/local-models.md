@@ -79,7 +79,7 @@ Alan needs the model's real context window to reserve output space and compact a
 
 For OpenAI-compatible servers Alan queries `/v1/models` and recognizes fields such as `max_model_len`, `max_context_length`, and `context_window`. Ollama is queried through `/api/show`. If metadata and registry lookup fail, a one-time probe is attempted and successful values are cached.
 
-If detection is unavailable, Alan uses a conservative fallback and prints a warning. If you know the server's configured value, set `context_window` in `.alan/settings.json` or pass `--cw TOKENS`; the served window may be smaller than the model's theoretical maximum.
+If detection fails entirely, Alan **refuses to start** with an error naming the model and every source it tried. It does not guess: every budget derives from this number, and a wrong one is invisible in the results - the agent simply discards conversation it did not need to discard. Set `context_window` in `.alan/settings.json` or pass `--cw TOKENS`; the served window may be smaller than the model's theoretical maximum. To assume a value instead, set `context_window_fallback` to the number you are willing to assume - it is deliberately not a default, so no run can guess by accident.
 
 ## Slow and offline endpoints
 

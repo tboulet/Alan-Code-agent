@@ -185,15 +185,21 @@ Idempotently fires `session_end` hooks, closes the backend's owned client/server
 ## Recording the resolved context window
 
 ```python
-agent.context_window          # 32768
-agent.context_window_source   # 'fallback'  <- it was a GUESS, not a fact
+agent.context_window          # 262144
+agent.context_window_source   # 'server'
 ```
 
 `context_window_source` is one of `override`, `registry`, `server`,
 `known_table`, `cache` or `fallback`.
 
-`fallback` is the loud alarm: nothing resolved, so Alan assumed a conservative
-32768 and the number is indistinguishable from a real one in a log.
+When nothing resolves, `agent.context_window` **raises `ConfigError`** naming
+the model and every source tried. Alan does not guess, because a guessed window
+is indistinguishable from a real one in a log: in one 320-run benchmark round,
+162 runs assumed 32768 against arms whose real windows were 202752 and 262144,
+and nothing in any score, transcript or exit reason recorded it.
+
+`fallback` therefore only appears when you set `context_window_fallback`
+yourself, naming the number you are willing to assume. Treat it as unverified.
 
 `server` deserves a second look on a self-hosted endpoint. Alan reads
 `max_model_len` from `/v1/models`, which is the model's *configured* context
@@ -215,9 +221,9 @@ long tasks.
 This matters for a served model a registry has never heard of. Alan warns on
 stderr once per model, but in a batch run nobody reads stderr: the run looks
 normal, compacts early and often, and a long-context task silently gets a
-fraction of the hardware. Record both values in your run metadata and treat
-`fallback` as a configuration error - pass `context_window` explicitly, sized
-against the server's real KV pool rather than the model's advertised length.
+fraction of the hardware. Record both values in your run metadata and pass `context_window` explicitly,
+sized against the server's real KV pool rather than the model's advertised
+length.
 
 ## Recording which alancode produced a run
 

@@ -60,6 +60,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     # the model's context window - see alancode/budget.py for the DAG and
     # the auto formulas) or an explicit positive integer.
     "context_window": "auto",  # "auto" = resolve from registry/server/probe; int = trust this value
+    "context_window_fallback": None,  # int = the window to assume when discovery fails; None = raise instead
     "compact_max_output_tokens": "auto",  # Summarizer output budget (auto: min(20k, CW - T - m))
     "escalated_max_tokens": 64_000,  # Retry budget on length-truncation, overrides a lower max_output_tokens (clamped to the window)
     "max_consecutive_compact_failures": 3,  # Circuit breaker for auto-compact retries
@@ -265,6 +266,7 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "verbose": _is_bool,
     "hooks": _is_dict,
     "context_window": _is_pos_int_or_auto,
+    "context_window_fallback": _is_pos_int_or_none,
     "compact_max_output_tokens": _is_pos_int_or_auto,
     "escalated_max_tokens": _is_pos_int,
     "max_consecutive_compact_failures": _is_pos_int,
@@ -311,6 +313,7 @@ BACKEND_SETTINGS: set[str] = {
     "base_url",
     "request_timeout",
     "context_window",
+    "context_window_fallback",
 }
 
 # ── Backend inference ────────────────────────────────────────────────────────

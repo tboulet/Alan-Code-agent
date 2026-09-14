@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from alancode.api.errors import is_prompt_too_long
+from alancode.budget import ConfigError
 from alancode.backends.base import (
     LLMBackend,
     ModelInfo,
@@ -162,6 +163,7 @@ class LiteLLMBackend(LLMBackend):
         api_key: str | None = None,
         api_base: str | None = None,
         context_window: int | None = None,
+        context_window_fallback: int | None = None,
         max_output_tokens: int | None = None,
         request_timeout: int | str | None = "auto",
         extra_kwargs: dict[str, Any] | None = None,
@@ -171,6 +173,7 @@ class LiteLLMBackend(LLMBackend):
         self._api_key = api_key
         self._api_base = api_base
         self._context_window_override = context_window
+        self._context_window_fallback = context_window_fallback
         self._max_output_override = max_output_tokens
         self._request_timeout = _resolve_request_timeout(
             request_timeout, api_base,
@@ -235,17 +238,29 @@ class LiteLLMBackend(LLMBackend):
             ctx = cw_probe.load_cached_context_window(m, self._api_base)
             source = "cache" if ctx is not None else None
 
-        # Rung 6: conservative fallback - loudly, and only once per model.
+        # Rung 6: refuse. Every budget derives from this number, and a wrong
+        # one is invisible in the results - the run just discards context it
+        # did not need to. Guessing requires naming the guess.
         if ctx is None:
-            ctx = 32_768
+            if self._context_window_fallback is None:
+                raise ConfigError(
+                    f"Context window of model '{m}' could not be determined. "
+                    f"Tried: the 'context_window' setting (unset), LiteLLM's "
+                    f"registry, the serving endpoint's metadata"
+                    f"{' at ' + self._api_base if self._api_base else ' (no base_url)'}, "
+                    f"the known-models table, and the probe cache. Set "
+                    f"'context_window' to the real value, or set "
+                    f"'context_window_fallback' to assume one deliberately."
+                )
+            ctx = self._context_window_fallback
             source = "fallback"
             if m not in self._cw_fallback_warned:
                 self._cw_fallback_warned.add(m)
                 logger.warning(
                     "Context window of model '%s' is UNKNOWN (registry, server "
-                    "metadata and cache all failed). Assuming a conservative "
-                    "%d tokens. Set the 'context_window' setting if you know "
-                    "the real value.", m, ctx,
+                    "metadata and cache all failed). Assuming %d tokens from "
+                    "'context_window_fallback' - this number is NOT verified.",
+                    m, ctx,
                 )
 
         return ModelInfo(
@@ -284,8 +299,9 @@ class LiteLLMBackend(LLMBackend):
             return result.value
 
         logger.warning(
-            "Context window probe for '%s' inconclusive (%s): %s. "
-            "Keeping the conservative fallback.", m, result.method, result.detail,
+            "Context window probe for '%s' inconclusive (%s): %s. The window "
+            "is still unverified; set 'context_window' to the real value.",
+            m, result.method, result.detail,
         )
         return None
 
