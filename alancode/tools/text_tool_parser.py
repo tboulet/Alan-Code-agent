@@ -712,10 +712,14 @@ class BashBlockFormat(ToolCallFormat):
 # variant shows up.
 
 
+# The separator between the id and the arguments is whatever the model put
+# there: Kimi-K2.6 substitutes a stray "<think>" for the argument-begin token
+# often enough to loop on it at temperature 0. The envelope already delimits
+# the call, so the arguments are located as the first JSON object inside it
+# rather than by the token that should precede them.
 _KIMI_CALL_PATTERN = re.compile(
     r"(?:<\|tool_calls_section_begin\|>\s*)?"
-    r"<\|tool_call_begin\|>\s*(.*?)\s*"
-    r"<\|tool_call_argument_begin\|>(.*?)<\|tool_call_end\|>"
+    r"<\|tool_call_begin\|>\s*([A-Za-z_][\w.:-]*)\s*(.*?)<\|tool_call_end\|>"
     r"(?:\s*<\|tool_calls_section_end\|>)?",
     re.DOTALL,
 )
@@ -742,8 +746,12 @@ class KimiFormat(ToolCallFormat):
         results = []
         for match in _KIMI_CALL_PATTERN.finditer(text):
             name = _kimi_tool_name(match.group(1))
+            body = match.group(2)
+            start = body.find("{")
+            if start == -1:
+                continue  # Detected as malformed below
             try:
-                args = json.loads(match.group(2))
+                args, _ = json.JSONDecoder().raw_decode(body[start:])
             except (json.JSONDecodeError, ValueError):
                 continue  # Detected as malformed below
             if not isinstance(args, dict):

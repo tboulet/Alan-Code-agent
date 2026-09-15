@@ -325,3 +325,27 @@ async def test_draft_block_in_thinking_not_executed(tmp_path):
         if isinstance(e, AssistantMessage)
         for b in e.content
     )
+
+
+@pytest.mark.asyncio
+async def test_kimi_substituted_argument_token_still_executes(tmp_path):
+    """Kimi-K2.6 sometimes writes a stray "<think>" where its
+    argument-begin token belongs, and echoes back a text_<hex> call id
+    instead of the tool name. Neither is a reason to drop the call: the
+    JSON is complete, and a single-tool agent already remaps the name.
+    Unparsed, the deterministic nudge loops at temperature 0 - measured at
+    30 of 33 completions in one bench-03 attempt.
+    """
+    backend = TextTurnsBackend([
+        (None,
+         '<|tool_calls_section_begin|><|tool_call_begin|>text_c35d869d'
+         '<think>{"command": "echo hi"}<|tool_call_end|>'
+         '<|tool_calls_section_end|>'),
+        (None, "Done."),
+    ])
+    tool = RecordingBashTool()
+    agent = make_agent(tmp_path, backend, tool, tool_call_format="kimi")
+
+    [event async for event in agent.query_events_async("go")]
+
+    assert tool.commands == ["echo hi"]
