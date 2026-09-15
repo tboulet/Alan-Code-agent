@@ -121,6 +121,14 @@ def resolve_context_budget(
         cw = _require_positive_int(cw_override, "context_window")
     else:
         cw = model_info.context_window
+        if cw is None:
+            raise ConfigError(
+                "The backend reported no context window (cw_source="
+                f"{getattr(model_info, 'cw_source', 'unknown')!r}). Every "
+                "budget derives from this number, so there is nothing safe "
+                "to assume. Set the 'context_window' setting, or return a "
+                "real value from the backend's get_model_info()."
+            )
 
     if cw < MIN_CONTEXT_WINDOW:
         raise ConfigError(

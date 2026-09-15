@@ -243,6 +243,17 @@ class TestClampOutputBudget:
         b = resolve_context_budget(info(cw=32_768))
         assert clamp_output_budget(b, estimated_input_tokens=32_768) == 0
 
+    def test_backend_returning_no_window_is_a_clear_error(self):
+        # Reachable through the public LLMBackend escape hatch: a custom
+        # transport may return None where the shipped ones cannot.
+        class NoWindow:
+            context_window = None
+            max_output_tokens = 4_096
+            cw_source = "fallback"
+
+        with pytest.raises(ConfigError, match="no context window"):
+            resolve_context_budget(NoWindow(), {})
+
     def test_clamps_escalated_request(self):
         # Escalation asks for 64k on a 32k window: physically impossible,
         # the clamp grants what actually fits.
