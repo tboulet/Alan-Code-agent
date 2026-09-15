@@ -641,9 +641,11 @@ class BashBlockFormat(ToolCallFormat):
     # puts the executable block in the visible answer only.
     parse_thinking = False
 
-    # "\n```\n" only matches a CLOSING fence line - the opening fence is
-    # "```bash" so the newline right after the backticks cannot match it.
-    stop_sequences = ("\n```\n",)
+    # No stop sequence: a fence stop cannot tell this format's CLOSING fence
+    # from a bare "```" the model opens anywhere else, and the server applies
+    # stops to the whole generation - reasoning channel included - so a
+    # thinking model quoting a grid is cut before it writes anything visible.
+    stop_sequences: tuple[str, ...] = ()
 
     def repair_stop_truncation(self, text: str) -> str:
         if _BASH_BLOCK_PATTERN.search(text):
@@ -1046,10 +1048,11 @@ class AutoFormat(ToolCallFormat):
 
     # Only unambiguous stops: models emit stray <tool_call>-style label
     # chatter BEFORE their real call (observed on GLM-5.2), so a
-    # </tool_call> stop can cut the turn before the call is written.
+    # </tool_call> stop can cut the turn before the call is written. A bare
+    # "```" fence is ambiguous the same way, and is excluded for that reason.
     # Formats configured directly keep their own tag stops.
     stop_sequences = (
-        "\n```\n", "<|tool_call_end|>",
+        "<|tool_call_end|>",
         f"{_DS_CLOSE}tool_calls>", "</minimax:tool_call>", "<|close|>call",
     )
 

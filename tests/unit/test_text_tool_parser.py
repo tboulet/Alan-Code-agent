@@ -631,10 +631,13 @@ class TestStopRepair:
         assert len(result.tool_calls) == 1
         assert result.error is None
 
-    def test_all_text_formats_declare_stops_except_meta_json(self):
-        for name in ("bash_block", "hermes", "hermes_xml", "glm", "alan", "kimi", "auto"):
+    def test_tag_formats_declare_stops(self):
+        # A unique closing tag is safe to stop on; a markdown fence is not,
+        # so bash_block (and auto, which teaches it) declare none.
+        for name in ("hermes", "hermes_xml", "glm", "alan", "kimi", "auto"):
             assert get_format(name).stop_sequences, name
         assert get_format("meta_json").stop_sequences == ()
+        assert get_format("bash_block").stop_sequences == ()
 
     def test_auto_stops_exclude_ambiguous_tag_closers(self):
         """Stray <tool_call>-label chatter before a real call must not let
@@ -642,6 +645,7 @@ class TestStopRepair:
         auto_stops = get_format("auto").stop_sequences
         assert "</tool_call>" not in auto_stops
         assert "</tool_use>" not in auto_stops
+        assert "\n```\n" not in auto_stops
 
 
 class TestAutoFormat:
@@ -824,3 +828,21 @@ class TestFormatRegistry:
     def test_extract_unknown_format_raises(self):
         with pytest.raises(ValueError, match="Unknown"):
             extract_tool_calls_from_text("text", format="unknown")
+
+
+def test_no_format_stops_on_text_a_reasoning_channel_can_produce():
+    """Servers apply stop sequences to the WHOLE generation, reasoning
+    included, so a stop that a model can emit while thinking cuts the turn
+    before any visible text exists. Measured on bench-minigrid-03: a bare
+    "```" opened to quote a grid ended 29 of 45 Kimi turns and 10 of 23
+    DeepSeek turns with reasoning and nothing else."""
+    reasoning = (
+        "Looking at the grid from explore9.py:\n```\n0 0 1\n1 0 0\n```\n"
+        "So the agent is at (1,2).\n"
+    )
+    for name, fmt in FORMATS.items():
+        for stop in fmt.stop_sequences:
+            assert stop not in reasoning, (
+                f"format {name!r} stops on {stop!r}, which a thinking model "
+                f"produces while quoting a grid"
+            )

@@ -126,11 +126,12 @@ async def test_block_executes_and_markup_removed(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_stop_sequences_sent_and_stop_cut_fence_repaired(tmp_path):
-    """The format's stop sequences reach the backend, and a completion the
-    server cut at the closing-fence stop (stripping it) still executes."""
+async def test_no_fence_stop_is_sent(tmp_path):
+    """A fence stop is applied to the whole generation, reasoning included,
+    so a thinking model quoting a grid is cut before writing anything
+    visible. bash_block therefore sends no stop sequences at all."""
     backend = TextTurnsBackend([
-        (None, "Check the files first.\n```bash\nls code_library"),
+        (None, "Check the files first.\n```bash\nls code_library\n```\n"),
         (None, "Done."),
     ])
     tool = RecordingBashTool()
@@ -139,8 +140,24 @@ async def test_stop_sequences_sent_and_stop_cut_fence_repaired(tmp_path):
     events = [event async for event in agent.query_events_async("go")]
 
     assert events
-    assert "\n```\n" in backend.stream_kwargs[0].get("stop_sequences")
+    assert not backend.stream_kwargs[0].get("stop_sequences")
     assert tool.commands == ["ls code_library"]
+
+
+@pytest.mark.asyncio
+async def test_unclosed_block_is_not_executed(tmp_path):
+    """Without a stop to blame, an unclosed fence means the model never
+    finished writing the command - running it would execute a fragment."""
+    backend = TextTurnsBackend([
+        (None, "Check the files first.\n```bash\nrm -rf /important"),
+        (None, "Done."),
+    ])
+    tool = RecordingBashTool()
+    agent = make_agent(tmp_path, backend, tool)
+
+    [event async for event in agent.query_events_async("go")]
+
+    assert tool.commands == []
 
 
 @pytest.mark.asyncio
