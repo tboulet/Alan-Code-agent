@@ -426,6 +426,7 @@ class LiteLLMBackend(LLMBackend):
         max_tokens: int | None = None,
         thinking: ThinkingConfig | None = None,
         stop_sequences: list[str] | None = None,
+        disable_stream: bool = False,
         **kwargs,
     ) -> AsyncGenerator[BackendStreamEvent, None]:
         """Stream from any litellm-supported backend."""
@@ -509,7 +510,7 @@ class LiteLLMBackend(LLMBackend):
             completion_kwargs["api_base"] = self._api_base
         if self._request_timeout is not None:
             completion_kwargs["timeout"] = self._request_timeout
-        if os.environ.get("ALANCODE_DISABLE_STREAM") == "1":
+        if disable_stream or os.environ.get("ALANCODE_DISABLE_STREAM") == "1":
             completion_kwargs["stream"] = False
             completion_kwargs.pop("stream_options", None)
 

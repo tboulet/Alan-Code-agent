@@ -110,3 +110,50 @@ async def test_http_5xx_stream_error_is_retryable(monkeypatch):
 def test_server_error_keeps_http_status():
     error = ServerError("temporary", status_code=502)
     assert error.status_code == 502
+
+
+class OversizedLineBackend(LLMBackend):
+    """Raises aiohttp's oversized-SSE-line ValueError until asked not to stream."""
+
+    def __init__(self, *, partial_content: bool = False):
+        self.calls: list[bool] = []
+        self.partial_content = partial_content
+
+    async def stream(self, messages, system, tools, *, disable_stream=False, **kwargs):
+        self.calls.append(disable_stream)
+        yield StreamMessageStart(model="test")
+        if not disable_stream:
+            if self.partial_content:
+                yield StreamTextDelta(text="partial")
+            raise ValueError(
+                "Separator is not found, and chunk exceed the limit"
+            )
+        yield StreamTextDelta(text="ok")
+
+    def get_model_info(self, model=None):
+        return ModelInfo()
+
+
+@pytest.mark.asyncio
+async def test_oversized_sse_line_falls_back_to_unstreamed():
+    # The buffer limit belongs to litellm's HTTP session, not to alancode, so
+    # the only recovery available here is to re-issue the request unstreamed.
+    backend = OversizedLineBackend()
+    events = [e async for e in stream_with_retry(backend, [], [], [])]
+
+    assert backend.calls == [False, True]
+    assert any(
+        isinstance(e, StreamTextDelta) and e.text == "ok" for e in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_oversized_sse_line_after_content_is_not_replayed():
+    # The no-replay boundary outranks the fallback: re-issuing a request whose
+    # response was already partly emitted would duplicate it.
+    backend = OversizedLineBackend(partial_content=True)
+    with pytest.raises(ValueError, match="Separator is not found"):
+        async for _ in stream_with_retry(backend, [], [], []):
+            pass
+
+    assert backend.calls == [False]

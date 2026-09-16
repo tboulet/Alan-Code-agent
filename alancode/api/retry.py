@@ -12,6 +12,7 @@ from alancode.api.errors import (
     RateLimitError,
     ServerError,
     classify_error,
+    is_oversized_stream_line,
     is_retryable_error,
 )
 from alancode.backends.base import (
@@ -114,9 +115,16 @@ async def stream_with_retry(
         "API call failed with no error detail recorded"
     )
 
+    # Set after a stream dies on an SSE line too long for the client buffer;
+    # the same request is then re-issued unstreamed.
+    unstreamed_retry = False
+
     for attempt in range(max_retries + 1):
         content_yielded = False
         try:
+            call_kwargs = dict(kwargs)
+            if unstreamed_retry:
+                call_kwargs["disable_stream"] = True
             stream = backend.stream(
                 messages,
                 system,
@@ -124,7 +132,7 @@ async def stream_with_retry(
                 model=model,
                 max_tokens=max_tokens,
                 thinking=thinking,
-                **kwargs,
+                **call_kwargs,
             )
             # Buffer events so we can detect mid-stream errors before
             # yielding partial content on a retry-eligible failure.
@@ -179,6 +187,13 @@ async def stream_with_retry(
                     exc,
                 )
                 raise
+            if is_oversized_stream_line(exc) and not unstreamed_retry:
+                unstreamed_retry = True
+                logger.warning(
+                    "Stream carried an SSE line above the client buffer "
+                    "limit; re-issuing this request unstreamed: %s", exc,
+                )
+                continue
             if not is_retryable_error(exc):
                 logger.error(
                     "Non-retryable error (category=%s): %s", category, exc

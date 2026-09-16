@@ -84,6 +84,22 @@ _RETRYABLE_TYPES = (
 )
 
 
+# aiohttp's StreamReader refuses a single SSE line longer than its limit
+# (64 KiB by default) with this message. A server that flushes a long
+# completion as one event trips it before any content is yielded, and the
+# session owning that limit is litellm's, not ours - so the recovery is to
+# re-issue the request unstreamed.
+_OVERSIZED_LINE_MARKERS = ("separator is not found", "chunk exceed the limit")
+
+
+def is_oversized_stream_line(error: Exception) -> bool:
+    """True for aiohttp refusing an SSE line above its buffer limit."""
+    if not isinstance(error, ValueError):
+        return False
+    message = str(error).lower()
+    return all(marker in message for marker in _OVERSIZED_LINE_MARKERS)
+
+
 def is_retryable_error(error: Exception) -> bool:
     """Return True if the error is transient and worth retrying.
 
