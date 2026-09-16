@@ -1,9 +1,16 @@
 """BashTool — execute shell commands via asyncio subprocess."""
 
 import asyncio
+import contextlib
+import os
+import signal
 from typing import Any
 
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
+
+# A killed shell's children inherit its stdout pipe, so reaping can block on
+# them for as long as they live. Cleanup is bounded rather than trusted.
+KILL_REAP_TIMEOUT_S = 5.0
 
 
 class BashTool(Tool):
@@ -79,6 +86,8 @@ class BashTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 cwd=context.cwd,
+                # Own process group, so a timeout can kill the whole tree.
+                start_new_session=True,
             )
         except Exception as exc:
             return ToolResult(data=f"Failed to start process: {exc}", is_error=True)
@@ -86,8 +95,7 @@ class BashTool(Tool):
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+            await _kill_process_tree(process)
             return ToolResult(
                 data=f"Command timed out after {timeout_ms}ms and was killed.",
                 is_error=True,
@@ -106,3 +114,19 @@ class BashTool(Tool):
         else:
             text = output + (f"\n\nExit code: {exit_code}" if output else f"Exit code: {exit_code}")
             return ToolResult(data=text, is_error=(exit_code != 0))
+
+
+async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+    """SIGKILL the command's whole process group, then reap without hanging.
+
+    Signalling the shell alone leaves its children running: they keep the
+    inherited stdout pipe open, so the timeout is reported only once they
+    happen to finish. Measured on a runaway agent script: a 300s timeout
+    reported 87 minutes late while the child grew to 240 GB.
+    """
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    with contextlib.suppress(ProcessLookupError):
+        process.kill()
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(process.wait(), timeout=KILL_REAP_TIMEOUT_S)
