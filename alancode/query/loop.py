@@ -470,6 +470,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         api_messages_dicts = messages_to_openai_dicts(
             api_messages,
             include_thinking=bool(params.settings.get("persist_thinking")),
+            text_dialect=bool(params.settings.get("tool_call_format")),
         )
 
         # Notify LLM perspective observers (GUI)
@@ -848,6 +849,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                             id=call_id,
                             name=pc.name,
                             input=pc.input,
+                            raw_text=pc.raw_match,
                         )
                         new_content.append(block)
                         tool_use_blocks.append(block)

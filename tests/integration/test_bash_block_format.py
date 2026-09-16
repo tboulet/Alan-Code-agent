@@ -349,3 +349,40 @@ async def test_kimi_substituted_argument_token_still_executes(tmp_path):
     [event async for event in agent.query_events_async("go")]
 
     assert tool.commands == ["echo hi"]
+
+
+@pytest.mark.asyncio
+async def test_text_dialect_history_shows_the_dialect_the_model_was_taught(tmp_path):
+    """A structured tool_calls entry is re-rendered by the server's chat
+    template into that model's NATIVE markup, carrying ids alancode minted.
+    A model taught a text dialect then sees a different one in its own
+    history and imitates it - measured on bench-04 Kimi-K2.6, 27% and 66%
+    of iterations emitting garbled native markup with alancode's text_<hex>
+    ids in it, against 0% on every other arm.
+    """
+    class Capturing(TextTurnsBackend):
+        def __init__(self, turns):
+            super().__init__(turns)
+            self.sent = []
+
+        async def stream(self, messages, system, tools, **kwargs):
+            self.sent.append(messages)
+            async for event in super().stream(messages, system, tools, **kwargs):
+                yield event
+
+    backend = Capturing([
+        (None, "Let me look.\n```bash\nls\n```\n"),
+        (None, "Done."),
+    ])
+    agent = make_agent(tmp_path, backend, RecordingBashTool(),
+                       tool_call_format="bash_block")
+    [event async for event in agent.query_events_async("go")]
+
+    replay = backend.sent[1]
+    assistant = [m for m in replay if m["role"] == "assistant"]
+    assert len(assistant) == 1
+    assert "```bash" in assistant[0]["content"]
+    assert "tool_calls" not in assistant[0]
+    # No role:tool entry may survive, or it would reference a dropped id.
+    assert not [m for m in replay if m["role"] == "tool"]
+    assert not any("text_" in str(m.get("content", "")) for m in replay)

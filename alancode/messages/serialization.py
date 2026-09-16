@@ -90,6 +90,7 @@ def messages_to_openai_dicts(
     messages: list[UserMessage | AssistantMessage],
     *,
     include_thinking: bool = False,
+    text_dialect: bool = False,
 ) -> list[dict[str, Any]]:
     """Convert a list of messages to OpenAI API dict format.
 
@@ -107,14 +108,22 @@ def messages_to_openai_dicts(
     ``include_thinking`` renders each ThinkingBlock back into the assistant
     content as inline ``<think>...</think>`` text (the ``persist_thinking``
     setting), so models whose state lives in their reasoning can re-see it.
+
+    ``text_dialect`` replays a tool call as the markup the model wrote and its
+    result as an ordinary user message. A structured ``tool_calls`` entry is
+    rendered by the server's chat template into that model's NATIVE markup,
+    carrying ids alancode minted - so a model taught a text dialect sees a
+    different one in its own history and imitates it.
     """
     result: list[dict[str, Any]] = []
 
     for msg in messages:
         if isinstance(msg, AssistantMessage):
-            result.extend(_assistant_to_openai(msg, include_thinking=include_thinking))
+            result.extend(_assistant_to_openai(
+                msg, include_thinking=include_thinking, text_dialect=text_dialect,
+            ))
         elif isinstance(msg, UserMessage):
-            result.extend(_user_to_openai(msg))
+            result.extend(_user_to_openai(msg, text_dialect=text_dialect))
         else:
             # Pass through unknown message types
             result.append({"role": "user", "content": str(msg)})
@@ -124,6 +133,7 @@ def messages_to_openai_dicts(
 
 def _assistant_to_openai(
     msg: AssistantMessage, *, include_thinking: bool = False,
+    text_dialect: bool = False,
 ) -> list[dict[str, Any]]:
     """Convert an AssistantMessage to OpenAI format.
 
@@ -136,6 +146,9 @@ def _assistant_to_openai(
         if isinstance(block, TextBlock):
             text_parts.append(block.text)
         elif isinstance(block, ToolUseBlock):
+            if text_dialect and block.raw_text:
+                text_parts.append(block.raw_text)
+                continue
             tool_calls.append({
                 "id": block.id,
                 "type": "function",
@@ -162,12 +175,18 @@ def _assistant_to_openai(
     return [d]
 
 
-def _user_to_openai(msg: UserMessage) -> list[dict[str, Any]]:
+def _user_to_openai(
+    msg: UserMessage, *, text_dialect: bool = False,
+) -> list[dict[str, Any]]:
     """Convert a UserMessage to OpenAI format.
 
     A UserMessage with tool_result blocks is split into:
     - ``role: "tool"`` messages (one per tool result)
     - ``role: "user"`` message for any remaining text content
+
+    Under ``text_dialect`` the results become ordinary user content instead:
+    a ``role: "tool"`` entry references a tool_calls id, and the assistant
+    side emits none, so a strict server would reject the orphan.
     """
     if isinstance(msg.content, str):
         return [{"role": "user", "content": msg.content}]
@@ -176,7 +195,7 @@ def _user_to_openai(msg: UserMessage) -> list[dict[str, Any]]:
     tool_results = [b for b in msg.content if isinstance(b, ToolResultBlock)]
     other_blocks = [b for b in msg.content if not isinstance(b, ToolResultBlock)]
 
-    # Emit tool result messages first (role=tool)
+    dialect_texts: list[str] = []
     for tr in tool_results:
         tr_content = tr.content
         if isinstance(tr_content, list):
@@ -184,11 +203,16 @@ def _user_to_openai(msg: UserMessage) -> list[dict[str, Any]]:
                 b.text if isinstance(b, TextBlock) else str(b)
                 for b in tr_content
             )
+        if text_dialect:
+            dialect_texts.append(str(tr_content))
+            continue
         result.append({
             "role": "tool",
             "tool_call_id": tr.tool_use_id,
             "content": str(tr_content),
         })
+    if dialect_texts:
+        result.append({"role": "user", "content": "\n".join(dialect_texts)})
 
     # Emit remaining user content (if any)
     if other_blocks:

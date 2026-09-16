@@ -29,6 +29,10 @@ class ToolUseBlock:
     name: str
     input: dict[str, Any]
     type: Literal["tool_use"] = "tool_use"
+    # The markup the model actually wrote, when the call came from a text
+    # dialect. Replayed verbatim so history shows the model the dialect it
+    # was taught rather than a structured call it never wrote.
+    raw_text: str | None = None
 
 
 @dataclass
