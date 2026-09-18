@@ -313,6 +313,11 @@ class LiteLLMBackend(LLMBackend):
         """
         import requests as http_requests
 
+        # A hosted OpenAI-compatible endpoint refuses /v1/models without the
+        # key, so discovery there fails for the same reason a request would.
+        headers = (
+            {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        )
         base = self._api_base.rstrip("/")
         parsed = urlsplit(base)
         base_path = parsed.path.rstrip("/")
@@ -328,7 +333,7 @@ class LiteLLMBackend(LLMBackend):
         requested_names = {model, model.split("/", 1)[-1], model.rsplit("/", 1)[-1]}
         for endpoint in openai_endpoints:
             try:
-                resp = http_requests.get(endpoint, timeout=5)
+                resp = http_requests.get(endpoint, timeout=5, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     model_entries = [
@@ -370,7 +375,7 @@ class LiteLLMBackend(LLMBackend):
         # /v1/models meta - that is the trained max, not what the server
         # will accept.
         try:
-            resp = http_requests.get(f"{root}/props", timeout=5)
+            resp = http_requests.get(f"{root}/props", timeout=5, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
                 n_ctx = (data.get("default_generation_settings") or {}).get("n_ctx")
@@ -391,7 +396,8 @@ class LiteLLMBackend(LLMBackend):
             # "ollama/llama3.1" -> the server knows it as "llama3.1"
             server_model = model.split("/", 1)[1] if "/" in model else model
             resp = http_requests.post(
-                f"{ollama_base}/api/show", json={"model": server_model}, timeout=5,
+                f"{ollama_base}/api/show", json={"model": server_model},
+                timeout=5, headers=headers,
             )
             if resp.status_code == 200:
                 data = resp.json()

@@ -275,10 +275,10 @@ class TestOllamaShow:
         )
 
     def test_context_length_from_model_info(self, monkeypatch):
-        def fake_get(url, timeout):
+        def fake_get(url, timeout, headers=None):
             return _FakeResponse(404, {})  # /v1/models rungs miss
 
-        def fake_post(url, json, timeout):
+        def fake_post(url, json, timeout, headers=None):
             assert url.endswith("/api/show")
             assert json == {"model": "llama-custom"}
             return _FakeResponse(200, {
@@ -294,10 +294,10 @@ class TestOllamaShow:
 
     def test_num_ctx_caps_model_max(self, monkeypatch):
         # Served context (num_ctx) below the model max: the real limit.
-        def fake_get(url, timeout):
+        def fake_get(url, timeout, headers=None):
             return _FakeResponse(404, {})
 
-        def fake_post(url, json, timeout):
+        def fake_post(url, json, timeout, headers=None):
             return _FakeResponse(200, {
                 "model_info": {"llama.context_length": 131_072},
                 "parameters": "num_ctx 4096\nstop \"<|end|>\"",
@@ -324,7 +324,7 @@ class TestLlamaCppProps:
     def test_props_n_ctx_wins_over_trained_max(self, monkeypatch):
         """The serving n_ctx (30k slot) must be returned, never the
         trained max from /v1/models meta (262k)."""
-        def fake_get(url, timeout):
+        def fake_get(url, timeout, headers=None):
             if url.endswith("/v1/models"):
                 return _FakeResponse(200, {
                     "data": [{
@@ -339,7 +339,7 @@ class TestLlamaCppProps:
                 })
             return _FakeResponse(404, {})
 
-        def fake_post(url, json, timeout):
+        def fake_post(url, json, timeout, headers=None):
             return _FakeResponse(404, {})
 
         monkeypatch.setattr("requests.get", fake_get)
@@ -349,10 +349,10 @@ class TestLlamaCppProps:
         ) == 30_000
 
     def test_props_absent_falls_through(self, monkeypatch):
-        def fake_get(url, timeout):
+        def fake_get(url, timeout, headers=None):
             return _FakeResponse(404, {})
 
-        def fake_post(url, json, timeout):
+        def fake_post(url, json, timeout, headers=None):
             return _FakeResponse(404, {})
 
         monkeypatch.setattr("requests.get", fake_get)
@@ -402,3 +402,31 @@ class TestSettingsPlumbing:
             "context_window": 30_000,
         })
         assert backend is not None
+
+
+def test_server_metadata_probe_authenticates(monkeypatch):
+    """A hosted OpenAI-compatible endpoint refuses /v1/models without the
+    key, so an unauthenticated probe cannot discover a window that is
+    plainly published - measured against Albert, which returns 401.
+    """
+    seen = {}
+
+    class Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": [{"id": "m", "max_context_length": 262_144}]}
+
+    def fake_get(url, timeout=None, headers=None):
+        seen["headers"] = headers
+        return Resp()
+
+    import requests
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    backend = LiteLLMBackend(
+        model="openai/m", api_base="https://example.invalid/v1", api_key="secret",
+    )
+    assert backend.get_model_info().context_window == 262_144
+    assert seen["headers"]["Authorization"] == "Bearer secret"
