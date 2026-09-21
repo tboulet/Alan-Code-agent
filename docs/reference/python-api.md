@@ -21,7 +21,6 @@ AlanCodeAgent(
     permission_mode: str | None = None,
     max_iterations_per_turn: int | None = None,
     max_output_tokens: int | str | None = None,
-    escalated_max_tokens: int | None = None,
     empty_response_retries: int | None = None,
     no_verbalize_warning: bool | None = None,
     persist_thinking: bool | None = None,
@@ -54,7 +53,6 @@ Key arguments:
 - **`request_timeout`** — positive seconds or `"auto"`. A custom `base_url` gets a 3,600-second automatic timeout for slow local inference.
 - **`context_window`** — positive token count or `"auto"`; also exposed as the resolved `agent.context_window` property.
 - **`max_output_tokens`** - starting per-call output budget. `"auto"`/`None` uses the model default capped at one quarter of its context window.
-- **`escalated_max_tokens`** - retry budget used after output truncation when it is higher than the resolved starting budget. Set it at or below `max_output_tokens` for a hard ceiling.
 - **`empty_response_retries`** - corrective retries for wholly empty or reasoning-only replies with no visible answer/tool (`2` by default; `0` disables).
 - **`no_verbalize_warning`** - when a turn calls tools with no visible text, send a `<system-reminder>` asking the model to narrate (`False` by default). Not a retry: the tool calls still run and their results are kept.
 - **`persist_thinking`** - re-inject reasoning already returned by the backend into subsequent requests and compaction summaries (`False` by default). It does not enable provider-side thinking.

@@ -97,7 +97,6 @@ agent = AlanCodeAgent(
     permission_mode="yolo",
     max_iterations_per_turn=15,
     max_output_tokens=16_000,
-    escalated_max_tokens=16_000,  # same value makes the output cap hard
     empty_response_retries=2,
     persist_thinking=False,
     memory="off",

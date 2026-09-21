@@ -62,7 +62,6 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "context_window": "auto",  # "auto" = resolve from registry/server/probe; int = trust this value
     "context_window_fallback": None,  # int = the window to assume when discovery fails; None = raise instead
     "compact_max_output_tokens": "auto",  # Summarizer output budget (auto: min(20k, CW - T - m))
-    "escalated_max_tokens": 64_000,  # Retry budget on length-truncation, overrides a lower max_output_tokens (clamped to the window)
     "max_consecutive_compact_failures": 3,  # Circuit breaker for auto-compact retries
     "compaction_threshold_percent": "auto",  # T as % of usable input (auto: 80)
     "max_compact_ptl_retries": 3,  # Max prompt-too-long retries during compaction summarize
@@ -268,7 +267,6 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "context_window": _is_pos_int_or_auto,
     "context_window_fallback": _is_pos_int_or_none,
     "compact_max_output_tokens": _is_pos_int_or_auto,
-    "escalated_max_tokens": _is_pos_int,
     "max_consecutive_compact_failures": _is_pos_int,
     "compaction_threshold_percent": (
         lambda v: _is_auto(v) or (isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 99),

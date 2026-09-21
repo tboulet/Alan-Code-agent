@@ -386,3 +386,28 @@ async def test_text_dialect_history_shows_the_dialect_the_model_was_taught(tmp_p
     # No role:tool entry may survive, or it would reference a dropped id.
     assert not [m for m in replay if m["role"] == "tool"]
     assert not any("text_" in str(m.get("content", "")) for m in replay)
+
+
+@pytest.mark.asyncio
+async def test_truncated_block_is_never_completed_by_the_next_generation(tmp_path):
+    """The cut attempt stays in history as text. It must never combine with
+    what comes next into a call: a fence left open mid-file plus a later
+    closing fence would otherwise parse into a command carrying a
+    half-written file, and run it.
+    """
+    backend = TextTurnsBackend([
+        # Cut mid-heredoc: the fence is still open.
+        (None, "Writing it now.\n```bash\ncat > solution.py <<EOF\nimport numpy as np\ndef solve(", "max_tokens"),
+        # The model carries on; on its own this closes nothing it opened.
+        (None, "EOF\n```\nThat completes the file."),
+        (None, "Done."),
+    ])
+    tool = RecordingBashTool()
+    agent = make_agent(tmp_path, backend, tool, programmatic=False)
+
+    [event async for event in agent.query_events_async("write solution.py")]
+
+    for command in tool.commands:
+        assert "def solve(\nEOF" not in command, (
+            f"a truncated block was stitched into a command: {command!r}"
+        )

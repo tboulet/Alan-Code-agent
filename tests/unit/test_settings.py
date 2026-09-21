@@ -193,7 +193,6 @@ class TestValidation:
     def test_boolean_is_not_a_positive_integer(self):
         for key in (
             "max_iterations_per_turn",
-            "escalated_max_tokens",
             "max_consecutive_compact_failures",
             "max_compact_ptl_retries",
             "max_output_tokens_recovery_limit",

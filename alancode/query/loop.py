@@ -88,6 +88,15 @@ logger = logging.getLogger(__name__)
 _hard_truncate_fallback = hard_truncate_messages
 MAX_NATIVE_TOOL_RETRIES = 2
 
+TRUNCATION_NOTICE = (
+    "<system-reminder>\n"
+    "The generation above was cut off because it reached the output token "
+    "budget. It is unfinished, and any tool call inside it was NOT executed. "
+    "The budget is fixed and will not grow, so content that does not fit in "
+    "one generation has to be produced over several turns.\n"
+    "</system-reminder>"
+)
+
 EMPTY_RESPONSE_NUDGE = (
     "Your previous response contained no visible answer or tool call - the "
     "output was spent entirely on reasoning, and reasoning is NOT preserved "
@@ -501,7 +510,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             ]
 
         requested_max_tokens = (
-            state.max_output_tokens_override or budget.max_output_tokens
+            budget.max_output_tokens
         )
         max_tokens = clamp_output_budget(
             budget, current_tokens, requested_max_tokens,
@@ -1006,62 +1015,22 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             for result in truncated_tool_results:
                 yield result
 
-            # A programmatic caller drives the next turn itself and reads the
-            # partial text out of history, so a retry only re-pays for tokens
-            # it already has. Interactive callers have no such next turn.
-            if not tool_use_blocks and params.programmatic:
+            # Consecutive truncations only: Phase 10 clears the count after
+            # any iteration that completes, so a long task that keeps making
+            # progress is never ended by a cumulative total.
+            limit = params.settings.get("max_output_tokens_recovery_limit", 3)
+            if state.max_output_tokens_recovery_count >= limit:
                 return
+            state.max_output_tokens_recovery_count += 1
 
-            def _try_escalate() -> bool:
-                # An explicit max_output_tokens is a starting budget, not a
-                # recovery ceiling (clamp_output_budget still bounds the call
-                # to the window).
-                escalated = params.settings.get("escalated_max_tokens", 64000)
-                if (
-                    state.max_output_tokens_override is None
-                    and budget.max_output_tokens < escalated
-                ):
-                    logger.info("Escalating max_tokens to %d", escalated)
-                    state.max_output_tokens_override = escalated
-                    state.messages = list(messages_for_query)
-                    state.transition = "max_output_tokens_escalate"
-                    return True
-                return False
-
-            def _try_recover() -> bool:
-                limit = params.settings.get("max_output_tokens_recovery_limit", 3)
-                if state.max_output_tokens_recovery_count >= limit:
-                    return False
-                state.max_output_tokens_recovery_count += 1
-                recovery_msg = create_user_message(
-                    "Output token limit hit. Resume directly -- no apology, no recap. "
-                    "Pick up mid-thought. Break remaining work into smaller pieces.",
-                    hide_in_ui=True,
-                )
-                state.messages = (
-                    list(messages_for_query)
-                    + [assistant_msg]
-                    + truncated_tool_results
-                    + [recovery_msg]
-                )
-                state.max_output_tokens_override = None
-                state.transition = "max_output_tokens_recovery"
-                return True
-
-            # A truncated tool call has to land complete in ONE generation -
-            # its JSON cannot be resumed across turns, so a budget held flat
-            # never emits it. Text does resume, and recovering keeps the
-            # already-generated tokens that escalation would re-pay for.
-            attempts = (
-                (_try_escalate, _try_recover)
-                if tool_use_blocks
-                else (_try_recover, _try_escalate)
+            state.messages = (
+                list(messages_for_query)
+                + [assistant_msg]
+                + truncated_tool_results
+                + [create_user_message(TRUNCATION_NOTICE, hide_in_ui=True)]
             )
-            if any(attempt() for attempt in attempts):
-                continue
-
-            # Both paths exhausted: end the turn with the truncated response.
-            return
+            state.transition = "max_output_tokens_recovery"
+            continue
 
         # -- Phase 7b: No tool use -> normal completion ------------------
         if not tool_use_blocks:
@@ -1148,7 +1117,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # -- Phase 10: Assemble next iteration ---------------------------
         state.messages = list(messages_for_query) + [assistant_msg] + tool_results
         state.max_output_tokens_recovery_count = 0
-        state.max_output_tokens_override = None
         state.transition = "next_iteration"
         iteration += 1
     # end while True

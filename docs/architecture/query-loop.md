@@ -194,23 +194,19 @@ results, and proceed to truncation handling or tools.
 if stop_reason == "max_tokens":
     # Never execute calls assembled from a truncated response.
     yield synthetic_error_results_for(tool_use_blocks)
-    if (
-        state.max_output_tokens_override is None
-        and budget.max_output_tokens < escalated_max_tokens
-    ):
-        state.max_output_tokens_override = escalated_max_tokens
-        continue
-    if state.max_output_tokens_recovery_count < limit:
-        state.max_output_tokens_recovery_count += 1
-        yield recovery_msg   # "Resume directly..."
-        continue
+    if state.max_output_tokens_recovery_count >= limit:
+        return
+    state.max_output_tokens_recovery_count += 1
+    # The cut attempt stays in history; the model is told why it ended.
+    state.messages = messages + [assistant_msg, *results, TRUNCATION_NOTICE]
+    continue
 
 if not tool_use_blocks:
     # Normal completion
     return
 ```
 
-If the output is cut off, every assembled tool call is invalidated and paired with a synthetic error result; none executes. When the resolved starting budget is below `escalated_max_tokens` (64,000 by default), Alan first retries the original request at that larger target, clamped to legal room. This applies to explicit starting budgets too; set the escalation target at or below the starting value for a hard ceiling. If the larger call is still cut off, Alan stores the partial assistant response plus any synthetic results and injects a hidden, model-facing "Resume directly" user turn, up to `max_output_tokens_recovery_limit`. Prompt-too-long errors trigger one emergency-compaction attempt around the backend stream.
+If the output is cut off, every assembled tool call is invalidated and paired with a synthetic error result; none executes. The output budget is a hard ceiling - there is no larger retry - so the cut attempt is kept in history as it stands and a hidden, model-facing `<system-reminder>` states that the budget ended it and that content which does not fit one generation must be produced over several turns. This is allowed up to `max_output_tokens_recovery_limit` CONSECUTIVE times; Phase 10 clears the count after any iteration that completes, so a long task making progress is never ended by a cumulative total. A programmatic caller gets the same treatment as an interactive one. Prompt-too-long errors trigger one emergency-compaction attempt around the backend stream.
 
 ## Phase 8 — Tool execution
 
@@ -279,7 +275,7 @@ iteration += 1
 ```
 
 Assemble the next iteration's starting state and label the diagnostic
-transition. The continuation counter and temporary escalation override reset
+transition. The continuation counter resets
 after a completed tool cycle.
 
 ## Where the loop exits

@@ -32,7 +32,6 @@ class TestDefaults:
     @pytest.mark.parametrize(
         ("kwargs", "setting"),
         [
-            ({"escalated_max_tokens": 0}, "escalated_max_tokens"),
             ({"empty_response_retries": -1}, "empty_response_retries"),
             ({"persist_thinking": "yes"}, "persist_thinking"),
             ({"verbose": "yes"}, "verbose"),

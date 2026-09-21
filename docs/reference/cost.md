@@ -38,7 +38,7 @@ Alan Code computes cost client-side from token counts × registered per-token pr
 Every model call the agent makes is recorded, not just the ones whose answer you see:
 
 - normal turns;
-- recovery calls - output-truncation escalation and continuation, malformed-tool-call retries, and the empty-response nudge;
+- recovery calls - output-truncation continuation, malformed-tool-call retries, and the empty-response nudge;
 - compaction (Layer C) summarizer calls, including attempts a prompt-too-long retry discards.
 
 A session that compacts often therefore costs more than its visible turns suggest. Cost tracking is not a budget enforcer - see [limitations.md](limitations.md).
@@ -48,7 +48,7 @@ A session that compacts often therefore costs more than its visible turns sugges
 Key settings that affect cost behavior (see [`cli.md`](cli.md)):
 
 - `max_iterations_per_turn` - hard cap on completed model→tool cycles for one user message; recovery-only calls are not counted.
-- `max_output_tokens` - starting per-call output budget, with internal escalation to the higher `escalated_max_tokens` target when the model hits the limit and needs to recover.
+- `max_output_tokens` - per-call output budget, and a hard ceiling: a truncated generation is continued in a new turn, never retried at a larger budget.
 - `compaction_threshold_percent` - at what fraction of the usable input budget Alan starts summarizing.
 - `context_window` - normally automatic; override it only when model or server detection is wrong.
 

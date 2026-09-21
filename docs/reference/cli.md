@@ -42,8 +42,7 @@ By default, Alan uses native structured tool calling. If your model/server combi
 |---|---|---|
 | `--permission-mode` | `safe` (auto-read, ask for writes + exec), `edit` (auto-read/write, ask for exec), `yolo` (allow everything). | `edit` |
 | `--max-iterations-per-turn` | Hard cap on completed model→tool cycles per user message; recovery-only calls are not counted. | unlimited |
-| `--max-output-tokens` | Starting output budget per model call. A length-truncated response may retry at `escalated_max_tokens`; set that setting at or below this value for a hard ceiling. | automatic (model default, capped at 25% of the context window) |
-| `--escalated-max-tokens` | Retry budget after output truncation; set at/below the starting budget for a hard ceiling. | `64,000` |
+| `--max-output-tokens` | Output budget per model call, a hard ceiling - a truncated response is never retried at a larger budget. | automatic (model default, capped at 25% of the context window) |
 | `--empty-response-retries` | Corrective retries for wholly empty or reasoning-only replies with no visible answer/tool. | `2` |
 | `--persist-thinking`, `--no-persist-thinking` | Re-inject or omit prior reasoning in later requests. Does not enable provider-side thinking. | disabled |
 | `--memory` | Memory mode: `off` (default), `on`, `intensive`. | `off` |

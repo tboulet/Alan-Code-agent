@@ -7,7 +7,7 @@ instead. These are current-design facts, not bugs on a fix list.
 ## `max_iterations_per_turn` counts tool cycles, not model calls
 
 The cap counts **completed model -> tool cycles**. Recovery calls do not count:
-output-truncation escalation and continuation, malformed-tool-call retries, and
+output-truncation continuation, malformed-tool-call retries, and
 the empty-response nudge (`empty_response_retries`) are extra billed calls that
 leave the counter untouched. A turn with a low cap can therefore still make more
 model calls than the cap suggests.

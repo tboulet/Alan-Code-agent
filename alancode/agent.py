@@ -269,12 +269,6 @@ class AlanCodeAgent:
     max_output_tokens : int or "auto", optional
         Max tokens per LLM response. Acts as a starting budget: on a
         length-truncated response the loop escalates once to the
-        ``escalated_max_tokens`` setting (default 64000) when that is
-        higher. Set ``escalated_max_tokens`` at or below this value to
-        keep it a hard ceiling.
-    escalated_max_tokens : int, optional
-        Retry budget after a response hits its output limit. Defaults to
-        64000 and is always clamped to the legal room in the context window.
     empty_response_retries : int, optional
         In-send corrective nudges when a wholly empty or reasoning-only
         response has no visible answer or tool call (default 2, 0 disables). After
@@ -326,7 +320,6 @@ class AlanCodeAgent:
         permission_mode: str | None = None,
         max_iterations_per_turn: int | None = None,
         max_output_tokens: int | str | None = None,
-        escalated_max_tokens: int | None = None,
         empty_response_retries: int | None = None,
         no_verbalize_warning: bool | None = None,
         persist_thinking: bool | None = None,
@@ -393,7 +386,6 @@ class AlanCodeAgent:
             "permission_mode": permission_mode,
             "max_iterations_per_turn": max_iterations_per_turn,
             "max_output_tokens": max_output_tokens,
-            "escalated_max_tokens": escalated_max_tokens,
             "empty_response_retries": empty_response_retries,
             "no_verbalize_warning": no_verbalize_warning,
             "persist_thinking": persist_thinking,

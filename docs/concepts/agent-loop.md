@@ -66,7 +66,7 @@ The stream is driven by `backend.stream(...)` which yields structured events: `S
 
 Three kinds of errors the loop handles transparently:
 
-1. **Output token limit hit mid-thought**: the assistant gets cut off. If the resolved starting budget is below `escalated_max_tokens` (64k by default), the loop retries at that higher, window-clamped target. If still cut off, it injects "Resume directly, no apology, pick up mid-thought" up to 3 times. Suspect truncated tool calls are answered with synthetic errors and never executed.
+1. **Output token limit hit mid-thought**: the assistant gets cut off. The budget is fixed, so there is no larger retry; the cut attempt stays in history and a `<system-reminder>` tells the model the budget ended it and that long content must span several turns. Allowed up to `max_output_tokens_recovery_limit` consecutive times. Suspect truncated tool calls are answered with synthetic errors and never executed.
 2. **Prompt too long (413)**: triggers an emergency compaction and re-runs with the summarized history.
 3. **Retryable network errors (rate limits, timeouts, 529)**: handled in `alancode/api/retry.py` with exponential backoff.
 
@@ -90,7 +90,6 @@ Between iterations the loop carries a `LoopState` (`alancode/query/state.py`):
 - `max_output_tokens_recovery_count` - how many hidden "Resume directly" continuation turns were attempted.
 - `has_attempted_emergency_compact` — one-shot per turn.
 - `last_input_tokens` / `last_output_tokens` — used by the pre-call compaction estimate.
-- `max_output_tokens_override` - temporary escalation target for the next retry.
 
 When a turn ends, `LoopState` is discarded. The durable state is `self._messages` on the agent and `SessionState` on disk.
 

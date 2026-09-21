@@ -10,7 +10,6 @@ class LoopState:
     """Mutable state carried between loop iterations."""
     messages: list  # Current message history
     max_output_tokens_recovery_count: int = 0
-    max_output_tokens_override: int | None = None
     has_attempted_emergency_compact: bool = False
     native_tool_retries: int = 0
     iteration_count: int = 0  # Number of tool-use iterations completed

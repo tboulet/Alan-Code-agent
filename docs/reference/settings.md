@@ -23,7 +23,6 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `context_window` | int \| `"auto"` | `"auto"` | Budget |
 | `context_window_fallback` | int \| `null` | `null` | Budget |
 | `compact_max_output_tokens` | int \| `"auto"` | `"auto"` | Compaction |
-| `escalated_max_tokens` | int | `64_000` | Output control |
 | `max_consecutive_compact_failures` | int | `3` | Compaction |
 | `compaction_threshold_percent` | int \| `"auto"` | `"auto"` (80) | Compaction |
 | `max_compact_ptl_retries` | int | `3` | Compaction |
@@ -79,10 +78,10 @@ Text-based tool-call protocol for models without reliable native function callin
 - `"safe"` - allow reads, ask for write/exec.
 
 ### `max_iterations_per_turn`
-Hard cap on completed model→tool execution cycles per user message. `null` = unlimited. Recovery-only calls (empty-response correction, malformed-call correction, max-output escalation/continuation, or emergency retry) do not increment this counter, so it is not a total API-call limit.
+Hard cap on completed model→tool execution cycles per user message. `null` = unlimited. Recovery-only calls (empty-response correction, malformed-call correction, max-output continuation, or emergency retry) do not increment this counter, so it is not a total API-call limit.
 
 ### `max_output_tokens`
-Starting output budget per call. `null` or `"auto"` uses the model's declared output maximum capped at one quarter of the context window. If a response is cut off, Alan retries once at `escalated_max_tokens` when that value is higher, even when this starting budget was explicit. Set `escalated_max_tokens` at or below the starting budget for a hard ceiling. Every request is clamped so input, output, and safety margin fit the context window.
+Output budget per call. `null` or `"auto"` uses the model's declared output maximum capped at one quarter of the context window. It is a hard ceiling: a cut-off response is never retried at a larger budget. Every request is clamped so input, output, and safety margin fit the context window.
 
 ---
 
@@ -154,17 +153,10 @@ Independent toggles for compaction layers A/B/C. All `true` by default.
 
 ---
 
-## Output control
-
-### `escalated_max_tokens`
-Retry budget after the starting output budget is hit mid-generation. Default 64 000; it is used only when higher than the resolved starting budget and is clamped to what legally fits in the context window.
-
----
-
 ## Error recovery
 
 ### `max_output_tokens_recovery_limit`
-When the model keeps getting cut off at `max_tokens`, how many "Resume directly" continuation turns to try before giving up. When the resolved starting budget is lower than `escalated_max_tokens`, Alan first retries the original request at that larger target; continuation turns begin only if that retry is also cut off. Default 3.
+How many CONSECUTIVE length-truncated generations to allow within one turn before ending it. The count resets after any iteration that completes, so a long task making progress is never ended by a cumulative total. Default 3.
 
 ### `empty_response_retries`
 How many in-send corrective nudges to make when a model returns no visible answer or tool call, including a wholly empty or reasoning-only reply. Default 2; `0` disables retries. If exhausted, the final assistant message has `api_error="empty_response"` but is not classified as a transport/API failure.
