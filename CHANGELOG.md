@@ -1,5 +1,24 @@
 # Changelog
 
+- **2026-09-21 - Alan Code 1.3.17**
+  - **Breaking: `escalated_max_tokens` is removed.** A length-truncated generation is no longer retried at a larger budget. There is one output budget and it is a hard ceiling. A caller that still passes the setting now gets a validation error rather than being silently ignored - see the migration note below.
+  - A generation cut off by the output budget now keeps its partial text in history and tells the model why, via a `<system-reminder>` stating that the budget ended it and that content which does not fit one generation has to be produced over several turns. It replaces the previous "resume mid-thought" message. Allowed up to `max_output_tokens_recovery_limit` CONSECUTIVE times; the count clears after any iteration that completes, so a long task that keeps making progress is never ended by a cumulative total. Measured on a 59,650-turn benchmark round at an 8,000-token cap: 8,620 turns ended with no parsed tool call, 1,785 of them after generating 7,000+ tokens, and 190 had visibly opened a file write and were cut mid-content - each one discarding 30-110 minutes of generation on a 3.5 tok/s serve.
+  - The `programmatic` flag no longer suppresses that handling. It returned before the remedy, so every harness-driven run - which is every benchmark run - got nothing at all.
+  - A tool call parsed out of a text dialect is now replayed to the model as the markup it actually wrote, not as a structured `tool_calls` entry carrying an id Alan minted. The server's chat template re-renders a structured entry into that model's own native markup, so a model taught to write a fenced bash block saw a different dialect in its own history and imitated it - measured at 25% and 63% of iterations on two Kimi arms, producing garbled markup that nothing parses. Tool results move to ordinary user content in the same conversation, since a `role: "tool"` entry would otherwise reference an id that is no longer sent.
+  - Context-window discovery now authenticates. `/v1/models`, `/props` and `/api/show` were queried without credentials, which a self-hosted server does not need and a hosted endpoint answers with 401 - so a window the endpoint publishes plainly could not be discovered.
+  - A command that times out now has its whole process group killed, and the reap is bounded. Signalling only the shell left its children running holding the inherited stdout pipe, so the timeout was reported only once they finished: measured at 87 minutes for a 300s timeout, by which point the runaway child had grown to 240 GB.
+  - A stream that dies because one SSE line exceeds the client buffer is re-issued unstreamed instead of crashing the turn. The no-replay boundary still wins: a stream that fails after emitting content is raised, never re-sent.
+  - The markdown-fence stop sequence is gone from `bash_block` and `auto`. Stop sequences apply to the whole generation including the reasoning channel, and a bare ``` fence is what a thinking model writes to quote a grid - so the turn was cut before any visible text existed. Every other format stops on a unique closing tag and is unchanged.
+  - Kimi tool calls are located by their JSON rather than by the token that should precede it, so a stray `<think>` where `<|tool_call_argument_begin|>` belongs no longer makes the whole call unparseable.
+
+### Migration from 1.3.16
+
+`escalated_max_tokens` no longer exists. Remove it from settings, constructor
+calls and CLI flags (`--escalated-max-tokens`). A harness that applies it
+through `update_session_setting` will receive an error string instead of
+`None`; one that raises on that - the correct thing to do - will fail at
+startup until the call is removed.
+
 - **2026-09-05 - Alan Code 1.3.16**
   - New `agent.context_window_source` property: where the resolved window came from (`override`, `registry`, `server`, `known_table`, `cache`, `fallback`). Only `fallback` is an alarm - nothing resolved, so Alan assumed a conservative 32768 and the number is indistinguishable from a real one once it reaches a log. Alan already warned on stderr once per model, but in a batch run nobody reads stderr: the run looks normal, compacts early and often, and a long-context task silently gets a fraction of the hardware. A harness can now record the source beside the number and treat `fallback` as a configuration error.
 - **2026-09-03 - Alan Code 1.3.15**
