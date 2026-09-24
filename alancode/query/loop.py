@@ -34,6 +34,7 @@ from alancode.messages.types import (
 )
 from alancode.messages.factory import (
     create_assistant_error_message,
+    create_compact_clear_boundary_message,
     create_attachment_message,
     create_tool_result_message,
     create_user_interruption_message,
@@ -81,7 +82,7 @@ from alancode.tools.text_tool_parser import (
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
 from alancode.skills.tool_filter import filter_tools_for_skill
-from alancode.utils.tokens import predicted_next_call_tokens
+from alancode.utils.tokens import estimate_message_tokens, predicted_next_call_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -328,10 +329,19 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # not keep up.
         b_tokens_saved = 0
         if params.settings.get("compaction_clear_enabled", True):
+            pre_clear = messages_for_query
             messages_for_query, b_tokens_saved = compaction_clear_tool_results(
                 messages_for_query,
                 clear_target_tokens=budget.tool_result_clear_target,
             )
+            if b_tokens_saved > 0:
+                yield create_compact_clear_boundary_message(
+                    trigger="auto",
+                    pre_tokens=estimate_message_tokens(pre_clear),
+                    tokens_saved=b_tokens_saved,
+                    compacted_tool_ids=[],
+                    cleared_attachment_uuids=[],
+                )
 
         # Layer C: compaction_auto (summarize if at/over the threshold).
         # Pre-call token estimate: max(usage_based, full_estimate), where

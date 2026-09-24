@@ -541,3 +541,45 @@ class TestBreakerFallbackLiveness:
         events2 = await run_turn(agent, "still there?")
         assert backend.violations == []
         assert final_text(events2) == "All done."
+
+
+# ---------------------------------------------------------------------------
+# Layer B announces itself
+# ---------------------------------------------------------------------------
+
+
+class _FloodingBash(DummyTool):
+    """Layer B only clears results of known tools, so the flood wears Bash's name."""
+
+    @property
+    def name(self) -> str:
+        return "Bash"
+
+
+@pytest.mark.asyncio
+async def test_layer_b_clearing_yields_a_clear_boundary(tmp_path):
+    """Clearing old tool results used to happen silently: the boundary type
+    existed but nothing created it, so a harness saw the prompt shrink with
+    no event to attribute it to."""
+    from alancode.messages.types import SystemMessage, SystemMessageSubtype
+
+    inner = ScriptedBackend.from_responses(
+        [tool_call("Bash", {"command": "x"}) for _ in range(14)],
+        fallback=text("All done."),
+    )
+    backend = AuditedBackend(inner, context_window=16_384)
+    agent = make_agent(tmp_path, backend, tool=_FloodingBash(flood_payload(9_000)))
+    # Isolate Layer B from Layer C, which would otherwise keep the history
+    # below B's target. A settings key, not a constructor kwarg.
+    assert agent.update_session_setting("compaction_auto_enabled", False) is None
+
+    events = await run_turn(agent, "flood")
+    clears = [
+        e for e in events
+        if isinstance(e, SystemMessage)
+        and e.subtype == SystemMessageSubtype.COMPACT_CLEAR_BOUNDARY
+    ]
+    assert clears, "Layer B fired without announcing it"
+    meta = clears[0].compact_clear_metadata
+    assert meta.tokens_saved > 0
+    assert meta.pre_tokens > meta.tokens_saved
