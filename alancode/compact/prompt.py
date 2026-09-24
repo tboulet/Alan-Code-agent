@@ -8,6 +8,13 @@ from __future__ import annotations
 
 import re
 
+# Lines of the summary request that must never survive into a summary.
+_SUMMARY_REQUEST_MARKERS = (
+    "Respond with TEXT ONLY",
+    "Do NOT call any tools",
+    "Do NOT use Read, Bash",
+)
+
 # -- No-tools preamble --
 # Prevents the summarizer from attempting tool calls during compaction.
 NO_TOOLS_PREAMBLE = (
@@ -56,7 +63,7 @@ Your summary should include the following sections:
 3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important.
 4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.
 5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
-6. All user messages: List ALL user messages that are not tool results. These are critical for understanding the users' feedback and changing intent.
+6. All user messages: List ALL user messages that are not tool results, excluding this summary request itself. These are critical for understanding the users' feedback and changing intent.
 7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
 8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
 9. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's most recent explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests or really old requests that were already completed without confirming with the user first.
@@ -173,6 +180,14 @@ def format_compact_summary(raw_summary: str) -> str:
         # Fallback: use the full response (with analysis already stripped)
         formatted = formatted.strip()
 
+    # The summary request is the conversation's last user message, so a model
+    # listing "all user messages" can quote it - and "Do NOT call any tools"
+    # would then sit in every later request.
+    formatted = "\n".join(
+        line for line in formatted.split("\n")
+        if not any(marker in line for marker in _SUMMARY_REQUEST_MARKERS)
+    )
+
     # Clean up extra whitespace between sections
     formatted = re.sub(r"\n\n+", "\n\n", formatted)
 
@@ -224,8 +239,8 @@ def get_post_compact_notification(memory_mode: str = "on") -> str:
     parts = [
         "<system-reminder>",
         "Your conversation was compacted. Earlier tool results and messages "
-        "have been summarized. Re-read files you need with the Read tool "
-        "rather than relying on earlier context.",
+        "have been summarized. Re-read any files you need rather than "
+        "relying on earlier context.",
     ]
     if memory_mode != "off":
         parts.append("If memory is enabled, check your memory files.")

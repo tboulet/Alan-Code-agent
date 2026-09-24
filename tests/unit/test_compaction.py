@@ -244,3 +244,28 @@ class TestTokenCounting:
         total = estimate_message_tokens(messages)
         # Should be > 0 with message overhead + content
         assert total > 0
+
+
+def test_summary_never_carries_the_summarizer_tool_ban():
+    """Asked to list "all user messages", a model quoted the summary request
+    itself, so "Do NOT call any tools" sat in every post-compaction request
+    (seen on Qwen3.8). A literal model would stop acting."""
+    from alancode.compact.prompt import format_compact_summary
+
+    raw = (
+        "<analysis>x</analysis><summary>\n6. All user messages:\n"
+        "  - Fix the failing test\n"
+        "  - (Current message) CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n"
+        "7. Pending Tasks: none\n</summary>"
+    )
+    out = format_compact_summary(raw)
+    assert "Do NOT call any tools" not in out
+    assert "TEXT ONLY" not in out
+    assert "Fix the failing test" in out, "real user messages must survive"
+
+
+def test_post_compact_notice_names_no_specific_tool():
+    # A Bash-only agent has no Read tool to re-read files with.
+    from alancode.compact.prompt import get_post_compact_notification
+
+    assert "Read tool" not in get_post_compact_notification()
