@@ -259,14 +259,16 @@ class TestBashBlockFormat:
         assert result.error is None
         assert result.cleaned_text == text
 
-    def test_unclosed_block_not_executed(self):
-        """A block cut before its closing fence (mid-stream chunk or a
-        length-truncated output) must NOT parse as a call - the loop's
-        truncation recovery handles the truncated case."""
+    def test_unclosed_block_not_executed_but_reported(self):
+        """A block with no closing fence must NOT parse as a call - running it
+        would execute a fragment. It IS reported as an attempted call, so a
+        turn that ENDED on it gets format feedback instead of being taken as
+        the final answer; a length-truncated one never reaches that path,
+        because the loop routes max_tokens to length recovery first."""
         text = "Writing:\n```bash\ncat > f <<'EOF'\nif ("
         result = extract_tool_calls_from_text(text, format="bash_block")
         assert result.tool_calls == []
-        assert result.error is None
+        assert result.error is not None
 
     def test_other_language_fences_ignored(self):
         text = "```python\nprint('hi')\n```\nand\n```sh\nls\n```"

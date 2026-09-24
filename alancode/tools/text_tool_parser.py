@@ -671,9 +671,11 @@ class BashBlockFormat(ToolCallFormat):
         )]
 
     def detect_malformed(self, text: str) -> bool:
-        # No-block and unclosed-block answers are normal turns (reasoning
-        # only, or truncated output), never a malformed call to retry.
-        return False
+        # An opened ```bash that never parses is an attempted call. The loop
+        # only asks this when the turn was NOT cut by the output budget, so a
+        # truncated block still goes to length recovery; left unflagged, the
+        # prose around it was taken as the final answer and the session ended.
+        return bool(re.search(r"```bash[ \t]*\r?\n", text)) and not self.parse(text)
 
     def format_error(self) -> str:
         return (

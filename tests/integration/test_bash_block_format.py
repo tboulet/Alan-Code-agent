@@ -411,3 +411,22 @@ async def test_truncated_block_is_never_completed_by_the_next_generation(tmp_pat
         assert "def solve(\nEOF" not in command, (
             f"a truncated block was stitched into a command: {command!r}"
         )
+
+
+@pytest.mark.asyncio
+async def test_turn_ending_on_an_unclosed_block_gets_format_feedback(tmp_path):
+    """GLM-5.3-Flash ended its first turn on a ```bash block it never
+    closed. Nothing parsed and nothing was flagged, so the prose was taken as
+    the final answer and the session ended after one turn with 0 calls."""
+    backend = TextTurnsBackend([
+        (None, "I will read them, one per line.```bash\ncat notes/a.txt\ncat notes/b.txt\n"),
+        (None, "Reading them.\n```bash\ncat notes/a.txt\n```\n"),
+        (None, "Done."),
+    ])
+    tool = RecordingBashTool()
+    agent = make_agent(tmp_path, backend, tool, programmatic=True)
+
+    [event async for event in agent.query_events_async("read the notes")]
+
+    assert backend.calls >= 2, "the session ended on the unparsed block"
+    assert tool.commands == ["cat notes/a.txt"], "only the well-formed retry runs"
