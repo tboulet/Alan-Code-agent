@@ -48,13 +48,6 @@ class BashTool(Tool):
                         "The command will be killed if it exceeds this duration."
                     ),
                 },
-                "purpose": {
-                    "type": "string",
-                    "description": (
-                        "A clear, concise one-line summary of what this "
-                        "command does. Shown to the user before approval."
-                    ),
-                },
             },
             "required": ["command"],
         }
@@ -68,7 +61,8 @@ class BashTool(Tool):
             given_keys = list(args.keys())
             return ToolResult(
                 data=f"Error: 'command' parameter is required but was not provided. "
-                     f"Got parameters: {given_keys}.",
+                     f"Got parameters: {given_keys}. Put the shell command itself "
+                     f"in 'command'.",
                 is_error=True,
             )
 

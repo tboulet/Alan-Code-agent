@@ -34,7 +34,6 @@ Runs a shell command. Output is stdout + stderr combined, exit-code-non-zero mar
 |---|---|---|---|
 | `command` | string | yes | The shell command. Use `&&` to chain. Quote paths with spaces. |
 | `timeout` | integer | no | Milliseconds; default 120 000 (2 min). |
-| `purpose` | string | no | One-line summary shown to the user on the approval prompt. |
 
 **System prompt guidance**: "Avoid using this tool to run `cat`, `head`, `tail`, `sed`, `awk`, or `echo` when a dedicated tool (Read/Edit/Write/Glob/Grep) exists."
 
