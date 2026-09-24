@@ -53,7 +53,7 @@ Truncation is middle-out: the head (structure, first errors) and the tail (concl
 
 `alancode/compact/compact_clear.py`
 
-Damage control, not economization: inactive until the estimated size exceeds the *clear target* G (halfway between the compaction threshold T and the blocking limit - see `alancode/budget.py`). Above G, it replaces the **content** of `tool_result` blocks oldest-first, stopping as soon as the estimate is back at G - so it can never bring the size below T, which means it never pre-empts Layer C (the information-preserving path). There is no keep-recent floor; recent results are protected by the target itself. The model still sees that a tool was called, but the output is reduced to:
+Damage control, not economization: inactive until the estimated size exceeds the *clear target* G (halfway between the compaction threshold T and the blocking limit - see `alancode/budget.py`). Above G, it replaces the **content** of `tool_result` blocks oldest-first, stopping as soon as the estimate is back at G - so it can never bring the size below T, which means it never pre-empts Layer C (the information-preserving path). That holds only because B and C measure the payload the same way; they once did not, and B fired while C never ran. There is no keep-recent floor; recent results are protected by the target itself. The model still sees that a tool was called, but the output is reduced to:
 
 ```
 [cleared to free context space]

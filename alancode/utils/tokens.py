@@ -188,6 +188,22 @@ def _messages_for_litellm(messages: list) -> list[dict]:
     return out
 
 
+def _openai_tool_shape(tool: Any) -> Any:
+    """litellm.token_counter reads OpenAI-shaped tools; alancode's schema
+    ({name, description, input_schema}) made it raise, so every in-loop
+    count silently fell back to chars/3."""
+    if isinstance(tool, dict) and "input_schema" in tool and "function" not in tool:
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.get("name", ""),
+                "description": tool.get("description", ""),
+                "parameters": tool.get("input_schema") or {},
+            },
+        }
+    return tool
+
+
 def count_tokens_for_call(
     model: str | None,
     messages: list,
@@ -222,7 +238,7 @@ def count_tokens_for_call(
         try:
             kwargs: dict[str, Any] = {"model": model, "messages": msg_dicts}
             if tools:
-                kwargs["tools"] = tools
+                kwargs["tools"] = [_openai_tool_shape(t) for t in tools]
             return int(litellm.token_counter(**kwargs))
         except Exception as exc:
             logger.debug("litellm.token_counter failed (%s); using fallback", exc)

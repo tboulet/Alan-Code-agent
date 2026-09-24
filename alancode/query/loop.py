@@ -82,7 +82,7 @@ from alancode.tools.text_tool_parser import (
 from alancode.query.state import LoopState
 from alancode.settings import SETTINGS_DEFAULTS
 from alancode.skills.tool_filter import filter_tools_for_skill
-from alancode.utils.tokens import estimate_message_tokens, predicted_next_call_tokens
+from alancode.utils.tokens import predicted_next_call_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -329,15 +329,28 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # not keep up.
         b_tokens_saved = 0
         if params.settings.get("compaction_clear_enabled", True):
-            pre_clear = messages_for_query
+            pre_clear_tokens = predicted_next_call_tokens(
+                params.model,
+                messages_for_query,
+                system=params.system_prompt,
+                tools=[t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools],
+                last_input_tokens=0 if a_truncated else state.last_input_tokens,
+                last_output_tokens=0 if a_truncated else state.last_output_tokens,
+                new_messages_since_last_call=(
+                    state.messages[state.messages_len_at_last_call:]
+                    if state.last_input_tokens and not a_truncated
+                    else None
+                ),
+            )
             messages_for_query, b_tokens_saved = compaction_clear_tool_results(
                 messages_for_query,
                 clear_target_tokens=budget.tool_result_clear_target,
+                current_tokens=pre_clear_tokens,
             )
             if b_tokens_saved > 0:
                 yield create_compact_clear_boundary_message(
                     trigger="auto",
-                    pre_tokens=estimate_message_tokens(pre_clear),
+                    pre_tokens=pre_clear_tokens,
                     tokens_saved=b_tokens_saved,
                     compacted_tool_ids=[],
                     cleared_attachment_uuids=[],

@@ -233,7 +233,7 @@ class TestToolResultFlooding:
         """Many medium results, each under the per-result cap: the original
         issue #2 crash. Must never produce an illegal call, must attempt
         Layer C when over the threshold, and the session must keep working."""
-        n_calls = 12
+        n_calls = 16
         inner = ScriptedBackend.from_responses(
             [tool_call("Dummy", {}) for _ in range(n_calls)],
             fallback=text("All done."),
@@ -244,8 +244,9 @@ class TestToolResultFlooding:
         events = await run_turn(agent, "flood me")
         assert_survived(backend, events)
 
-        # 12 results x ~9k chars ~= 27k+ tokens: crosses T on every small
-        # window. On 200k (T ~= 151k tokens) no compaction is expected.
+        # Counted by a real tokenizer (~3.9 chars/token here, not chars/3),
+        # 16 capped results cross T on every small window. On 200k
+        # (T ~= 151k tokens) no compaction is expected.
         if cw <= 32_768:
             assert backend.summarizer_calls >= 1, (
                 "Layer C was never attempted despite crossing the threshold"
@@ -511,7 +512,9 @@ class TestBreakerFallbackLiveness:
         the fallback hard-truncates with a visible notice, and the session
         finishes the turn AND answers the next one."""
         cw = 32_768
-        n_calls = 14
+        # Enough results to trip the breaker once but not to re-cross T after
+        # the fallback resets it, which would start a second cycle.
+        n_calls = 18
         inner = ScriptedBackend.from_responses(
             [tool_call("Dummy", {}) for _ in range(n_calls)],
             fallback=text("All done."),
@@ -583,3 +586,55 @@ async def test_layer_b_clearing_yields_a_clear_boundary(tmp_path):
     meta = clears[0].compact_clear_metadata
     assert meta.tokens_saved > 0
     assert meta.pre_tokens > meta.tokens_saved
+
+
+@pytest.mark.asyncio
+async def test_clearing_never_pre_empts_summarising(tmp_path):
+    """Layer B's target sits above Layer C's threshold so that B cannot fire
+    first - which holds only if both measure on one scale. B used a chars/3
+    estimate while C used a tokenizer count; chars/3 reads well above a real
+    tokenizer, so B crossed its target while C never reached its threshold.
+    Measured on Qwen3.8/llama.cpp: 35 clearings, 0 summarizer requests."""
+    from alancode.messages.types import SystemMessage, SystemMessageSubtype
+
+    test_output = (
+        '  File "solution.py", line 12, in solve\n'
+        "    return bfs(grid, start)\n"
+        "AssertionError: expected 4 got 3\n"
+    ) * 25
+    inner = ScriptedBackend.from_responses(
+        [tool_call("Bash", {"command": "python run_test.py"}) for _ in range(40)],
+        fallback=text("All done."),
+    )
+    backend = AuditedBackend(inner, context_window=16_384)
+    # A name litellm tokenizes with a real tokenizer; for an unrecognised one
+    # both layers fall back to chars/3 and agree, hiding the bug.
+    agent = make_agent(
+        tmp_path, backend, tool=_FloodingBash(test_output[:2000]),
+        model="gpt-4o", max_output_tokens=4000,
+    )
+
+    events = await run_turn(agent, "fix the tests")
+    kinds = [
+        e.subtype for e in events
+        if isinstance(e, SystemMessage) and e.subtype in (
+            SystemMessageSubtype.COMPACT_BOUNDARY,
+            SystemMessageSubtype.COMPACT_CLEAR_BOUNDARY,
+        )
+    ]
+    assert kinds, "precondition: the flood must engage context management"
+    assert kinds[0] == SystemMessageSubtype.COMPACT_BOUNDARY, (
+        f"Layer B cleared before Layer C ever summarised: {[k.value for k in kinds[:4]]}"
+    )
+
+
+def test_token_counter_accepts_alancode_tool_schemas():
+    """litellm.token_counter reads OpenAI-shaped tools and raised on
+    alancode's schema, so every in-loop count fell back to chars/3."""
+    from alancode.tools.builtin.bash import BashTool
+    from alancode.utils.tokens import count_tokens_for_call, estimate_message_tokens
+    from alancode.messages.factory import create_user_message
+
+    msgs = [create_user_message("def solve(grid):\n    return grid\n" * 150)]
+    counted = count_tokens_for_call("gpt-4o", msgs, tools=[BashTool().to_schema()])
+    assert counted < estimate_message_tokens(msgs), "still on the chars/3 fallback"

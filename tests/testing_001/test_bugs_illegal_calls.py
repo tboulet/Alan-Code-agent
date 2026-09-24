@@ -21,12 +21,6 @@ from .harness import (
     run_turn,
     word_soup,
 )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Accepted limitation: fallback token estimates are inaccurate for CJK text",
-)
 class TestF05CjkIllegalCalls:
     async def test_cjk_flood_never_produces_illegal_call(self, tmp_path):
         """I1: input + max_tokens <= CW for every call. The chars/3

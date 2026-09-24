@@ -30,9 +30,11 @@ cancel a request already in flight or kill a tool already running: a ten-minute
 
 ## Token counts are estimates
 
-Alan does not run the provider's tokenizer. It takes the maximum of the last
-call's reported usage and its own estimate, then adds a safety margin. The
-fallback estimator (characters / 3) under-counts scripts such as CJK.
+Alan does not run the provider's own tokenizer. It counts with LiteLLM's
+tokenizer for the model (tiktoken when the model is unknown to it), takes the
+maximum of that and the last call's reported usage, then adds a safety margin.
+When LiteLLM cannot count at all it falls back to characters / 3, which
+under-counts scripts such as CJK.
 
 The failure mode is deliberately one-sided: compaction fires slightly early
 rather than letting a request overflow, and a genuine prompt-too-long is caught

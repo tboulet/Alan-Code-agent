@@ -74,6 +74,7 @@ def compaction_clear_tool_results(
     *,
     clear_target_tokens: int,
     compactable_tools: set[str] = COMPACTABLE_TOOLS,
+    current_tokens: int | None = None,
 ) -> tuple[list[Message], int]:
     """Clear old tool result content down to a token target (Layer B).
 
@@ -81,11 +82,17 @@ def compaction_clear_tool_results(
     G, and with the per-result cap at 10% of T a single clear can never
     jump the estimate from above G to below T.
 
+    ``current_tokens`` must be measured the way the Layer C threshold is:
+    the target sits above that threshold only on a shared scale, and a
+    chars/3 estimate reads well above a real tokenizer, which let B fire
+    while C never did. It falls back to that estimate when not given.
+
     Returns (new_messages, tokens_saved).
     Only clears tool results from compactable tools.
     """
     # Gate: nothing to do at or below the target.
-    current_tokens = estimate_message_tokens(messages)
+    if current_tokens is None:
+        current_tokens = estimate_message_tokens(messages)
     if current_tokens <= clear_target_tokens:
         return list(messages), 0
 
