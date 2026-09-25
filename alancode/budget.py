@@ -213,6 +213,8 @@ def resolve_context_budget(
                 f"than the context window ({cw})."
             )
     else:
+        # Sized at T, not at call time: it bounds the call even when the
+        # input estimate is far low (CJK, see test_bugs_illegal_calls F05).
         summary_max = min(DEFAULT_SUMMARY_MAX_TOKENS, cw - threshold - margin)
         summary_max = max(1, summary_max)
 
