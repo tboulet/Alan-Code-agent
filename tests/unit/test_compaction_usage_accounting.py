@@ -137,6 +137,34 @@ async def test_a_cut_off_summary_is_retried_not_accepted():
     assert "ls -la &&" not in summary
 
 
+class ReasonedToTheCapBackend:
+    """First attempt spends the whole budget on hidden reasoning: no text."""
+
+    def __init__(self):
+        self.inputs = []
+
+    async def stream(self, messages, system, tools, **kwargs):
+        self.inputs.append(len(messages))
+        yield StreamMessageStart(model="test-model", request_id="req")
+        if len(self.inputs) == 1:
+            yield StreamMessageDelta(stop_reason="max_tokens", usage={"output_tokens": 8192})
+            return
+        yield StreamTextDelta(text="<analysis>ok</analysis><summary>Read all 14 notes.</summary>")
+        yield StreamMessageDelta(stop_reason="end_turn", usage={"output_tokens": 40})
+
+
+@pytest.mark.asyncio
+async def test_an_empty_cut_off_summary_is_retried_on_a_smaller_input():
+    """GLM-5.3's template has no reasoning switch: attempts that reasoned to
+    the cap and wrote nothing were re-sent unchanged until compaction gave up."""
+    backend = ReasonedToTheCapBackend()
+    result = await compaction_auto(_history(turns=4), backend, settings={})
+
+    assert result is not None
+    assert len(backend.inputs) == 2
+    assert backend.inputs[1] < backend.inputs[0], "the retry must trim the input"
+
+
 class NoThinkingBackend(SummarizerBackend):
     """A custom-endpoint backend: offers kwargs that switch reasoning off."""
 

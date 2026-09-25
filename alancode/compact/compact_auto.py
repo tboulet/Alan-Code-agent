@@ -241,11 +241,11 @@ async def compaction_auto(
                     response_text = ""
                     break
 
+            if _summary_cut_off(response_text, stop_reason):
+                # Same remedy as no room at all: a smaller input leaves
+                # the summarizer more output budget on the retry.
+                raise _PromptTooLongError("summary was cut off before it closed")
             if response_text.strip():
-                if _summary_cut_off(response_text, stop_reason):
-                    # Same remedy as no room at all: a smaller input leaves
-                    # the summarizer more output budget on the retry.
-                    raise _PromptTooLongError("summary was cut off before it closed")
                 break  # Success
 
         except _PromptTooLongError:
