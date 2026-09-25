@@ -135,3 +135,46 @@ async def test_a_cut_off_summary_is_retried_not_accepted():
     summary = " ".join(str(getattr(m, "content", "")) for m in result.summary_messages)
     assert "Read all 14 notes" in summary
     assert "ls -la &&" not in summary
+
+
+class NoThinkingBackend(SummarizerBackend):
+    """A custom-endpoint backend: offers kwargs that switch reasoning off."""
+
+    def __init__(self):
+        super().__init__()
+        self.kwargs_seen = []
+
+    def no_thinking_kwargs(self):
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+
+    async def stream(self, messages, system, tools, **kwargs):
+        self.kwargs_seen.append(kwargs)
+        async for event in super().stream(messages, system, tools, **kwargs):
+            yield event
+
+
+@pytest.mark.asyncio
+async def test_summarizer_call_switches_reasoning_off_when_the_backend_can():
+    """A reasoning model thought to the output cap on every summarizer
+    attempt - four of ~4.5 min each, all failing - because hidden reasoning
+    ate the budget the visible <analysis> block already provides for."""
+    backend = NoThinkingBackend()
+    await compaction_auto(_history(), backend, settings={})
+    assert backend.kwargs_seen[0].get("chat_template_kwargs") == {"enable_thinking": False}
+
+
+@pytest.mark.asyncio
+async def test_summarizer_sends_nothing_extra_to_a_backend_without_the_switch():
+    # Hosted providers may reject an unknown parameter.
+    backend = SummarizerBackend()
+    seen = []
+    original = backend.stream
+
+    async def spy(messages, system, tools, **kwargs):
+        seen.append(kwargs)
+        async for event in original(messages, system, tools, **kwargs):
+            yield event
+
+    backend.stream = spy
+    await compaction_auto(_history(), backend, settings={})
+    assert "chat_template_kwargs" not in seen[0]

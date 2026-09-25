@@ -183,6 +183,18 @@ class LiteLLMBackend(LLMBackend):
         self._cw_probe_attempted = False
         self._cw_fallback_warned: set[str] = set()
 
+    def no_thinking_kwargs(self) -> dict[str, Any]:
+        """Per-call kwargs that switch a chat template's reasoning off.
+
+        Only for a custom endpoint (llama.cpp, vLLM, SGLang and the like),
+        where the chat template reads them; a hosted provider may reject an
+        unknown parameter. Merges with any chat_template_kwargs already set.
+        """
+        if not self._api_base:
+            return {}
+        existing = self._extra_kwargs.get("chat_template_kwargs") or {}
+        return {"chat_template_kwargs": {**existing, "enable_thinking": False}}
+
     def get_model_info(self, model: str | None = None) -> ModelInfo:
         """Get model capabilities.
 

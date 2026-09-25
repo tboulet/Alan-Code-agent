@@ -430,3 +430,13 @@ def test_server_metadata_probe_authenticates(monkeypatch):
     )
     assert backend.get_model_info().context_window == 262_144
     assert seen["headers"]["Authorization"] == "Bearer secret"
+
+
+def test_no_thinking_kwargs_only_for_a_custom_endpoint_and_merged():
+    assert LiteLLMBackend(model="gpt-4o").no_thinking_kwargs() == {}
+    custom = LiteLLMBackend(
+        model="openai/m", api_base="http://h/v1", chat_template_kwargs={"foo": 1},
+    )
+    assert custom.no_thinking_kwargs() == {
+        "chat_template_kwargs": {"foo": 1, "enable_thinking": False},
+    }

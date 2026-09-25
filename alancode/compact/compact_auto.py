@@ -176,6 +176,12 @@ async def compaction_auto(
     kwargs: dict[str, Any] = {}
     if model is not None:
         kwargs["model"] = model
+    # The <analysis> block is the summarizer's visible scratchpad; hidden
+    # reasoning on top of it can consume the whole output budget on every
+    # retry (measured: four attempts of ~4.5 min, all thinking to the cap).
+    no_thinking = getattr(backend, "no_thinking_kwargs", None)
+    if callable(no_thinking):
+        kwargs.update(no_thinking())
 
     for attempt in range(max_ptl_retries + 1):
         # Size the summarizer's output so input + output + margin fits the window.
