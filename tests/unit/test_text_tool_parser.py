@@ -146,6 +146,19 @@ class TestHermesFormat:
         assert result.error is not None
         assert "not valid" in result.error
 
+    def test_json_that_does_not_decode_is_flagged(self):
+        """Qwen3-32B opened a command string with " and closed it with ';
+        the block matched the tag shape, no call parsed, and the turn was
+        taken as the final answer."""
+        text = (
+            '<tool_call>\n{"name": "Bash", "arguments": {"command": '
+            '"mkdir -p inventory && echo \'class Store: pass\' > '
+            'inventory/store.py\'}}\n</tool_call>'
+        )
+        result = extract_tool_calls_from_text(text, format="hermes")
+        assert result.tool_calls == []
+        assert result.error is not None
+
 
 class TestHermesXMLFormat:
     """Hermes-XML (Qwen3-Coder-Next style) text tool call format."""
@@ -194,6 +207,12 @@ class TestHermesXMLFormat:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].input["command"] == body
 
+    def test_a_json_body_block_is_flagged_not_ignored(self):
+        text = '<tool_call>\n{"name": "Bash", "arguments": {"command": "ls"}}\n</tool_call>'
+        result = extract_tool_calls_from_text(text, format="hermes_xml")
+        assert result.tool_calls == []
+        assert result.error is not None
+
 
 class TestAlanFormat:
     """Alan's custom text tool call format."""
@@ -218,6 +237,13 @@ class TestAlanFormat:
         result = extract_tool_calls_from_text(text, format="alan")
         assert len(result.tool_calls) == 2
         assert "Let me check" in result.cleaned_text
+
+
+    def test_json_that_does_not_decode_is_flagged(self):
+        text = '<tool_use>\n{"name": "Bash", "input": {"command": "ls\'}}\n</tool_use>'
+        result = extract_tool_calls_from_text(text, format="alan")
+        assert result.tool_calls == []
+        assert result.error is not None
 
 
 class TestBashBlockFormat:

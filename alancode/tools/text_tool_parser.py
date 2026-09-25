@@ -164,10 +164,7 @@ class HermesFormat(ToolCallFormat):
         return results
 
     def detect_malformed(self, text: str) -> bool:
-        for match in _HERMES_LOOSE_PATTERN.finditer(text):
-            if not _HERMES_PATTERN.match(match.group(0)):
-                return True
-        return False
+        return bool(_HERMES_LOOSE_PATTERN.search(text)) and not self.parse(text)
 
     def format_error(self) -> str:
         return (
@@ -325,10 +322,7 @@ class AlanFormat(ToolCallFormat):
         return results
 
     def detect_malformed(self, text: str) -> bool:
-        for match in _ALAN_LOOSE_PATTERN.finditer(text):
-            if not _ALAN_PATTERN.match(match.group(0)):
-                return True
-        return False
+        return bool(_ALAN_LOOSE_PATTERN.search(text)) and not self.parse(text)
 
     def format_error(self) -> str:
         return (
@@ -427,18 +421,7 @@ class HermesXMLFormat(ToolCallFormat):
         return results
 
     def detect_malformed(self, text: str) -> bool:
-        # A <tool_call> block that doesn't satisfy the strict pattern AND
-        # isn't a valid `hermes` JSON-body either is malformed.
-        for match in _HERMES_XML_LOOSE_PATTERN.finditer(text):
-            blk = match.group(0)
-            if _HERMES_XML_PATTERN.match(blk):
-                continue
-            # Maybe it's JSON-body hermes-style — that's the sibling format's
-            # problem, not ours. Don't double-report.
-            if re.match(r"<tool_call>\s*\{.*?\}\s*</tool_call>", blk, re.DOTALL):
-                continue
-            return True
-        return False
+        return bool(_HERMES_XML_LOOSE_PATTERN.search(text)) and not self.parse(text)
 
     def format_error(self) -> str:
         return (
