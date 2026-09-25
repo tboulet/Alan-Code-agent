@@ -261,3 +261,6 @@ async def test_partial_5xx_is_not_replayed_through_compaction(tmp_path):
         if isinstance(event, AssistantMessage) and event.is_api_error_message
     ]
     assert errors
+    # A stream that dies after content must end the turn as an error, not
+    # as the model's answer.
+    assert errors[-1].api_error == "server_error"

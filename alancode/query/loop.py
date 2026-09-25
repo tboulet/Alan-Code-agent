@@ -57,6 +57,7 @@ from alancode.backends.base import (
 from alancode.api.errors import (
     InvalidToolCallError,
     ServerError,
+    classify_error,
     is_prompt_too_long,
 )
 from alancode.api.retry import stream_with_retry
@@ -707,12 +708,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
             logger.error("Query error: %s", e)
             yield create_assistant_error_message(
-                str(e),
-                api_error=(
-                    "prompt_too_long"
-                    if is_prompt_too_long(str(e))
-                    else None
-                ),
+                str(e), api_error=classify_error(e),
             )
             return
 
