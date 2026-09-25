@@ -848,3 +848,21 @@ def test_no_format_stops_on_text_a_reasoning_channel_can_produce():
                 f"format {name!r} stops on {stop!r}, which a thinking model "
                 f"produces while quoting a grid"
             )
+
+
+def test_k3_turn_of_only_template_structure_is_not_an_answer():
+    """Kimi-K3 answered turn 13 with nothing but the control markup of an
+    empty message. Taken as a final answer, it ended the session silently
+    after 12 clean calls."""
+    fmt = get_format("kimi_k3")
+    empty = (
+        '<|open|>message role="assistant"<|sep|><|open|>think<|sep|><|close|>think<|sep|>'
+        "<|open|>response<|sep|><|close|>response<|sep|>\n"
+        "<|close|>tools<|sep|><|close|>message<|sep|><|end_of_msg|>"
+    )
+    assert fmt.detect_malformed(empty)
+    # Real text inside the markup is an answer, and prose is left alone.
+    assert not fmt.detect_malformed(
+        "<|open|>response<|sep|>All three checkpoints are done.<|close|>response<|sep|>"
+    )
+    assert not fmt.detect_malformed("Done.")

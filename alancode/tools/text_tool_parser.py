@@ -978,6 +978,10 @@ _K3_CALL_PATTERN = re.compile(
     re.DOTALL,
 )
 
+_K3_STRUCTURE_PATTERN = re.compile(
+    r"<\|open\|>[^<]*<\|sep\|>|<\|close\|>\w+<\|sep\|>|<\|end_of_msg\|>"
+)
+
 _K3_ARG_PATTERN = re.compile(
     r'<\|open\|>argument\s+key="([^"]+)"([^<]*)<\|sep\|>(.*?)<\|close\|>argument',
     re.DOTALL,
@@ -1009,9 +1013,13 @@ class KimiK3Format(ToolCallFormat):
         return results
 
     def detect_malformed(self, text: str) -> bool:
-        if "<|open|>call" not in text:
-            return False
-        return not self.parse(text)
+        if "<|open|>call" in text:
+            return not self.parse(text)
+        # A turn made only of the template's own structure - an empty
+        # message - is not an answer. Taken as one, it ended a Kimi-K3
+        # session silently after 12 clean calls.
+        stripped = _K3_STRUCTURE_PATTERN.sub("", text)
+        return stripped != text and not stripped.strip()
 
     def format_error(self) -> str:
         return (
