@@ -103,3 +103,35 @@ async def test_usage_free_backend_records_nothing():
     )
     assert result is not None
     assert tracker.calls == []
+
+
+class CutOffFirstBackend:
+    """First summary runs out of budget mid-reasoning, the retry completes."""
+
+    def __init__(self):
+        self.attempts = 0
+
+    async def stream(self, messages, system, tools, **kwargs):
+        self.attempts += 1
+        yield StreamMessageStart(model="test-model", request_id="req")
+        if self.attempts == 1:
+            yield StreamTextDelta(text="<analysis> 2. **My first action**: Ran `ls -la &&")
+            yield StreamMessageDelta(stop_reason="max_tokens", usage={"output_tokens": 2278})
+            return
+        yield StreamTextDelta(text="<analysis>ok</analysis><summary>Read all 14 notes.</summary>")
+        yield StreamMessageDelta(stop_reason="end_turn", usage={"output_tokens": 40})
+
+
+@pytest.mark.asyncio
+async def test_a_cut_off_summary_is_retried_not_accepted():
+    """A reasoning model spent the summarizer budget thinking and left 122
+    tokens ending mid-command, with no <summary> block. It was accepted as
+    the compaction, so the agent resumed knowing only that it had run `ls`
+    and re-read everything (Qwen3.8, 16k window)."""
+    backend = CutOffFirstBackend()
+    result = await compaction_auto(_history(turns=4), backend, settings={})
+
+    assert backend.attempts == 2, "the cut-off summary must not be accepted"
+    summary = " ".join(str(getattr(m, "content", "")) for m in result.summary_messages)
+    assert "Read all 14 notes" in summary
+    assert "ls -la &&" not in summary

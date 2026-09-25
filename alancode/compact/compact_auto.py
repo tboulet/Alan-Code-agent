@@ -8,6 +8,7 @@ replaces the pre-boundary history.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -187,6 +188,7 @@ async def compaction_auto(
             call_max_tokens = compact_max_output_tokens
 
         response_text = ""
+        stop_reason: str | None = None
         call_usage = Usage()
         call_model = model
         try:
@@ -209,6 +211,8 @@ async def compaction_auto(
                     if event.usage:
                         call_usage = usage_from_stream(event.usage)
                 elif isinstance(event, StreamMessageDelta):
+                    if event.stop_reason:
+                        stop_reason = event.stop_reason
                     if event.usage:
                         call_usage.accumulate(usage_from_stream(event.usage))
                 elif isinstance(event, StreamError):
@@ -221,6 +225,10 @@ async def compaction_auto(
                     break
 
             if response_text.strip():
+                if _summary_cut_off(response_text, stop_reason):
+                    # Same remedy as no room at all: a smaller input leaves
+                    # the summarizer more output budget on the retry.
+                    raise _PromptTooLongError("summary was cut off before it closed")
                 break  # Success
 
         except _PromptTooLongError:
@@ -312,6 +320,18 @@ async def compaction_auto(
         pre_compact_token_count=pre_compact_token_count,
         post_compact_token_count=post_compact_token_count,
     )
+
+
+def _summary_cut_off(text: str, stop_reason: str | None) -> bool:
+    """A summary that ran out of budget, or opened its blocks and never closed
+    the summary. Accepting one replaces the conversation with a fragment: a
+    reasoning model spent its budget thinking and left 122 tokens ending
+    mid-command, which was accepted and cost the agent everything it had read.
+    A response with no tags at all is still accepted by the fallback."""
+    if stop_reason == "max_tokens":
+        return True
+    opened = "<analysis>" in text or "<summary>" in text
+    return opened and not re.search(r"<summary>[\s\S]*?</summary>", text)
 
 
 class _PromptTooLongError(Exception):
