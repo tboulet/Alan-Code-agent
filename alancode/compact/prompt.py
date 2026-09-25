@@ -53,6 +53,8 @@ DETAILED_ANALYSIS_INSTRUCTION = (
 # -- Base compact prompt (the 9-section template) --
 BASE_COMPACT_PROMPT = f"""Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
+This request to summarize is not part of the conversation: do not mention it anywhere in the summary.
+Record work as done only when the conversation shows it was done - a file written, a command run with its result. Anything intended or planned but not yet carried out belongs under Pending Tasks, never under what was accomplished.
 
 {DETAILED_ANALYSIS_INSTRUCTION}
 
@@ -238,9 +240,9 @@ def get_post_compact_notification(memory_mode: str = "on") -> str:
     """
     parts = [
         "<system-reminder>",
-        "Your conversation was compacted. Earlier tool results and messages "
-        "have been summarized. Re-read any files you need rather than "
-        "relying on earlier context.",
+        "Your conversation was compacted. The summary above records what "
+        "was done before this point; rely on it. Re-read a file only when you "
+        "need exact content the summary does not give.",
     ]
     if memory_mode != "off":
         parts.append("If memory is enabled, check your memory files.")

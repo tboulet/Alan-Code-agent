@@ -269,3 +269,25 @@ def test_post_compact_notice_names_no_specific_tool():
     from alancode.compact.prompt import get_post_compact_notification
 
     assert "Read tool" not in get_post_compact_notification()
+
+
+def test_summary_prompt_keeps_the_request_out_and_plans_apart_from_work():
+    """Kimi-K2.7 opened a summary with "The user then interrupted with a
+    CRITICAL request for a text-only summary" - a paraphrase no line filter
+    catches - and in another run reported a planned history() as implemented,
+    then claimed a checkpoint it never wrote."""
+    from alancode.compact.prompt import get_compact_prompt
+
+    prompt = get_compact_prompt(None)
+    assert "do not mention it anywhere in the summary" in prompt
+    assert "Record work as done only when the conversation shows it was done" in prompt
+
+
+def test_post_compact_notice_tells_the_model_to_rely_on_the_summary():
+    # "Re-read files ... rather than relying on earlier context" told a model
+    # to distrust the summary; it re-read every note it had already covered.
+    from alancode.compact.prompt import get_post_compact_notification
+
+    notice = get_post_compact_notification()
+    assert "rely on it" in notice
+    assert "rather than relying on earlier context" not in notice
