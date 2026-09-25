@@ -225,6 +225,17 @@ async def compaction_auto(
                     error_msg = event.error or ""
                     if is_prompt_too_long(error_msg):
                         raise _PromptTooLongError(event.error)
+                    if "chat_template_kwargs" in kwargs and _rejects_no_thinking(error_msg):
+                        logger.warning(
+                            "Server rejected summarizing without reasoning (%s); "
+                            "summarizing with it for the rest of the session", error_msg,
+                        )
+                        reject = getattr(backend, "reject_no_thinking", None)
+                        if callable(reject):
+                            reject()
+                        kwargs.pop("chat_template_kwargs")
+                        response_text = ""
+                        break
                     # Other errors: log and fail
                     logger.warning("Compaction stream error: %s", event.error)
                     response_text = ""
@@ -326,6 +337,17 @@ async def compaction_auto(
         pre_compact_token_count=pre_compact_token_count,
         post_compact_token_count=post_compact_token_count,
     )
+
+
+# A chat template that refuses the no-reasoning switch fails the whole call
+# (llama.cpp --jinja: HTTP 500 "Jinja Exception: Disabling thinking is not
+# supported."); these mark that refusal apart from an ordinary server error.
+_NO_THINKING_REJECTION_MARKERS = ("thinking", "chat_template", "jinja")
+
+
+def _rejects_no_thinking(error: str) -> bool:
+    lowered = error.lower()
+    return any(marker in lowered for marker in _NO_THINKING_REJECTION_MARKERS)
 
 
 def _summary_cut_off(text: str, stop_reason: str | None) -> bool:

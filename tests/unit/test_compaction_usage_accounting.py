@@ -178,3 +178,48 @@ async def test_summarizer_sends_nothing_extra_to_a_backend_without_the_switch():
     backend.stream = spy
     await compaction_auto(_history(), backend, settings={})
     assert "chat_template_kwargs" not in seen[0]
+
+
+class TemplateRefusesNoThinking:
+    """A llama.cpp chat template that raises on enable_thinking=false."""
+
+    def __init__(self):
+        self.calls = []
+        self._rejected = False
+
+    def no_thinking_kwargs(self):
+        return {} if self._rejected else {"chat_template_kwargs": {"enable_thinking": False}}
+
+    def reject_no_thinking(self):
+        self._rejected = True
+
+    async def stream(self, messages, system, tools, **kwargs):
+        self.calls.append(kwargs)
+        yield StreamMessageStart(model="test-model", request_id="req")
+        if "chat_template_kwargs" in kwargs:
+            yield StreamError(
+                error="HTTP 500: Jinja Exception: Disabling thinking is not supported."
+            )
+            return
+        yield StreamTextDelta(text="<summary>done</summary>")
+        yield StreamMessageDelta(stop_reason="end_turn", usage={"output_tokens": 10})
+
+
+@pytest.mark.asyncio
+async def test_a_template_that_refuses_the_switch_falls_back_and_remembers():
+    """Qwen3.8-2.4T's template raised on enable_thinking=false, so every
+    summarizer call failed: 6 compactions in one session, all failed, and the
+    agent ran on hard truncation alone."""
+    backend = TemplateRefusesNoThinking()
+
+    first = await compaction_auto(_history(), backend, settings={})
+    assert first is not None, "must fall back to summarizing with reasoning"
+    assert "chat_template_kwargs" in backend.calls[0]
+    assert "chat_template_kwargs" not in backend.calls[1]
+
+    backend.calls.clear()
+    second = await compaction_auto(_history(), backend, settings={})
+    assert second is not None
+    assert backend.calls and all("chat_template_kwargs" not in c for c in backend.calls), (
+        "the refusal must be remembered, not paid for on every compaction"
+    )

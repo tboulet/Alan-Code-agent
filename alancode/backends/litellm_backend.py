@@ -181,6 +181,7 @@ class LiteLLMBackend(LLMBackend):
         self._extra_kwargs = dict(extra_kwargs or {})
         self._extra_kwargs.update(kwargs)
         self._cw_probe_attempted = False
+        self._no_thinking_rejected = False
         self._cw_fallback_warned: set[str] = set()
 
     def no_thinking_kwargs(self) -> dict[str, Any]:
@@ -190,10 +191,14 @@ class LiteLLMBackend(LLMBackend):
         where the chat template reads them; a hosted provider may reject an
         unknown parameter. Merges with any chat_template_kwargs already set.
         """
-        if not self._api_base:
+        if not self._api_base or self._no_thinking_rejected:
             return {}
         existing = self._extra_kwargs.get("chat_template_kwargs") or {}
         return {"chat_template_kwargs": {**existing, "enable_thinking": False}}
+
+    def reject_no_thinking(self) -> None:
+        """Stop offering the switch: this server's template refuses it."""
+        self._no_thinking_rejected = True
 
     def get_model_info(self, model: str | None = None) -> ModelInfo:
         """Get model capabilities.
