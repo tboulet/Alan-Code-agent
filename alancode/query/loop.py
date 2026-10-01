@@ -410,7 +410,11 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         yield result.boundary_message
                         for msg in result.summary_messages:
                             yield msg
-                        messages_for_query = [result.boundary_message] + result.summary_messages
+                        # Messages injected this iteration have not been
+                        # answered yet: they follow the summary verbatim.
+                        messages_for_query = (
+                            [result.boundary_message] + result.summary_messages + injected
+                        )
                         # The payload was just replaced wholesale - the
                         # usage floor is stale for Phase 3 too.
                         layers_modified = True
@@ -698,6 +702,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         state.messages = (
                             [emergency_result.boundary_message]
                             + emergency_result.summary_messages
+                            + injected
                         )
                         state.transition = "emergency_compact_retry"
                         continue

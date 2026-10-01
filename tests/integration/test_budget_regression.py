@@ -262,6 +262,40 @@ class TestToolResultFlooding:
         assert final_text(events2) == "All done."
 
 
+class InjectingTool(DummyTool):
+    """Injects a notice at each completed call, as regact does with warnings."""
+
+    def __init__(self, payload: str) -> None:
+        super().__init__(payload)
+        self.agent = None
+        self.executions = 0
+
+    async def call(self, args: dict, context: ToolUseContext) -> ToolResult:
+        self.executions += 1
+        self.agent.inject_message(f"NOTICE-{self.executions}: actions are running out")
+        return await super().call(args, context)
+
+
+@pytest.mark.asyncio
+async def test_a_message_injected_as_compaction_fires_reaches_the_model_verbatim(tmp_path):
+    """The summary replaced the whole payload, including the notice injected
+    in that same iteration: the model never saw it as written."""
+    inner = ScriptedBackend.from_responses(
+        [tool_call("Dummy", {}) for _ in range(16)], fallback=text("All done."),
+    )
+    backend = AuditedBackend(inner, context_window=16_384)
+    tool = InjectingTool(flood_payload(9_000))
+    agent = make_agent(tmp_path, backend, tool=tool)
+    tool.agent = agent
+
+    await run_turn(agent, "flood me")
+
+    kinds = [call["kind"] for call in backend.calls]
+    assert "summarizer" in kinds, "compaction never fired"
+    after_summary = backend.calls[kinds.index("summarizer") + 1]
+    assert "NOTICE-" in str(after_summary["messages"])
+
+
 # ---------------------------------------------------------------------------
 # Scenario 3 - single giant result
 # ---------------------------------------------------------------------------
