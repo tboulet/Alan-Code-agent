@@ -124,16 +124,7 @@ def main() -> None:
         "--max-output-tokens",
         type=_positive_int,
         default=None,
-        help=(
-            "Starting output budget; truncated replies may retry at "
-            "--escalated-max-tokens"
-        ),
-    )
-    parser.add_argument(
-        "--escalated-max-tokens",
-        type=_positive_int,
-        default=None,
-        help="Retry budget after an output-limit truncation",
+        help="Output budget per model reply; a reply cut at it is not retried larger",
     )
     parser.add_argument(
         "--empty-response-retries",

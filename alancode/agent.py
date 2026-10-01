@@ -267,8 +267,11 @@ class AlanCodeAgent:
         Maximum completed model→tool execution cycles per turn. Recovery-only
         model calls do not consume this counter.
     max_output_tokens : int or "auto", optional
-        Max tokens per LLM response. Acts as a starting budget: on a
-        length-truncated response the loop escalates once to the
+        Max tokens per LLM response, a hard ceiling (clamped to the
+        window at call time). A length-truncated response is not retried at
+        a larger budget: its tool calls are not executed and the model is
+        told to continue in smaller pieces, up to
+        ``max_output_tokens_recovery_limit`` consecutive truncations.
     empty_response_retries : int, optional
         In-send corrective nudges when a wholly empty or reasoning-only
         response has no visible answer or tool call (default 2, 0 disables). After
