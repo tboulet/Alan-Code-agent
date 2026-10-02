@@ -99,6 +99,10 @@ TRUNCATION_NOTICE = (
     "</system-reminder>"
 )
 
+CUT_CALLS_MARKER = (
+    "[{n} tool call(s) cut off by the output token limit were removed; none ran.]"
+)
+
 EMPTY_RESPONSE_NUDGE = (
     "Your previous response contained no visible answer or tool call - the "
     "output was spent entirely on reasoning, and reasoning is NOT preserved "
@@ -1000,6 +1004,19 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             # carries the machine-readable marker for callers to route on.
             assistant_msg.api_error = "empty_response"
 
+        # A cut reply's tool calls never run (Phase 7). A count stands in for
+        # them, so a degenerate burst (hundreds of calls) does not ride along
+        # in every later request.
+        if tool_use_blocks and (
+            stop_reason == "max_tokens"
+            or assistant_msg.api_error == "max_output_tokens"
+        ):
+            assistant_msg.content = [
+                block for block in assistant_msg.content
+                if not isinstance(block, ToolUseBlock)
+            ] + [TextBlock(text=CUT_CALLS_MARKER.format(n=len(tool_use_blocks)))]
+            tool_use_blocks = []
+
         # Yield the (possibly rebuilt) assistant message
         yield assistant_msg
 
@@ -1021,24 +1038,8 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         if stop_reason == "max_tokens" or assistant_msg.api_error == "max_output_tokens":
             # A truncated response's tool calls cannot be trusted -- the
             # last one may be cut mid-argument yet still parse as complete
-            # (text formats tolerate a missing closing tag) -- so fail
-            # them all instead of executing.
-            truncated_tool_results = [
-                create_tool_result_message(
-                    tool_use_id=block.id,
-                    content=(
-                        "This tool call was cut off by the output token "
-                        "limit and was NOT executed. Re-issue it "
-                        "completely, in smaller pieces if needed."
-                    ),
-                    is_error=True,
-                    source_tool_assistant_uuid=assistant_msg.uuid,
-                )
-                for block in tool_use_blocks
-            ]
-            for result in truncated_tool_results:
-                yield result
-
+            # (text formats tolerate a missing closing tag) -- so none ran;
+            # they were replaced by CUT_CALLS_MARKER above.
             # Consecutive truncations only: Phase 10 clears the count after
             # any iteration that completes, so a long task that keeps making
             # progress is never ended by a cumulative total.
@@ -1050,7 +1051,6 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             state.messages = (
                 list(messages_for_query)
                 + [assistant_msg]
-                + truncated_tool_results
                 + [create_user_message(TRUNCATION_NOTICE, hide_in_ui=True)]
             )
             state.transition = "max_output_tokens_recovery"

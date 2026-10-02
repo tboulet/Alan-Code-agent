@@ -428,8 +428,7 @@ class TestTruncatedToolCall:
     async def test_not_executed_and_escalation_retries(self, tmp_path):
         """A response cut at max_tokens while a tool call was in flight:
         the call must NOT run (it may be cut mid-argument yet still parse),
-        an error tool_result must answer it, and the escalation retry must
-        fire as if there were no tool call."""
+        and the retry must fire as if there were no tool call."""
         cw = 32_768
         inner = ScriptedBackend.from_responses(
             [truncated_tool_response(), text("recovered fully")],
@@ -444,11 +443,14 @@ class TestTruncatedToolCall:
         assert final_text(events) == "recovered fully"
 
         assert tool.executions == 0
-        results = [
+        cut = [
             e for e in events
-            if isinstance(e, UserMessage) and "NOT executed" in str(e.content)
+            if isinstance(e, AssistantMessage) and not e.hide_in_api
+            and e.stop_reason == "max_tokens"
         ]
-        assert len(results) == 1
+        assert len(cut) == 1
+        assert cut[0].tool_use_blocks == []
+        assert "[1 tool call(s) cut off" in cut[0].text
 
         main_calls = [c for c in backend.calls if c["kind"] == "main"]
         assert len(main_calls) == 2
@@ -457,8 +459,8 @@ class TestTruncatedToolCall:
 
     @pytest.mark.asyncio
     async def test_not_executed_and_recovery_messages_are_api_valid(self, tmp_path):
-        """The retry conversation must pair the dangling tool_use with the
-        error tool_result (strict servers 400 otherwise) plus the notice."""
+        """The retry conversation must carry no dangling tool_use (strict
+        servers 400 on one without its result), only the count and notice."""
         cw = 200_000
         inner = ScriptedBackend.from_responses(
             [truncated_tool_response(), text("recovered fully")],
@@ -476,9 +478,36 @@ class TestTruncatedToolCall:
         main_calls = [c for c in backend.calls if c["kind"] == "main"]
         assert len(main_calls) == 2
         retry = str(main_calls[1]["messages"])
-        assert "toolu_truncated" in retry
-        assert "NOT executed" in retry
+        assert "toolu_truncated" not in retry
+        assert "[1 tool call(s) cut off" in retry
         assert "output token budget" in retry
+
+    @pytest.mark.asyncio
+    async def test_a_cut_burst_of_calls_is_not_carried_into_the_retry(self, tmp_path):
+        """MiMo at temperature 1.0 emitted 818 parallel calls until the cap.
+        None ran, yet each call and its error result rode in every later
+        request: ~40k tokens of junk."""
+        burst = ScriptedResponse(
+            tool_calls=[
+                {"name": "Dummy", "input": {"n": i}, "id": f"toolu_burst_{i}"}
+                for i in range(50)
+            ],
+            stop_reason="max_tokens",
+        )
+        inner = ScriptedBackend.from_responses(
+            [burst, text("recovered fully")], fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=200_000)
+        tool = CountingTool(flood_payload(1_000))
+        agent = make_agent(tmp_path, backend, tool=tool)
+
+        events = await run_turn(agent, "go")
+        assert final_text(events) == "recovered fully"
+        assert tool.executions == 0
+
+        retry = str([c for c in backend.calls if c["kind"] == "main"][1]["messages"])
+        assert "toolu_burst_" not in retry
+        assert "[50 tool call(s) cut off" in retry
 
 
 # ---------------------------------------------------------------------------
