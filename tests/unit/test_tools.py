@@ -339,3 +339,27 @@ class TestBashTool:
         )
         assert not result.is_error
         assert result.data == "(no output)"
+
+    @pytest.mark.asyncio
+    async def test_session_default_timeout_applies_when_the_model_passes_none(self):
+        from alancode.tools.builtin.bash import BashTool
+
+        context = ToolUseContext(
+            cwd="/tmp", messages=[], settings={"bash_timeout_ms": 200},
+        )
+        result = await BashTool().call({"command": "sleep 5"}, context)
+        assert result.is_error
+        assert "timed out after 200ms" in result.data
+
+    @pytest.mark.asyncio
+    async def test_a_timeout_the_model_passes_overrides_the_session_default(self):
+        from alancode.tools.builtin.bash import BashTool
+
+        context = ToolUseContext(
+            cwd="/tmp", messages=[], settings={"bash_timeout_ms": 200},
+        )
+        result = await BashTool().call(
+            {"command": "sleep 0.5 && echo done", "timeout": 10_000}, context,
+        )
+        assert not result.is_error
+        assert "done" in result.data

@@ -6,6 +6,7 @@ import os
 import signal
 from typing import Any
 
+from alancode.settings import SETTINGS_DEFAULTS
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
 
 # A killed shell's children inherit its stdout pipe, so reaping can block on
@@ -44,7 +45,8 @@ class BashTool(Tool):
                 "timeout": {
                     "type": "integer",
                     "description": (
-                        "Optional timeout in milliseconds (default 120000, i.e. 2 minutes). "
+                        "Optional timeout in milliseconds. If omitted, the session's "
+                        "default applies (2 minutes unless configured). "
                         "The command will be killed if it exceeds this duration."
                     ),
                 },
@@ -66,9 +68,12 @@ class BashTool(Tool):
                 is_error=True,
             )
 
-        timeout_ms = args.get("timeout", 120_000)
+        default_ms = (context.settings or {}).get(
+            "bash_timeout_ms", SETTINGS_DEFAULTS["bash_timeout_ms"],
+        )
+        timeout_ms = args.get("timeout", default_ms)
         if not isinstance(timeout_ms, (int, float)) or timeout_ms <= 0:
-            timeout_ms = 120_000
+            timeout_ms = default_ms
         timeout_s = timeout_ms / 1000.0
 
         try:

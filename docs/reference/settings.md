@@ -30,6 +30,7 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `empty_response_retries` | int | `2` | Error recovery |
 | `no_verbalize_warning` | bool | `false` | Error recovery |
 | `max_tool_concurrency` | int | `10` | Tool execution |
+| `bash_timeout_ms` | int | `120000` | Tool execution |
 | `tool_result_max_chars` | int \| `"auto"` | `"auto"` | Tool execution |
 | `persist_thinking` | bool | `false` | Thinking history |
 | `disable_thinking` | bool | `false` | Thinking history |
@@ -170,6 +171,9 @@ When `true`, a turn that calls tools without any visible text gets a `<system-re
 
 ### `max_tool_concurrency`
 Max parallel read-only tool executions. Write and exec tools always run serially. Default 10.
+
+### `bash_timeout_ms`
+Timeout of a Bash command when the model does not pass its own `timeout`. The command's whole process group is killed when it expires. Default 120000 (2 minutes). A harness whose commands legitimately run longer (for example a framework call with its own time cap) should set it above that cap; a hanging command holds the turn for the full limit, so keep it no larger than needed.
 
 ---
 
