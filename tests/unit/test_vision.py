@@ -2,6 +2,7 @@
 
 import base64
 import os
+import struct
 
 import pytest
 
@@ -28,7 +29,12 @@ from alancode.session.transcript import dict_to_message, message_to_dict
 from alancode.tools.base import ToolUseContext
 from alancode.tools.builtin import view_image
 from alancode.tools.builtin.view_image import ViewImageTool
-from alancode.utils.tokens import IMAGE_TOKEN_ESTIMATE, estimate_message_tokens
+from alancode.utils.tokens import (
+    IMAGE_TOKEN_CEILING,
+    IMAGE_TOKEN_ESTIMATE,
+    estimate_message_tokens,
+    image_tokens,
+)
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 PNG_B64 = base64.b64encode(PNG).decode("ascii")
@@ -161,14 +167,37 @@ class TestImageSerialization:
 
 
 class TestImageBudget:
-    def test_an_image_costs_a_flat_estimate_not_its_base64_length(self):
-        big = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 600_000).decode("ascii")
-        message = create_tool_result_message("call_1", [
-            TextBlock(text="Image:"),
-            ImageBlock(source={"type": "base64", "media_type": "image/png", "data": big}),
-        ])
-        tokens = estimate_message_tokens([message])
-        assert IMAGE_TOKEN_ESTIMATE <= tokens < IMAGE_TOKEN_ESTIMATE + 50
+    @staticmethod
+    def _png_block(width, height, padding=0):
+        header = (
+            b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR"
+            + struct.pack(">II", width, height)
+        )
+        data = base64.b64encode(header + b"\x00" * padding).decode("ascii")
+        return ImageBlock(
+            source={"type": "base64", "media_type": "image/png", "data": data}
+        )
+
+    def test_an_image_costs_by_its_pixels(self):
+        """Measured on Qwen3.8-27B under llama.cpp: about 100 tokens at
+        256x256 and 300 at 512x512. A flat 1500 overcounted 5 to 15 times."""
+        assert image_tokens(self._png_block(256, 256)) == 88
+        assert image_tokens(self._png_block(512, 512)) == 350
+
+    def test_a_heavy_file_of_few_pixels_stays_cheap(self):
+        heavy = self._png_block(64, 64, padding=600_000)
+        message = create_tool_result_message("call_1", [TextBlock(text="Image:"), heavy])
+        assert estimate_message_tokens([message]) < 50
+
+    def test_a_huge_image_stops_at_the_ceiling(self):
+        assert image_tokens(self._png_block(8_000, 8_000)) == IMAGE_TOKEN_CEILING
+
+    def test_unreadable_dimensions_fall_back_to_the_flat_estimate(self):
+        jpeg = ImageBlock(source={
+            "type": "base64", "media_type": "image/jpeg",
+            "data": base64.b64encode(b"\xff\xd8\xff" + b"\x00" * 64).decode("ascii"),
+        })
+        assert image_tokens(jpeg) == IMAGE_TOKEN_ESTIMATE
 
     def test_truncating_a_long_result_keeps_its_image(self):
         message = create_tool_result_message("call_1", [

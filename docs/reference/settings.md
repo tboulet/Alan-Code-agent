@@ -177,7 +177,7 @@ Max parallel read-only tool executions. Write and exec tools always run serially
 Timeout of a Bash command when the model does not pass its own `timeout`. The command's whole process group is killed when it expires. Default 120000 (2 minutes). A harness whose commands legitimately run longer (for example a framework call with its own time cap) should set it above that cap; a hanging command holds the turn for the full limit, so keep it no larger than needed.
 
 ### `vision`
-Set to `true` when the model can see images. It adds the [`ViewImage`](tools.md#viewimage) tool to the default tool set and lets it return images. Default `false`: a text-only server typically rejects a request that carries an image. An image is budgeted at a flat 1500 tokens, is cleared with its tool result by compaction, and is replaced by `[image]` in the text sent to the summarizer.
+Set to `true` when the model can see images. It adds the [`ViewImage`](tools.md#viewimage) tool to the default tool set and lets it return images. Default `false`: a text-only server typically rejects a request that carries an image. An image is budgeted by its pixel count (about one token per 750 pixels, at most 1600; 1500 when its dimensions cannot be read), is cleared with its tool result by compaction, and is replaced by `[image]` in the text sent to the summarizer.
 
 ---
 

@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-07 - Alan Code 1.3.20**
+  - An image is now budgeted by its pixel count (about one token per 750 pixels, capped at 1600) instead of a flat 1500 tokens. Measured on a Qwen vision model under llama.cpp, an image cost about 100 tokens at 256x256 and 300 at 512x512, so the flat figure overcounted 5 to 15 times - enough to trigger compaction long before the window was full in a run that views a frame on most calls. The dimensions are read from the PNG header; other formats keep the 1500 fallback.
+
 - **2026-10-07 - Alan Code 1.3.19**
   - New `ViewImage` tool and `vision` setting (default off, so nothing changes unless it is set): a model that can see can look at an image file in its working directory, as Claude Code does through `Read` and Codex through `view_image`. The tool result carries a real image block; the Anthropic backend sends it as one, and an OpenAI-compatible server gets it as an `image_url` part of a user message right after the tool results, because a `role: "tool"` message carries text only. The tool refuses files outside the working directory, files that are not PNG/JPEG/GIF/WEBP by content, and files over 5 MB. An image is budgeted at a flat 1500 tokens rather than by the length of its base64, is cleared with its tool result by compaction, and is replaced by `[image]` for the summarizer. A tool with its own name cannot be called under `bash_block`.
   - A tool call cut by a kill now gets a result before the next request. A session stopped while a tool ran is saved ending on the call; resumed with `session_id`, the request carried a tool call with no result, which strict APIs reject. Every such call is answered with an error saying it was interrupted and may or may not have run.

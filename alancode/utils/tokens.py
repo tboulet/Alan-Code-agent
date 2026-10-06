@@ -21,6 +21,7 @@ been removed — calibration was numerically broken (see commit notes).
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 
@@ -35,9 +36,15 @@ MAX_OUTPUT_TOKENS_DEFAULT = 32_000
 # Fallback ratio used only when no tokenizer is available.
 # 3 chars/token is conservative for most models (English text + code).
 CHARS_PER_TOKEN_FALLBACK = 3.0
-# Flat cost of one image. Providers charge by resolution (roughly 250 to
-# 1,600 tokens); the base64 payload says nothing about it.
+# Providers charge an image by its pixels, not by its bytes: about one token
+# per 750 pixels (Anthropic's rule; measured within 15% on a Qwen vision
+# tower under llama.cpp), up to a ceiling where they downscale.
+IMAGE_PIXELS_PER_TOKEN = 750
+IMAGE_TOKEN_CEILING = 1_600
+# Cost assumed when the dimensions cannot be read.
 IMAGE_TOKEN_ESTIMATE = 1_500
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_PNG_HEADER_B64_CHARS = 32  # 24 bytes: signature, IHDR length and tag, width, height
 
 
 # ── Raw counting primitives ──────────────────────────────────────────────────
@@ -57,20 +64,37 @@ def _is_image(block: Any) -> bool:
     return getattr(block, "type", None) == "image"
 
 
-def _count_images(messages: list) -> int:
-    """Number of images in ``messages``, including those inside tool results."""
-    count = 0
+def image_tokens(block: Any) -> int:
+    """Estimate the tokens of one image block from its pixel count."""
+    source = getattr(block, "source", None) or {}
+    data = source.get("data") if isinstance(source, dict) else None
+    if isinstance(data, str) and len(data) >= _PNG_HEADER_B64_CHARS:
+        try:
+            head = base64.b64decode(data[:_PNG_HEADER_B64_CHARS])
+        except ValueError:
+            head = b""
+        if head.startswith(_PNG_SIGNATURE):
+            width = int.from_bytes(head[16:20], "big")
+            height = int.from_bytes(head[20:24], "big")
+            tokens = -(-width * height // IMAGE_PIXELS_PER_TOKEN)
+            return max(1, min(tokens, IMAGE_TOKEN_CEILING))
+    return IMAGE_TOKEN_ESTIMATE
+
+
+def _images_tokens(messages: list) -> int:
+    """Tokens of the images in ``messages``, including those inside tool results."""
+    total = 0
     for msg in messages:
         content = getattr(msg, "content", None)
         if not isinstance(content, list):
             continue
         for block in content:
             if _is_image(block):
-                count += 1
+                total += image_tokens(block)
             inner = getattr(block, "content", None)
             if isinstance(inner, list):
-                count += sum(1 for b in inner if _is_image(b))
-    return count
+                total += sum(image_tokens(b) for b in inner if _is_image(b))
+    return total
 
 
 def _content_block_tokens(block: Any) -> int:
@@ -78,7 +102,7 @@ def _content_block_tokens(block: Any) -> int:
     if isinstance(block, str):
         return rough_token_count(block)
     if _is_image(block):
-        return IMAGE_TOKEN_ESTIMATE
+        return image_tokens(block)
     if hasattr(block, "text"):
         return rough_token_count(block.text)
     if hasattr(block, "thinking"):
@@ -266,7 +290,7 @@ def count_tokens_for_call(
                 kwargs["tools"] = [_openai_tool_shape(t) for t in tools]
             return (
                 int(litellm.token_counter(**kwargs))
-                + _count_images(messages) * IMAGE_TOKEN_ESTIMATE
+                + _images_tokens(messages)
             )
         except Exception as exc:
             logger.debug("litellm.token_counter failed (%s); using fallback", exc)
