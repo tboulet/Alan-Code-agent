@@ -51,7 +51,7 @@ def _truncate_tool_result_content(
     text = (
         content
         if isinstance(content, str)
-        else "".join(b.text for b in content)
+        else "".join(b.text for b in content if isinstance(b, TextBlock))
     )
     original_size = len(text)
 
@@ -80,7 +80,9 @@ def _truncate_tool_result_content(
 
     if isinstance(content, str):
         return truncated
-    return [TextBlock(text=truncated)]
+    return [TextBlock(text=truncated)] + [
+        b for b in content if not isinstance(b, TextBlock)
+    ]
 
 
 def _process_tool_result_block(

@@ -9,7 +9,7 @@ from alancode.tools.base import (
     ToolResult,
     ToolUseContext,
 )
-from alancode.messages.types import ToolUseBlock, UserMessage
+from alancode.messages.types import ImageBlock, TextBlock, ToolUseBlock, UserMessage
 from alancode.messages.factory import create_tool_result_message
 from alancode.permissions.context import PermissionResult, PermissionBehavior
 from alancode.hooks.registry import run_pre_tool_hooks, run_post_tool_hooks
@@ -144,10 +144,11 @@ async def run_tool_use(
     _warn_inert_fields(tool, result)
 
     # 5. Post-tool-use hooks (fire-and-forget)
-    content = _result_to_str(result)
+    content = _result_content(result)
     try:
         await run_post_tool_hooks(
-            tool.name, args, content, is_error=result.is_error, settings=context.settings,
+            tool.name, args, _text_of(content), is_error=result.is_error,
+            settings=context.settings,
         )
     except Exception:
         logger.debug("Post-tool hook error (ignored)", exc_info=True)
@@ -169,10 +170,24 @@ def _error_result(tool_use_id: str, message: str) -> UserMessage:
     )
 
 
-def _result_to_str(result: ToolResult) -> str:
-    """Convert a ToolResult's data to a string suitable for the API."""
-    if isinstance(result.data, str):
-        return result.data
-    if result.data is None:
+def _result_content(result: ToolResult) -> str | list[TextBlock | ImageBlock]:
+    """Convert a ToolResult's data to tool_result content: a string, or the
+    tool's own text and image blocks."""
+    data = result.data
+    if isinstance(data, str):
+        return data
+    if data is None:
         return ""
-    return str(result.data)
+    if (
+        isinstance(data, list)
+        and data
+        and all(isinstance(b, (TextBlock, ImageBlock)) for b in data)
+    ):
+        return data
+    return str(data)
+
+
+def _text_of(content: str | list[TextBlock | ImageBlock]) -> str:
+    if isinstance(content, str):
+        return content
+    return "\n".join(b.text for b in content if isinstance(b, TextBlock))

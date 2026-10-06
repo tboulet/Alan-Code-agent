@@ -15,6 +15,7 @@ Alan Code ships with a handful of built-in tools the model uses to do actual wor
 | `AskUserQuestion` | Model asks you a multi-choice question. | `read` |
 | `WebFetch` | Fetch a URL and strip HTML. | `read` |
 | `GitCommit` | Stage + commit with a given message. | `write` |
+| `ViewImage` | Show an image file to a model that can see (only with `vision` on). | `read` |
 | `Skill` | Invoke a user-defined skill template. | `read` |
 
 Full schemas and examples: [reference/tools.md](../reference/tools.md).

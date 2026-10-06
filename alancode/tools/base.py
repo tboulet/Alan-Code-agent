@@ -15,7 +15,7 @@ DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000
 @dataclass
 class ToolResult:
     """Result of a tool execution."""
-    data: Any  # The tool's output (usually str)
+    data: Any  # The tool's output: str, or a list of TextBlock / ImageBlock
     is_error: bool = False
     # Reserved for compatibility with the v1 custom-tool API. The execution
     # pipeline currently persists only data/is_error and ignores this field.

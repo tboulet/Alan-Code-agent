@@ -33,8 +33,8 @@ from tests.conftest import EchoTool, MutateTool
 class TestToolRegistry:
     def test_get_all_builtin_tools(self):
         tools = get_all_builtin_tools()
-        # 7 tools + AskUserQuestion + GitCommit = 9 (WebSearch disabled)
-        assert len(tools) == 9
+        # 7 tools + AskUserQuestion + GitCommit + ViewImage = 10 (WebSearch disabled)
+        assert len(tools) == 10
 
     def test_builtin_tools_are_classes(self):
         tools = get_all_builtin_tools()

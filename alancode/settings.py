@@ -72,6 +72,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     # Tool execution
     "max_tool_concurrency": 10,  # Max parallel read-only tool executions
     "bash_timeout_ms": 120_000,  # Bash timeout when the model passes none
+    "vision": False,  # The model can see images: ViewImage may return them
     "tool_result_max_chars": "auto",  # Per-result cap (auto: min(10k, 10% of T in chars))
     # Thinking returned by the backend
     "persist_thinking": False,  # Re-render past turns' thinking as inline <think> text in API history
@@ -279,6 +280,7 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "no_verbalize_warning": _is_bool,
     "max_tool_concurrency": _is_pos_int,
     "bash_timeout_ms": _is_pos_int,
+    "vision": _is_bool,
     "tool_result_max_chars": _is_pos_int_or_auto,
     "persist_thinking": _is_bool,
     "disable_thinking": _is_bool,

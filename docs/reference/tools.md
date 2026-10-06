@@ -15,6 +15,7 @@ Every built-in tool with its input schema, permission level, and usage notes. Fo
 | [`AskUserQuestion`](#askuserquestion) | `read` | Ask the user a multi-choice question |
 | [`WebFetch`](#webfetch) | `read` | Fetch a URL |
 | [`GitCommit`](#gitcommit) | `write` | Stage and commit with a message |
+| [`ViewImage`](#viewimage) | `read` | Show an image file to a model that can see (needs `vision`) |
 | [`Skill`](#skill) | `read` | Invoke a user-defined skill template |
 
 All schemas reject unknown fields (`additionalProperties: false`) — the API surfaces clear "unknown parameter" errors instead of silently dropping.
@@ -186,6 +187,23 @@ Stages and commits with a given message. Adds a `Co-Authored-By: Alan Code` trai
 |---|---|---|---|
 | `message` | string | yes | Commit message. |
 | `files` | list[string] | no | Specific files to stage. Omit to stage all changes (`git add -A`). |
+
+---
+
+## ViewImage
+
+**Source**: `alancode/tools/builtin/view_image.py`
+**Permission level**: `read`
+
+Returns an image file (PNG, JPEG, GIF or WEBP, at most 5 MB) to the model as an image. Part of the default tool set only when the [`vision`](settings.md#vision) setting is on; with it off the tool answers with an error. The file must be inside the working directory, and its type is read from its content, not its name.
+
+The tool result holds a line of text and an image block (`{"type": "image", "source": {"type": "base64", "media_type": ..., "data": ...}}`). The Anthropic backend sends it as an image block; an OpenAI-compatible server gets it as an `image_url` part of a user message right after the tool results, since a `role: "tool"` message carries text only. Because it is a tool with its own name, it cannot be called under the `bash_block` format.
+
+**Parameters**:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file_path` | string | yes | Path of the image, absolute or relative to the working directory. |
 
 ---
 

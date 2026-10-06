@@ -9,6 +9,7 @@ from alancode.tools.builtin.grep_tool import GrepTool
 from alancode.tools.builtin.web_fetch import WebFetchTool
 from alancode.tools.builtin.ask_user import AskUserQuestionTool
 from alancode.tools.builtin.git_commit import GitCommitTool
+from alancode.tools.builtin.view_image import ViewImageTool
 
 ALL_BUILTIN_TOOLS = [
     BashTool(),
@@ -20,6 +21,7 @@ ALL_BUILTIN_TOOLS = [
     WebFetchTool(),
     AskUserQuestionTool(),
     GitCommitTool(),
+    ViewImageTool(),
 ]
 
 __all__ = [
@@ -31,5 +33,6 @@ __all__ = [
     "GrepTool",
     "WebFetchTool",
     "AskUserQuestionTool",
+    "ViewImageTool",
     "ALL_BUILTIN_TOOLS",
 ]

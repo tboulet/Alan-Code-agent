@@ -195,6 +195,15 @@ body {
     flex-shrink: 0;  /* don't let the chat's flex column squish us */
 }
 
+.msg-tool-image {
+    max-width: 100%;
+    max-height: 400px;
+    margin: 4px 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
 .msg-tool-result.error {
     border-color: var(--red);
     color: var(--red);

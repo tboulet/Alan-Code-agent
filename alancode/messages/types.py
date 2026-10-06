@@ -39,7 +39,7 @@ class ToolUseBlock:
 class ToolResultBlock:
     """A tool execution result."""
     tool_use_id: str
-    content: str | list[TextBlock]
+    content: str | list[TextBlock | ImageBlock]
     is_error: bool = False
     type: Literal["tool_result"] = "tool_result"
 

@@ -251,6 +251,14 @@ function renderUserMessage(data) {
                     el.textContent = text;
                     chatMessages.appendChild(el);
                 }
+                for (const b of Array.isArray(block.content) ? block.content : []) {
+                    if (b.type === "image" && b.source && b.source.type === "base64") {
+                        const img = document.createElement("img");
+                        img.className = "msg-tool-image";
+                        img.src = `data:${b.source.media_type};base64,${b.source.data}`;
+                        chatMessages.appendChild(img);
+                    }
+                }
             }
         }
         scrollToBottom();

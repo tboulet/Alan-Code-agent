@@ -16,6 +16,7 @@ from alancode.messages.types import (
     AttachmentMessage,
     CompactMetadata,
     CompactClearMetadata,
+    ImageBlock,
     SystemMessage,
     SystemMessageSubtype,
     TextBlock,
@@ -92,7 +93,7 @@ def create_user_interruption_message(*, tool_use: bool = False) -> UserMessage:
 
 def create_tool_result_message(
     tool_use_id: str,
-    content: str,
+    content: str | list[TextBlock | ImageBlock],
     *,
     is_error: bool = False,
     source_tool_assistant_uuid: UUID | None = None,

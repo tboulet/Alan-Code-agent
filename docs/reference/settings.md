@@ -31,6 +31,7 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `no_verbalize_warning` | bool | `false` | Error recovery |
 | `max_tool_concurrency` | int | `10` | Tool execution |
 | `bash_timeout_ms` | int | `120000` | Tool execution |
+| `vision` | bool | `false` | Tool execution |
 | `tool_result_max_chars` | int \| `"auto"` | `"auto"` | Tool execution |
 | `persist_thinking` | bool | `false` | Thinking history |
 | `disable_thinking` | bool | `false` | Thinking history |
@@ -174,6 +175,9 @@ Max parallel read-only tool executions. Write and exec tools always run serially
 
 ### `bash_timeout_ms`
 Timeout of a Bash command when the model does not pass its own `timeout`. The command's whole process group is killed when it expires. Default 120000 (2 minutes). A harness whose commands legitimately run longer (for example a framework call with its own time cap) should set it above that cap; a hanging command holds the turn for the full limit, so keep it no larger than needed.
+
+### `vision`
+Set to `true` when the model can see images. It adds the [`ViewImage`](tools.md#viewimage) tool to the default tool set and lets it return images. Default `false`: a text-only server typically rejects a request that carries an image. An image is budgeted at a flat 1500 tokens, is cleared with its tool result by compaction, and is replaced by `[image]` in the text sent to the summarizer.
 
 ---
 

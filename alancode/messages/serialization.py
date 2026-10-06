@@ -85,12 +85,16 @@ def message_to_anthropic_dict(msg: UserMessage | AssistantMessage) -> dict[str, 
 
 # ── OpenAI format (universal default) ───────────────────────────────────────
 
+IMAGE_PLACEHOLDER = "[image]"
+TOOL_IMAGES_NOTE = "Image(s) returned by the tool call above:"
+
 
 def messages_to_openai_dicts(
     messages: list[UserMessage | AssistantMessage],
     *,
     include_thinking: bool = False,
     text_dialect: bool = False,
+    include_images: bool = True,
 ) -> list[dict[str, Any]]:
     """Convert a list of messages to OpenAI API dict format.
 
@@ -114,6 +118,10 @@ def messages_to_openai_dicts(
     rendered by the server's chat template into that model's NATIVE markup,
     carrying ids alancode minted - so a model taught a text dialect sees a
     different one in its own history and imitates it.
+
+    An image in a tool result is sent as an ``image_url`` part of a user
+    message right after the results, since a ``role: "tool"`` message carries
+    text only. ``include_images=False`` sends ``IMAGE_PLACEHOLDER`` instead.
     """
     result: list[dict[str, Any]] = []
 
@@ -123,7 +131,9 @@ def messages_to_openai_dicts(
                 msg, include_thinking=include_thinking, text_dialect=text_dialect,
             ))
         elif isinstance(msg, UserMessage):
-            result.extend(_user_to_openai(msg, text_dialect=text_dialect))
+            result.extend(_user_to_openai(
+                msg, text_dialect=text_dialect, include_images=include_images,
+            ))
         else:
             # Pass through unknown message types
             result.append({"role": "user", "content": str(msg)})
@@ -175,8 +185,42 @@ def _assistant_to_openai(
     return [d]
 
 
+def _image_part(block: ImageBlock) -> dict[str, Any]:
+    source = block.source
+    url = source.get("url") or (
+        f"data:{source.get('media_type', '')};base64,{source.get('data', '')}"
+    )
+    return {"type": "image_url", "image_url": {"url": url}}
+
+
+def _split_text_and_images(
+    blocks: list[Any], *, include_images: bool,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Join the text of ``blocks``; return their images as image_url parts,
+    or mark them in the text when images are not sent."""
+    texts: list[str] = []
+    images: list[dict[str, Any]] = []
+    for b in blocks:
+        if isinstance(b, TextBlock):
+            texts.append(b.text)
+        elif isinstance(b, ImageBlock):
+            if include_images:
+                images.append(_image_part(b))
+            else:
+                texts.append(IMAGE_PLACEHOLDER)
+        else:
+            texts.append(str(b))
+    return "\n".join(texts), images
+
+
+def _user_content(text: str, images: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+    if not images:
+        return text
+    return ([{"type": "text", "text": text}] if text else []) + images
+
+
 def _user_to_openai(
-    msg: UserMessage, *, text_dialect: bool = False,
+    msg: UserMessage, *, text_dialect: bool = False, include_images: bool = True,
 ) -> list[dict[str, Any]]:
     """Convert a UserMessage to OpenAI format.
 
@@ -196,13 +240,14 @@ def _user_to_openai(
     other_blocks = [b for b in msg.content if not isinstance(b, ToolResultBlock)]
 
     dialect_texts: list[str] = []
+    result_images: list[dict[str, Any]] = []
     for tr in tool_results:
         tr_content = tr.content
         if isinstance(tr_content, list):
-            tr_content = "\n".join(
-                b.text if isinstance(b, TextBlock) else str(b)
-                for b in tr_content
+            tr_content, images = _split_text_and_images(
+                tr_content, include_images=include_images,
             )
+            result_images.extend(images)
         if text_dialect:
             dialect_texts.append(str(tr_content))
             continue
@@ -211,18 +256,23 @@ def _user_to_openai(
             "tool_call_id": tr.tool_use_id,
             "content": str(tr_content),
         })
-    if dialect_texts:
-        result.append({"role": "user", "content": "\n".join(dialect_texts)})
+    if text_dialect and (dialect_texts or result_images):
+        result.append({
+            "role": "user",
+            "content": _user_content("\n".join(dialect_texts), result_images),
+        })
+    elif result_images:
+        result.append({
+            "role": "user",
+            "content": _user_content(TOOL_IMAGES_NOTE, result_images),
+        })
 
     # Emit remaining user content (if any)
     if other_blocks:
-        text_parts = []
-        for b in other_blocks:
-            if isinstance(b, TextBlock):
-                text_parts.append(b.text)
-            else:
-                text_parts.append(str(b))
-        if text_parts:
-            result.append({"role": "user", "content": "\n".join(text_parts)})
+        text, images = _split_text_and_images(
+            other_blocks, include_images=include_images,
+        )
+        if text or images:
+            result.append({"role": "user", "content": _user_content(text, images)})
 
     return result

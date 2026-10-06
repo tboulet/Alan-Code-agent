@@ -88,6 +88,7 @@ from alancode.skills.tool_filter import filter_tools_for_skill
 from alancode.tools.base import ToolUseContext
 from alancode.tools.builtin.skill_tool import SkillTool
 from alancode.tools.registry import get_enabled_tools, get_programmatic_tool_set
+from alancode.tools.builtin.view_image import VIEW_IMAGE_TOOL_NAME
 from alancode.tools.text_tool_parser import get_tool_format_system_prompt
 from alancode.utils.atomic_io import interprocess_lock
 
@@ -292,6 +293,9 @@ class AlanCodeAgent:
         ``chat_template_kwargs={"enable_thinking": false}`` (default False).
         Only reaches the LiteLLM (``backend="auto"``) transport; the native
         Anthropic backend has no chat template and ignores it.
+    vision : bool, optional
+        The model can see images (default False). Adds the ``ViewImage``
+        tool to the default tool set and lets it return images.
     custom_system_prompt : str, optional
         Replace Alan's normal system prompt.
     append_system_prompt : str, optional
@@ -327,6 +331,7 @@ class AlanCodeAgent:
         no_verbalize_warning: bool | None = None,
         persist_thinking: bool | None = None,
         disable_thinking: bool | None = None,
+        vision: bool | None = None,
         memory: str | None = None,
         tool_call_format: str | None = None,
         session_id: str | None = None,
@@ -393,6 +398,7 @@ class AlanCodeAgent:
             "no_verbalize_warning": no_verbalize_warning,
             "persist_thinking": persist_thinking,
             "disable_thinking": disable_thinking,
+            "vision": vision,
             "memory": memory,
             "tool_call_format": tool_call_format,
             "verbose": verbose,
@@ -474,6 +480,8 @@ class AlanCodeAgent:
         else:
             base = get_enabled_tools()
             base.append(SkillTool(self._skill_registry))
+        if tools is None and not self._settings.get("vision"):
+            base = [t for t in base if t.name != VIEW_IMAGE_TOOL_NAME]
         if disabled_tools:
             blocked = set(disabled_tools)
             base = [t for t in base if t.name not in blocked]

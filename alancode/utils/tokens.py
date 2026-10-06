@@ -35,6 +35,9 @@ MAX_OUTPUT_TOKENS_DEFAULT = 32_000
 # Fallback ratio used only when no tokenizer is available.
 # 3 chars/token is conservative for most models (English text + code).
 CHARS_PER_TOKEN_FALLBACK = 3.0
+# Flat cost of one image. Providers charge by resolution (roughly 250 to
+# 1,600 tokens); the base64 payload says nothing about it.
+IMAGE_TOKEN_ESTIMATE = 1_500
 
 
 # ── Raw counting primitives ──────────────────────────────────────────────────
@@ -50,10 +53,32 @@ def rough_token_count(text: str) -> int:
     return _chars_to_tokens(len(text))
 
 
+def _is_image(block: Any) -> bool:
+    return getattr(block, "type", None) == "image"
+
+
+def _count_images(messages: list) -> int:
+    """Number of images in ``messages``, including those inside tool results."""
+    count = 0
+    for msg in messages:
+        content = getattr(msg, "content", None)
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if _is_image(block):
+                count += 1
+            inner = getattr(block, "content", None)
+            if isinstance(inner, list):
+                count += sum(1 for b in inner if _is_image(b))
+    return count
+
+
 def _content_block_tokens(block: Any) -> int:
     """Estimate tokens for a single content block (fallback heuristic)."""
     if isinstance(block, str):
         return rough_token_count(block)
+    if _is_image(block):
+        return IMAGE_TOKEN_ESTIMATE
     if hasattr(block, "text"):
         return rough_token_count(block.text)
     if hasattr(block, "thinking"):
@@ -239,7 +264,10 @@ def count_tokens_for_call(
             kwargs: dict[str, Any] = {"model": model, "messages": msg_dicts}
             if tools:
                 kwargs["tools"] = [_openai_tool_shape(t) for t in tools]
-            return int(litellm.token_counter(**kwargs))
+            return (
+                int(litellm.token_counter(**kwargs))
+                + _count_images(messages) * IMAGE_TOKEN_ESTIMATE
+            )
         except Exception as exc:
             logger.debug("litellm.token_counter failed (%s); using fallback", exc)
 

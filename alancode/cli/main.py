@@ -138,6 +138,12 @@ def main() -> None:
         default=None,
         help="Re-inject prior reasoning into later model requests",
     )
+    parser.add_argument(
+        "--vision",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="The model can see images: enables the ViewImage tool",
+    )
     parser.add_argument("--memory", default=None, choices=["on", "off", "intensive"])
     parser.add_argument("--verbose", default=None, action="store_true")
 

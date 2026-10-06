@@ -12,7 +12,11 @@ from alancode.messages.types import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from alancode.utils.tokens import rough_token_count, estimate_message_tokens
+from alancode.utils.tokens import (
+    _content_block_tokens,
+    estimate_message_tokens,
+    rough_token_count,
+)
 
 COMPACTABLE_TOOLS = {"Bash", "Read", "Grep", "Glob", "WebSearch", "WebFetch", "Edit", "Write"}
 CLEARED_MESSAGE = "[Old tool result content cleared]"
@@ -28,7 +32,7 @@ def _estimate_block_tokens(block: ToolResultBlock) -> int:
     """
     if isinstance(block.content, str):
         return rough_token_count(block.content)
-    return sum(rough_token_count(tb.text) for tb in block.content)
+    return sum(_content_block_tokens(b) for b in block.content)
 
 
 def _find_tool_name_for_result(messages: list[Message], tool_use_id: str) -> str | None:

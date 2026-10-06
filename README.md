@@ -207,7 +207,7 @@ See [docs/reference/python-api.md#programmatic-mode](docs/reference/python-api.m
 | Feature | What it does | How to use |
 |---|---|---|
 | Async agentic loop | Streaming responses, thinking blocks, concurrent tool use | default |
-| Built-in tools | Bash, File I/O, Grep/Glob, WebFetch, AskUserQuestion, SkillTool, GitCommit | default |
+| Built-in tools | Bash, File I/O, Grep/Glob, WebFetch, AskUserQuestion, SkillTool, GitCommit, ViewImage (with `vision`) | default |
 | Context compaction | Summarizes conversation when context fills up | auto, or `/compact` |
 | Universal backend (`auto`) | LiteLLM transport for OpenAI, OpenRouter, Gemini, Ollama, vLLM, and many other model providers | default for non-Claude models |
 | Native Anthropic backend | Direct Anthropic SDK with `cache_control`, native thinking, native `tool_use` | default for bare `claude-*` names; force with `--backend anthropic-native` |

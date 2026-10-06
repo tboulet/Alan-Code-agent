@@ -434,7 +434,18 @@ def _openai_to_anthropic_messages(
                 })
 
         elif role == "user":
-            result.append({"role": "user", "content": msg.get("content", "")})
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = [_convert_user_part_to_anthropic(p) for p in content]
+                # Images of a tool result ride in the message holding it.
+                if (
+                    result
+                    and result[-1].get("role") == "user"
+                    and isinstance(result[-1].get("content"), list)
+                ):
+                    result[-1]["content"].extend(content)
+                    continue
+            result.append({"role": "user", "content": content})
 
         elif role == "system":
             # System messages handled separately — pass through if present
@@ -444,6 +455,20 @@ def _openai_to_anthropic_messages(
             result.append(msg)
 
     return result
+
+
+def _convert_user_part_to_anthropic(part: Any) -> Any:
+    """Convert an OpenAI ``image_url`` content part to an Anthropic image block."""
+    if not (isinstance(part, dict) and part.get("type") == "image_url"):
+        return part
+    url = (part.get("image_url") or {}).get("url", "")
+    if url.startswith("data:") and ";base64," in url:
+        media_type, data = url[len("data:"):].split(";base64,", 1)
+        return {
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": data},
+        }
+    return {"type": "image", "source": {"type": "url", "url": url}}
 
 
 def _convert_assistant_to_anthropic(msg: dict[str, Any]) -> dict[str, Any]:

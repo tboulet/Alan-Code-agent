@@ -158,6 +158,7 @@ async def compaction_auto(
     api_messages = normalize_messages_for_api(truncated_messages)
     api_messages_dicts = messages_to_openai_dicts(
         api_messages, include_thinking=include_thinking,
+        include_images=False,
     )
 
     # Add compact prompt as the final user message
@@ -264,6 +265,7 @@ async def compaction_auto(
             api_messages = truncated
             api_messages_dicts = messages_to_openai_dicts(
                 api_messages, include_thinking=include_thinking,
+                include_images=False,
             )
             api_messages_dicts.append({"role": "user", "content": compact_prompt})
             logger.info(
