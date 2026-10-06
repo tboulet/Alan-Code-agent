@@ -97,7 +97,7 @@ def _images_tokens(messages: list) -> int:
     return total
 
 
-def _content_block_tokens(block: Any) -> int:
+def _content_block_tokens(block: Any, *, include_thinking: bool = False) -> int:
     """Estimate tokens for a single content block (fallback heuristic)."""
     if isinstance(block, str):
         return rough_token_count(block)
@@ -106,7 +106,7 @@ def _content_block_tokens(block: Any) -> int:
     if hasattr(block, "text"):
         return rough_token_count(block.text)
     if hasattr(block, "thinking"):
-        return rough_token_count(block.thinking)
+        return rough_token_count(block.thinking) if include_thinking else 0
     if hasattr(block, "content"):
         inner = block.content
         if isinstance(inner, str):
@@ -124,11 +124,14 @@ def _content_block_tokens(block: Any) -> int:
     return 4
 
 
-def estimate_message_tokens(messages: list) -> int:
+def estimate_message_tokens(messages: list, *, include_thinking: bool = False) -> int:
     """Estimate tokens for a list of messages using the chars/3 heuristic.
 
     For a more accurate count that understands the model's tokenizer, use
     :func:`count_tokens_for_call`.
+
+    Stored reasoning is counted only with ``include_thinking``: it is sent
+    back to the model only under ``persist_thinking``.
     """
     total = 0
     for msg in messages:
@@ -147,7 +150,10 @@ def estimate_message_tokens(messages: list) -> int:
         if isinstance(content, str):
             total += rough_token_count(content)
         elif isinstance(content, list):
-            total += sum(_content_block_tokens(b) for b in content)
+            total += sum(
+                _content_block_tokens(b, include_thinking=include_thinking)
+                for b in content
+            )
     return total
 
 
@@ -190,7 +196,7 @@ def _count_block_chars(block: Any) -> int:
 # ── LiteLLM-backed counting for pre-call estimation ──────────────────────────
 
 
-def _messages_for_litellm(messages: list) -> list[dict]:
+def _messages_for_litellm(messages: list, *, include_thinking: bool = False) -> list[dict]:
     """Serialize our Message objects into the simple dict shape that
     ``litellm.token_counter`` expects (``role`` + ``content`` string).
 
@@ -218,8 +224,9 @@ def _messages_for_litellm(messages: list) -> list[dict]:
             for b in content:
                 if hasattr(b, "text") and b.text:
                     parts.append(b.text)
-                elif hasattr(b, "thinking") and b.thinking:
-                    parts.append(b.thinking)
+                elif hasattr(b, "thinking"):
+                    if include_thinking and b.thinking:
+                        parts.append(b.thinking)
                 elif hasattr(b, "input") and isinstance(b.input, dict):
                     parts.append(str(b.input))
                 elif hasattr(b, "content"):
@@ -259,6 +266,7 @@ def count_tokens_for_call(
     *,
     system: str | list[str] | None = None,
     tools: list | None = None,
+    include_thinking: bool = False,
 ) -> int:
     """Estimate token count for a prospective API call.
 
@@ -268,7 +276,7 @@ def count_tokens_for_call(
     unrecognized.
     """
     # Build the prompt shape.
-    msg_dicts = _messages_for_litellm(messages)
+    msg_dicts = _messages_for_litellm(messages, include_thinking=include_thinking)
 
     if system:
         if isinstance(system, list):
@@ -296,7 +304,7 @@ def count_tokens_for_call(
             logger.debug("litellm.token_counter failed (%s); using fallback", exc)
 
     # Fallback: chars/3 over messages + system + tools-as-str.
-    total = estimate_message_tokens(messages)
+    total = estimate_message_tokens(messages, include_thinking=include_thinking)
     if system:
         system_str = "\n\n".join(system) if isinstance(system, list) else system
         total += rough_token_count(system_str)
@@ -315,6 +323,7 @@ def predicted_next_call_tokens(
     last_input_tokens: int = 0,
     last_output_tokens: int = 0,
     new_messages_since_last_call: list | None = None,
+    include_thinking: bool = False,
 ) -> int:
     """Estimate the token count of the upcoming API call.
 
@@ -333,12 +342,16 @@ def predicted_next_call_tokens(
     """
     full_estimate = count_tokens_for_call(
         model, messages, system=system, tools=tools,
+        include_thinking=include_thinking,
     )
 
     if last_input_tokens > 0:
         added = 0
         if new_messages_since_last_call:
-            added = count_tokens_for_call(model, new_messages_since_last_call)
+            added = count_tokens_for_call(
+                model, new_messages_since_last_call,
+                include_thinking=include_thinking,
+            )
         usage_based = last_input_tokens + last_output_tokens + added
         return max(usage_based, full_estimate)
 

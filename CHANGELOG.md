@@ -1,5 +1,9 @@
 # Changelog
 
+- **2026-10-07 - Alan Code 1.3.21**
+  - Token estimates no longer count reasoning that is not sent back. Reasoning is stored in the transcript but re-sent only under `persist_thinking`; counting it made a model that reasons about 10k tokens a turn compact at roughly 38% of its real payload (measured: compaction at an estimated 76,573 tokens while the server's last prompt was 31,625).
+  - The parser's tool-call format feedback no longer reaches the summarizer. It spells the syntax out, and a model cannot write its own special tokens as text: a GLM summary rendered the expected format in stand-in brackets, and the model then called tools that way for 28 turns. The summarizer reads a neutral placeholder instead and is told not to quote tool-call syntax.
+
 - **2026-10-07 - Alan Code 1.3.20**
   - An image is now budgeted by its pixel count (about one token per 750 pixels, capped at 1600) instead of a flat 1500 tokens. Measured on a Qwen vision model under llama.cpp, an image cost about 100 tokens at 256x256 and 300 at 512x512, so the flat figure overcounted 5 to 15 times - enough to trigger compaction long before the window was full in a run that views a frame on most calls. The dimensions are read from the PNG header; other formats keep the 1500 fallback.
 

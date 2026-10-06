@@ -54,6 +54,7 @@ DETAILED_ANALYSIS_INSTRUCTION = (
 BASE_COMPACT_PROMPT = f"""Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
 This request to summarize is not part of the conversation: do not mention it anywhere in the summary.
+Do not quote or describe the syntax of tool calls, or errors about that syntax: how tools are called is defined outside this summary.
 Record work as done only when the conversation shows it was done - a file written, a command run with its result. Anything intended or planned but not yet carried out belongs under Pending Tasks, never under what was accomplished.
 
 {DETAILED_ANALYSIS_INSTRUCTION}

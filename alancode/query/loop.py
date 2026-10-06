@@ -290,6 +290,8 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         return
 
     iteration = 0
+    # Stored reasoning is in the payload only under persist_thinking.
+    counts_thinking = bool(params.settings.get("persist_thinking"))
 
     while True:
         # -- Phase 1: Check abort ----------------------------------------
@@ -337,6 +339,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             pre_clear_tokens = predicted_next_call_tokens(
                 params.model,
                 messages_for_query,
+                include_thinking=counts_thinking,
                 system=params.system_prompt,
                 tools=[t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools],
                 last_input_tokens=0 if a_truncated else state.last_input_tokens,
@@ -381,6 +384,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         current_tokens = predicted_next_call_tokens(
             params.model,
             messages_for_query,
+            include_thinking=counts_thinking,
             system=params.system_prompt,
             tools=[t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools],
             last_input_tokens=seed_input,
@@ -396,6 +400,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     messages_for_query,
                     target_tokens=int(threshold_tokens * 0.8),
                     failures=failures,
+                    include_thinking=counts_thinking,
                 )
             else:
                 logger.info("Auto-compaction triggered")
@@ -453,6 +458,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         current_tokens = predicted_next_call_tokens(
             params.model,
             messages_for_query,
+            include_thinking=counts_thinking,
             system=params.system_prompt,
             tools=[t.to_schema() if hasattr(t, "to_schema") else t for t in params.tools],
             last_input_tokens=seed_input,
@@ -474,6 +480,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 messages_for_query,
                 target_tokens=int(threshold_tokens * 0.8),
                 failures=failures,
+                include_thinking=counts_thinking,
             )
 
         if fallback_result is not None:
@@ -489,6 +496,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
             current_tokens = predicted_next_call_tokens(
                 params.model,
                 messages_for_query,
+                include_thinking=counts_thinking,
                 system=params.system_prompt,
                 tools=[
                     t.to_schema() if hasattr(t, "to_schema") else t

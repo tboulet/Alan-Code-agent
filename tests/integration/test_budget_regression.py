@@ -296,6 +296,43 @@ async def test_a_message_injected_as_compaction_fires_reaches_the_model_verbatim
     assert "NOTICE-" in str(after_summary["messages"])
 
 
+def _reasoning_then_call(chars: int) -> ScriptedResponse:
+    return ScriptedResponse(
+        text=f"<think>{flood_payload(chars)}</think>",
+        tool_calls=[{"name": "Dummy", "input": {}, "id": f"toolu_{chars}_{id(object())}"}],
+    )
+
+
+class TestStoredReasoningIsNotPayload:
+    """GLM-5.3 reasoned ~10k tokens per turn. Alan stores that reasoning but
+    does not send it back, yet counted it: compaction fired at an estimated
+    76,573 tokens while the server's last prompt was 31,625."""
+
+    async def _summaries(self, tmp_path, **agent_kwargs) -> int:
+        inner = ScriptedBackend.from_responses(
+            [_reasoning_then_call(9_000) for _ in range(12)], fallback=text("All done."),
+        )
+        backend = AuditedBackend(inner, context_window=32_768)
+        agent = make_agent(tmp_path, backend, payload_chars=200, **agent_kwargs)
+        events = await run_turn(agent, "think hard")
+        assert_survived(backend, events)
+        stored = sum(
+            len(b.thinking)
+            for e in events if isinstance(e, AssistantMessage) and not e.hide_in_api
+            for b in e.content if hasattr(b, "thinking")
+        )
+        assert stored > 100_000, "the turns must really carry reasoning"
+        return backend.summarizer_calls
+
+    @pytest.mark.asyncio
+    async def test_reasoning_that_is_not_resent_does_not_trigger_compaction(self, tmp_path):
+        assert await self._summaries(tmp_path) == 0
+
+    @pytest.mark.asyncio
+    async def test_reasoning_that_is_resent_still_counts(self, tmp_path):
+        assert await self._summaries(tmp_path, persist_thinking=True) >= 1
+
+
 # ---------------------------------------------------------------------------
 # Scenario 3 - single giant result
 # ---------------------------------------------------------------------------

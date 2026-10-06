@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from alancode.messages.types import (
@@ -43,6 +43,7 @@ from alancode.budget import DEFAULT_SUMMARY_MAX_TOKENS, MIN_SUMMARY_OUTPUT_TOKEN
 from alancode.budget import clamp_output_budget
 from alancode.compact.compact_truncate import compaction_truncate_tool_results
 from alancode.api.errors import is_prompt_too_long
+from alancode.tools.text_tool_parser import get_format
 from alancode.utils.tokens import (
     estimate_message_tokens,
     rough_token_count,
@@ -128,7 +129,10 @@ async def compaction_auto(
     # Get messages from last compact boundary onward
     relevant_messages = get_messages_after_compact_boundary(messages)
 
-    pre_compact_token_count = estimate_message_tokens(relevant_messages)
+    pre_compact_token_count = estimate_message_tokens(
+        relevant_messages,
+        include_thinking=bool((settings or {}).get("persist_thinking")),
+    )
     logger.info(
         "Starting compaction: %d messages, ~%d tokens",
         len(relevant_messages),
@@ -143,6 +147,8 @@ async def compaction_auto(
         max_chars=budget.tool_result_cap_chars if budget is not None else None,
         settings=settings,
     )
+
+    truncated_messages = _without_format_feedback(truncated_messages, settings or {})
 
     # 2. Build compact system prompt (REPLACEMENT, not appended)
     compact_system = ["You are a helpful AI assistant tasked with summarizing conversations."]
@@ -339,6 +345,29 @@ async def compaction_auto(
         pre_compact_token_count=pre_compact_token_count,
         post_compact_token_count=post_compact_token_count,
     )
+
+
+# Stands in for the parser's format feedback in what the summarizer reads.
+FORMAT_FEEDBACK_PLACEHOLDER = (
+    "[The tool call above could not be parsed and was not run.]"
+)
+
+
+def _without_format_feedback(messages: list[Message], settings: dict) -> list[Message]:
+    """Replace the parser's format feedback, which spells out the tool-call
+    syntax. A summarizer cannot reproduce a model's special tokens as text:
+    it wrote "Expected format: ..." with stand-in characters, and the model
+    then called tools in the format its own summary showed."""
+    tool_call_format = settings.get("tool_call_format")
+    if not tool_call_format:
+        return messages
+    feedback = get_format(tool_call_format).format_error()
+    return [
+        replace(msg, content=FORMAT_FEEDBACK_PLACEHOLDER)
+        if isinstance(msg, UserMessage) and msg.content == feedback
+        else msg
+        for msg in messages
+    ]
 
 
 # A chat template that refuses the no-reasoning switch fails the whole call

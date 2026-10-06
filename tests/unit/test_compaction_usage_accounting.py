@@ -2,7 +2,8 @@
 
 import pytest
 
-from alancode.compact.compact_auto import compaction_auto
+from alancode.compact.compact_auto import FORMAT_FEEDBACK_PLACEHOLDER, compaction_auto
+from alancode.tools.text_tool_parser import get_format
 from alancode.backends.base import (
     StreamError,
     StreamMessageDelta,
@@ -163,6 +164,38 @@ async def test_an_empty_cut_off_summary_is_retried_on_a_smaller_input():
     assert result is not None
     assert len(backend.inputs) == 2
     assert backend.inputs[1] < backend.inputs[0], "the retry must trim the input"
+
+
+class InputRecordingBackend(SummarizerBackend):
+    def __init__(self):
+        super().__init__()
+        self.inputs = []
+
+    async def stream(self, messages, system, tools, **kwargs):
+        self.inputs.append(messages)
+        async for event in super().stream(messages, system, tools, **kwargs):
+            yield event
+
+
+@pytest.mark.asyncio
+async def test_format_feedback_does_not_reach_the_summarizer():
+    """GLM-5.3 summarized a session holding three format errors. It cannot
+    write its own special tokens as text, so the summary read "Expected
+    format: [ToolName]parameter_name]..." in stand-in brackets, and the next
+    28 turns called tools that way."""
+    feedback = get_format("glm").format_error()
+    history = _history(turns=2) + [
+        UserMessage(content=feedback),
+        AssistantMessage(content=[TextBlock(text="retrying")]),
+    ]
+    backend = InputRecordingBackend()
+
+    await compaction_auto(history, backend, settings={"tool_call_format": "glm"})
+
+    sent = str(backend.inputs[0])
+    assert "arg_key" in feedback, "the feedback must really spell the syntax"
+    assert "arg_key" not in sent
+    assert FORMAT_FEEDBACK_PLACEHOLDER in sent
 
 
 class NoThinkingBackend(SummarizerBackend):

@@ -36,6 +36,8 @@ def _is_plain_user_text(message: Message) -> bool:
 def hard_truncate_messages(
     messages: list[Message],
     target_tokens: int,
+    *,
+    include_thinking: bool = False,
 ) -> tuple[list[Message], int]:
     """Keep the valuable head and recent tail while meeting a token target.
 
@@ -63,11 +65,14 @@ def hard_truncate_messages(
     tail = list(messages[head_end:])
     dropped = 0
 
-    if head and estimate_message_tokens(head) > target_tokens:
+    def tokens(msgs: list[Message]) -> int:
+        return estimate_message_tokens(msgs, include_thinking=include_thinking)
+
+    if head and tokens(head) > target_tokens:
         dropped += len(head)
         head = []
 
-    while tail and estimate_message_tokens(head + tail) > target_tokens:
+    while tail and tokens(head + tail) > target_tokens:
         tail.pop(0)
         dropped += 1
 
@@ -129,10 +134,15 @@ def build_hard_truncation_result(
     *,
     target_tokens: int,
     failures: int,
+    include_thinking: bool = False,
 ) -> HardTruncationResult:
     """Select and package a fallback history that survives future turns."""
-    pre_fallback_tokens = estimate_message_tokens(messages)
-    retained, dropped = hard_truncate_messages(messages, target_tokens)
+    pre_fallback_tokens = estimate_message_tokens(
+        messages, include_thinking=include_thinking,
+    )
+    retained, dropped = hard_truncate_messages(
+        messages, target_tokens, include_thinking=include_thinking,
+    )
     boundary = create_compact_boundary_message(
         trigger="auto",
         pre_tokens=pre_fallback_tokens,
