@@ -68,8 +68,61 @@ def normalize_messages_for_api(
     # before merging). Any orphan tool_result would cause the API to
     # reject the request with 400.
     _drop_orphan_tool_results(result)
+    _answer_unanswered_tool_uses(result)
 
     return result
+
+
+INTERRUPTED_TOOL_RESULT = (
+    "This tool call was interrupted before it returned a result (the session "
+    "was stopped). It may or may not have run: check its effects before "
+    "repeating it."
+)
+
+
+def _answer_unanswered_tool_uses(
+    messages: list[UserMessage | AssistantMessage],
+) -> None:
+    """Give every tool_use without a tool_result an error result. Mutates
+    ``messages`` in place.
+
+    A session killed while a tool ran is saved ending on the call; resumed,
+    the request carried a tool_use with no result, which strict APIs reject.
+    """
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if not isinstance(msg, AssistantMessage):
+            i += 1
+            continue
+        tool_use_ids = [b.id for b in msg.content if isinstance(b, ToolUseBlock)]
+        nxt = messages[i + 1] if i + 1 < len(messages) else None
+        answered: set[str] = set()
+        if isinstance(nxt, UserMessage) and isinstance(nxt.content, list):
+            answered = {
+                b.tool_use_id for b in nxt.content if isinstance(b, ToolResultBlock)
+            }
+        missing = [
+            ToolResultBlock(
+                tool_use_id=tool_use_id,
+                content=INTERRUPTED_TOOL_RESULT,
+                is_error=True,
+            )
+            for tool_use_id in tool_use_ids
+            if tool_use_id not in answered
+        ]
+        if missing:
+            logger.warning(
+                "Answered %d tool call(s) left without a result", len(missing),
+            )
+            if isinstance(nxt, UserMessage):
+                # Results first: the API wants them ahead of other content.
+                answered_msg = deepcopy(nxt)
+                answered_msg.content = missing + _to_content_list(nxt.content)
+                messages[i + 1] = answered_msg
+            else:
+                messages.insert(i + 1, UserMessage(content=missing))
+        i += 1
 
 
 def _drop_orphan_tool_results(

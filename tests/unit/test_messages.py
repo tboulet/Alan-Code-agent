@@ -277,6 +277,41 @@ class TestNormalization:
         user_msgs = [m for m in result if isinstance(m, UserMessage)]
         assert len(user_msgs) >= 1
 
+    def _call(self, call_id):
+        return create_assistant_message(
+            [ToolUseBlock(id=call_id, name="Bash", input={"command": "ls"})]
+        )
+
+    def test_tool_call_cut_by_a_kill_is_answered_before_the_next_message(self):
+        """A session killed mid-tool is saved ending on the call. Resumed, the
+        request carried a tool_use with no result, which strict APIs reject."""
+        resumed = create_user_message("continue")
+        result = normalize_messages_for_api(
+            [create_user_message("go"), self._call("call_1"), resumed]
+        )
+        answer = result[2].content
+        assert isinstance(answer[0], ToolResultBlock)
+        assert answer[0].tool_use_id == "call_1" and answer[0].is_error
+        assert answer[1].text == "continue"
+        assert resumed.content == "continue", "the stored message must not change"
+
+    def test_tool_call_left_last_gets_its_own_result_message(self):
+        result = normalize_messages_for_api(
+            [create_user_message("go"), self._call("call_1")]
+        )
+        assert isinstance(result[-1], UserMessage)
+        assert result[-1].content[0].tool_use_id == "call_1"
+
+    def test_answered_tool_call_is_left_alone(self):
+        messages = [
+            create_user_message("go"),
+            self._call("call_1"),
+            create_tool_result_message("call_1", "file.txt"),
+        ]
+        result = normalize_messages_for_api(messages)
+        assert len(result) == 3
+        assert [b.content for b in result[2].content] == ["file.txt"]
+
 
 # ---------------------------------------------------------------------------
 # Compact boundary helpers
