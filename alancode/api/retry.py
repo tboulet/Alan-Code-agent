@@ -121,6 +121,7 @@ async def stream_with_retry(
 
     for attempt in range(max_retries + 1):
         content_yielded = False
+        stream = None
         try:
             call_kwargs = dict(kwargs)
             if unstreamed_retry:
@@ -199,6 +200,12 @@ async def stream_with_retry(
                     "Non-retryable error (category=%s): %s", category, exc
                 )
                 raise
+
+        finally:
+            # Also when the caller stops reading: the backend must close its
+            # connection now, which ends the server's generation.
+            if stream is not None:
+                await stream.aclose()
 
         # We have a retryable error.  Log and back off.
         if attempt < max_retries:

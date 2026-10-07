@@ -85,6 +85,11 @@ class ToolCallFormat(ABC):
         """Re-append the closing marker a stop sequence stripped."""
         return text
 
+    def first_call_is_complete(self, text: str) -> bool:
+        """Whether ``text`` already holds the one call this format will run,
+        so that nothing generated after it can change the turn."""
+        return False
+
     @abstractmethod
     def parse(self, text: str) -> list[ParsedToolCall]:
         """Extract well-formed tool calls from text."""
@@ -637,6 +642,9 @@ class BashBlockFormat(ToolCallFormat):
             return text.rstrip("\r\n") + "\n```"
         return text
 
+    def first_call_is_complete(self, text: str) -> bool:
+        return bool(_BASH_BLOCK_PATTERN.search(text))
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         matches = list(_BASH_BLOCK_PATTERN.finditer(text))
         if not matches:
@@ -1070,6 +1078,10 @@ class AutoFormat(ToolCallFormat):
             if candidate != text and FORMATS[name].parse(candidate):
                 return candidate
         return text
+
+    def first_call_is_complete(self, text: str) -> bool:
+        # parse() tries this format first, so its call is the one that runs.
+        return FORMATS[_AUTO_ORDER[0]].first_call_is_complete(text)
 
     def _formats(self, source: str) -> list[tuple[str, ToolCallFormat]]:
         return [

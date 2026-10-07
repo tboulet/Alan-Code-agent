@@ -32,6 +32,7 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `max_tool_concurrency` | int | `10` | Tool execution |
 | `bash_timeout_ms` | int | `120000` | Tool execution |
 | `vision` | bool | `false` | Tool execution |
+| `stop_at_first_call` | bool | `true` | Tool execution |
 | `tool_result_max_chars` | int \| `"auto"` | `"auto"` | Tool execution |
 | `persist_thinking` | bool | `false` | Thinking history |
 | `disable_thinking` | bool | `false` | Thinking history |
@@ -178,6 +179,9 @@ Timeout of a Bash command when the model does not pass its own `timeout`. The co
 
 ### `vision`
 Set to `true` when the model can see images. It adds the [`ViewImage`](tools.md#viewimage) tool to the default tool set and lets it return images. Default `false`: a text-only server typically rejects a request that carries an image. An image is budgeted by its pixel count (about one token per 750 pixels, at most 1600; 1500 when its dimensions cannot be read), is cleared with its tool result by compaction, and is replaced by `[image]` in the text sent to the summarizer.
+
+### `stop_at_first_call`
+Under the `bash_block` format (and `auto` when a bash block is what parses), only the first closed block of a reply runs. With this setting on, Alan stops reading the reply as soon as that block is complete in the visible text and closes the connection, which ends the server's generation; the reply then counts as finished, not cut. It saves the time a model spends writing on after its call. It only acts once reasoning is known to be over - sent on its own channel, or closed inline with `</think>` - because before that a fenced block may be a draft. It needs streaming, and the server reports no token usage for a reply ended this way. Default `true`.
 
 ---
 

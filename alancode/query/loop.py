@@ -76,6 +76,7 @@ from alancode.compact.hard_truncate import (
 )
 from alancode.tools.text_tool_parser import (
     MAX_TEXT_TOOL_RETRIES,
+    ToolCallFormat,
     _extract_thinking,
     extract_tool_calls_from_text,
     get_format,
@@ -133,6 +134,23 @@ def _build_turn_reminders(context: ToolUseContext) -> list[UserMessage]:
         "</system-reminder>"
     )
     return [create_user_message(reminder_text, hide_in_ui=True)]
+
+def _first_call_is_written(
+    content: list[AssistantContentBlock], call_format: ToolCallFormat,
+) -> bool:
+    """Whether the reply streamed so far holds the one call its format runs.
+
+    Text counts as visible only once reasoning is known to be over: sent on
+    its own channel, or closed inline. Until then a fenced block may be a
+    draft, which Phase 5.25 files under thinking.
+    """
+    text = "".join(b.text for b in content if isinstance(b, TextBlock))
+    if not any(isinstance(b, ThinkingBlock) for b in content):
+        if "</think>" not in text:
+            return False
+        text = _extract_thinking(text)[1]
+    return call_format.first_call_is_complete(text)
+
 
 def _drain_message_queue(msg_queue) -> list[UserMessage]:
     """Drain queued messages from inject_message() into user messages.
@@ -567,17 +585,25 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         stop_reason: str | None = None
         request_id: str | None = None
 
+        first_call_format = (
+            get_format(params.settings["tool_call_format"])
+            if params.settings.get("tool_call_format")
+            and params.settings.get("stop_at_first_call", True)
+            else None
+        )
+        response_stream = stream_with_retry(
+            params.backend,
+            api_messages_dicts,
+            params.system_prompt,
+            tool_schemas,
+            model=params.model,
+            max_tokens=max_tokens,
+            stop_sequences=format_stop_sequences,
+            system_static_boundary=params.system_static_boundary,
+        )
+
         try:
-            async for event in stream_with_retry(
-                params.backend,
-                api_messages_dicts,
-                params.system_prompt,
-                tool_schemas,
-                model=params.model,
-                max_tokens=max_tokens,
-                stop_sequences=format_stop_sequences,
-                system_static_boundary=params.system_static_boundary,
-            ):
+            async for event in response_stream:
                 # --- StreamMessageStart ---
                 if isinstance(event, StreamMessageStart):
                     current_model = event.model
@@ -597,6 +623,13 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         model=current_model,
                         hide_in_api=True,
                     )
+                    # Nothing written after the call can change the turn:
+                    # stop reading, which ends the server's generation.
+                    if first_call_format is not None and _first_call_is_written(
+                        assistant_content, first_call_format,
+                    ):
+                        stop_reason = "end_turn"
+                        break
 
                 # --- Tool use lifecycle ---
                 elif isinstance(event, StreamToolUseStart):
@@ -732,6 +765,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 str(e), api_error=classify_error(e),
             )
             return
+
+        finally:
+            await response_stream.aclose()
 
         # The backend stream completed normally. Account exactly once before
         # response parsing, because several semantic recovery paths below

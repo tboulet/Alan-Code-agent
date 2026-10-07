@@ -1,5 +1,9 @@
 # Changelog
 
+- **2026-10-07 - Alan Code 1.3.23**
+  - New `stop_at_first_call` setting (default on): under `bash_block`, and `auto` when a bash block is what parses, a generation ends once its one call is written. Only the first closed block of a reply ever runs, yet nothing stopped the model after it: DeepSeek-V4-Pro wrote its command in about 15 tokens, then imagined the rest of the session up to the 16000-token cap - 42 minutes at 6.4 tok/s - and the cut reply ran nothing at all. Alan now stops reading when that block is complete in the visible text and closes the connection, which makes the server abandon the generation. Unlike the fence stop sequence removed in 1.3.17, it never looks at the reasoning channel and needs a whole closed block; it stays inactive while reasoning could still be open inline. Measured against a streaming test server: the connection closed 0.1 s after the block and the turn took 1.5 s instead of 31.8 s. No token usage is reported for a reply ended this way.
+  - The LiteLLM backend and the retry layer now close their stream when the caller stops reading, instead of leaving it to garbage collection.
+
 - **2026-10-07 - Alan Code 1.3.22**
   - The token count written in a compaction record (`compact_metadata.pre_tokens`) is now the measure that triggered the compaction, and the last-resort hard truncation measures messages with the model's tokenizer. Both used chars/3, which reads a grid of spaced digits at a third of its real size: a record said 116k tokens where the server had just counted 182k, and a truncation to a target on that scale would have kept about three times the target. The trigger itself was already tokenizer-based and is unchanged.
 

@@ -22,6 +22,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -546,6 +547,7 @@ class LiteLLMBackend(LLMBackend):
         request_id = str(uuid4())
         log_wire_request("litellm", completion_kwargs)
 
+        response = None
         try:
             if not completion_kwargs.get("stream", True):
                 # Non-streaming path: one completion, parsed once. Avoids
@@ -774,6 +776,13 @@ class LiteLLMBackend(LLMBackend):
                 error_type=error_type,
                 status_code=status_code,
             )
+        finally:
+            # A consumer that stops reading mid-answer must end the server's
+            # generation now, not when the stream object is collected.
+            aclose = getattr(response, "aclose", None)
+            if aclose is not None:
+                with contextlib.suppress(Exception):
+                    await aclose()
 
 
 def _map_finish_reason(reason: str | None) -> str:
