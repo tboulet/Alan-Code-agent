@@ -18,7 +18,7 @@ from alancode.messages.types import (
     UserMessage,
     is_compact_boundary,
 )
-from alancode.utils.tokens import estimate_message_tokens
+from alancode.utils.tokens import count_tokens_for_call
 
 
 def _is_plain_user_text(message: Message) -> bool:
@@ -38,8 +38,12 @@ def hard_truncate_messages(
     target_tokens: int,
     *,
     include_thinking: bool = False,
+    model: str | None = None,
 ) -> tuple[list[Message], int]:
     """Keep the valuable head and recent tail while meeting a token target.
+
+    Messages are measured with ``model``'s tokenizer, as the loop measures
+    the call: chars/3 reads a grid of digits at a third of its real size.
 
     A prior compact summary, or otherwise the opening user request, is kept
     as the head. Old messages immediately after it are discarded first.
@@ -65,15 +69,19 @@ def hard_truncate_messages(
     tail = list(messages[head_end:])
     dropped = 0
 
-    def tokens(msgs: list[Message]) -> int:
-        return estimate_message_tokens(msgs, include_thinking=include_thinking)
+    def tokens(msg: Message) -> int:
+        return count_tokens_for_call(model, [msg], include_thinking=include_thinking)
 
-    if head and tokens(head) > target_tokens:
+    head_tokens = sum(tokens(msg) for msg in head)
+    if head and head_tokens > target_tokens:
         dropped += len(head)
-        head = []
+        head, head_tokens = [], 0
 
-    while tail and tokens(head + tail) > target_tokens:
+    tail_tokens = [tokens(msg) for msg in tail]
+    kept_tokens = head_tokens + sum(tail_tokens)
+    while tail and kept_tokens > target_tokens:
         tail.pop(0)
+        kept_tokens -= tail_tokens.pop(0)
         dropped += 1
 
     while tail and not (
@@ -135,13 +143,14 @@ def build_hard_truncation_result(
     target_tokens: int,
     failures: int,
     include_thinking: bool = False,
+    model: str | None = None,
 ) -> HardTruncationResult:
     """Select and package a fallback history that survives future turns."""
-    pre_fallback_tokens = estimate_message_tokens(
-        messages, include_thinking=include_thinking,
+    pre_fallback_tokens = count_tokens_for_call(
+        model, messages, include_thinking=include_thinking,
     )
     retained, dropped = hard_truncate_messages(
-        messages, target_tokens, include_thinking=include_thinking,
+        messages, target_tokens, include_thinking=include_thinking, model=model,
     )
     boundary = create_compact_boundary_message(
         trigger="auto",

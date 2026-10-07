@@ -401,6 +401,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                     target_tokens=int(threshold_tokens * 0.8),
                     failures=failures,
                     include_thinking=counts_thinking,
+                    model=params.model,
                 )
             else:
                 logger.info("Auto-compaction triggered")
@@ -413,6 +414,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         settings=params.settings,
                         budget=budget,
                         cost_tracker=params.cost_tracker,
+                        current_tokens=current_tokens,
                     )
                     if result:
                         # Yield compaction artefacts so the caller can display/store them
@@ -481,6 +483,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 target_tokens=int(threshold_tokens * 0.8),
                 failures=failures,
                 include_thinking=counts_thinking,
+                model=params.model,
             )
 
         if fallback_result is not None:
@@ -706,6 +709,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         settings=params.settings,
                         budget=budget,
                         cost_tracker=params.cost_tracker,
+                        current_tokens=current_tokens,
                     )
                     if emergency_result:
                         yield emergency_result.boundary_message

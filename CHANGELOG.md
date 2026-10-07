@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-07 - Alan Code 1.3.22**
+  - The token count written in a compaction record (`compact_metadata.pre_tokens`) is now the measure that triggered the compaction, and the last-resort hard truncation measures messages with the model's tokenizer. Both used chars/3, which reads a grid of spaced digits at a third of its real size: a record said 116k tokens where the server had just counted 182k, and a truncation to a target on that scale would have kept about three times the target. The trigger itself was already tokenizer-based and is unchanged.
+
 - **2026-10-07 - Alan Code 1.3.21**
   - Token estimates no longer count reasoning that is not sent back. Reasoning is stored in the transcript but re-sent only under `persist_thinking`; counting it made a model that reasons about 10k tokens a turn compact at roughly 38% of its real payload (measured: compaction at an estimated 76,573 tokens while the server's last prompt was 31,625).
   - The parser's tool-call format feedback no longer reaches the summarizer. It spells the syntax out, and a model cannot write its own special tokens as text: a GLM summary rendered the expected format in stand-in brackets, and the model then called tools that way for 28 turns. The summarizer reads a neutral placeholder instead and is told not to quote tool-call syntax.

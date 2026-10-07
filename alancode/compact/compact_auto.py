@@ -113,6 +113,7 @@ async def compaction_auto(
     settings: dict | None = None,
     budget: Any = None,  # ContextBudget | None - sizes the summarizer call
     cost_tracker: Any = None,  # CostTracker | None - records the summarizer's own calls
+    current_tokens: int | None = None,  # the loop's measure of the call being compacted
 ) -> CompactionResult | None:
     """Compact the conversation by summarizing it via LLM (Layer C).
 
@@ -129,9 +130,13 @@ async def compaction_auto(
     # Get messages from last compact boundary onward
     relevant_messages = get_messages_after_compact_boundary(messages)
 
-    pre_compact_token_count = estimate_message_tokens(
-        relevant_messages,
-        include_thinking=bool((settings or {}).get("persist_thinking")),
+    pre_compact_token_count = (
+        current_tokens
+        if current_tokens is not None
+        else estimate_message_tokens(
+            relevant_messages,
+            include_thinking=bool((settings or {}).get("persist_thinking")),
+        )
     )
     logger.info(
         "Starting compaction: %d messages, ~%d tokens",
