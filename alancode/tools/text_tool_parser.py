@@ -90,6 +90,11 @@ class ToolCallFormat(ABC):
         so that nothing generated after it can change the turn."""
         return False
 
+    def closing_call(self, text: str) -> ParsedToolCall | None:
+        """The call ``text`` ends on, if this format can tell one from a
+        draft written along the way."""
+        return None
+
     @abstractmethod
     def parse(self, text: str) -> list[ParsedToolCall]:
         """Extract well-formed tool calls from text."""
@@ -645,6 +650,17 @@ class BashBlockFormat(ToolCallFormat):
     def first_call_is_complete(self, text: str) -> bool:
         return bool(_BASH_BLOCK_PATTERN.search(text))
 
+    def closing_call(self, text: str) -> ParsedToolCall | None:
+        matches = list(_BASH_BLOCK_PATTERN.finditer(text))
+        if not matches or text[matches[-1].end():].strip():
+            return None
+        last = matches[-1]
+        return ParsedToolCall(
+            name="Bash",
+            input={"command": last.group(1)},
+            raw_match=last.group(0),
+        )
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         matches = list(_BASH_BLOCK_PATTERN.finditer(text))
         if not matches:
@@ -1082,6 +1098,9 @@ class AutoFormat(ToolCallFormat):
     def first_call_is_complete(self, text: str) -> bool:
         # parse() tries this format first, so its call is the one that runs.
         return FORMATS[_AUTO_ORDER[0]].first_call_is_complete(text)
+
+    def closing_call(self, text: str) -> ParsedToolCall | None:
+        return FORMATS[_AUTO_ORDER[0]].closing_call(text)
 
     def _formats(self, source: str) -> list[tuple[str, ToolCallFormat]]:
         return [

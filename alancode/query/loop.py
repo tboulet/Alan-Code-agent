@@ -76,6 +76,7 @@ from alancode.compact.hard_truncate import (
 )
 from alancode.tools.text_tool_parser import (
     MAX_TEXT_TOOL_RETRIES,
+    ParseResult,
     ToolCallFormat,
     _extract_thinking,
     extract_tool_calls_from_text,
@@ -871,6 +872,25 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 if thinking_result.tool_calls or thinking_result.error:
                     parse_source = "thinking"
                     parse_result = thinking_result
+
+            # A reply that ends inside its reasoning, on a call and with
+            # nothing visible, has written its action in the wrong channel.
+            if (
+                full_thinking
+                and not full_text.strip()
+                and stop_reason != "max_tokens"
+                and params.settings.get("run_reasoning_closing_call", True)
+                and (parse_result is None or not parse_result.tool_calls)
+            ):
+                closing = fmt_obj.closing_call(full_thinking)
+                if closing is not None:
+                    parse_source = "thinking"
+                    parse_result = ParseResult(
+                        tool_calls=[closing],
+                        cleaned_text=full_thinking.replace(
+                            closing.raw_match, "",
+                        ).strip(),
+                    )
 
             if parse_result is not None:
 
