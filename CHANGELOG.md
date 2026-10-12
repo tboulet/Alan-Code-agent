@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-12 - Alan Code 1.3.28**
+  - Under `auto`, a bash block whose closing fence is written but misplaced (glued to the end of the command line) is no longer repaired into a call: the stop-truncation repair only applies when no fence follows the opening one. The reply gets the format error instead. MiniMax-M3 ended one command with its native tag prefix `]<]minimax[>[` and the fence on the same line; the repaired command failed in the shell and the model copied that line eight more times from its history.
+
 - **2026-10-12 - Alan Code 1.3.27**
   - Fixed a compaction loop introduced with `stop_at_first_call` (1.3.23). A reply ended at its call reports no token usage, and the usage of the last reply that did report stayed in force as the size of the next request. After a compaction that figure was the pre-compaction size, so the session was summarized again before every reply until one reply reported usage: 167 times in a row on one MiniMax-M3 run of 2026-10-09 (about 6 minutes each), 36 times on another. A call without usage now clears that figure and the next request is sized by the tokenizer estimate alone. Between compactions the same stale figure could only trigger them early.
 

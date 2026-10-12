@@ -612,6 +612,17 @@ class TestStopRepair:
         fmt = get_format("bash_block")
         assert fmt.repair_stop_truncation("no fence here") == "no fence here"
 
+    @pytest.mark.parametrize("tool_call_format", ["bash_block", "auto"])
+    def test_misplaced_closing_fence_is_not_repaired_into_a_call(self, tool_call_format):
+        """MiniMax-M3 ended a command with its native tag prefix and the fence
+        on the same line; the repair closed the block around both, the shell
+        failed on the backticks and the model copied the line eight times."""
+        fmt = get_format(tool_call_format)
+        text = "Check.\n```bash\necho hi]<]minimax[>[```"
+        assert fmt.repair_stop_truncation(text) == text
+        result = extract_tool_calls_from_text(text, format=tool_call_format)
+        assert not result.tool_calls and result.error
+
     def test_glm_repair_closes_tag(self):
         fmt = get_format("glm")
         text = "<tool_call>Bash<arg_key>command</arg_key><arg_value>ls</arg_value>"

@@ -643,7 +643,9 @@ class BashBlockFormat(ToolCallFormat):
     def repair_stop_truncation(self, text: str) -> str:
         if _BASH_BLOCK_PATTERN.search(text):
             return text
-        if re.search(r"```bash[ \t]*\r?\n", text):
+        opening = re.search(r"```bash[ \t]*\r?\n", text)
+        # A fence after the opening one was written, not cut by a stop.
+        if opening and "```" not in text[opening.end():]:
             return text.rstrip("\r\n") + "\n```"
         return text
 
