@@ -291,6 +291,11 @@ def _record_completed_call(
         state.last_input_tokens = usage.input_tokens
         state.last_output_tokens = usage.output_tokens
         state.messages_len_at_last_call = len(state.messages)
+    else:
+        # No usage reported (a reply ended by stop_at_first_call): the
+        # previous floor describes an older payload.
+        state.last_input_tokens = 0
+        state.last_output_tokens = 0
 
 
 async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:

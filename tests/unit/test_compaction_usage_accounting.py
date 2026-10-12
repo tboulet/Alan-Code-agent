@@ -1,5 +1,7 @@
 """Layer C bills like any other call: the summarizer must reach cost tracking."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from alancode.compact.compact_auto import FORMAT_FEEDBACK_PLACEHOLDER, compaction_auto
@@ -12,7 +14,9 @@ from alancode.backends.base import (
     StreamMessageStart,
     StreamTextDelta,
 )
-from alancode.messages.types import AssistantMessage, TextBlock, UserMessage
+from alancode.messages.types import AssistantMessage, TextBlock, Usage, UserMessage
+from alancode.query.loop import _record_completed_call
+from alancode.query.state import LoopState
 
 
 class RecordingTracker:
@@ -320,3 +324,17 @@ async def test_a_template_that_refuses_the_switch_falls_back_and_remembers():
     assert backend.calls and all("chat_template_kwargs" not in c for c in backend.calls), (
         "the refusal must be remembered, not paid for on every compaction"
     )
+
+
+def test_a_call_without_usage_clears_the_usage_floor():
+    """MiniMax-M3, 2026-10-09: every reply after a compaction was ended by
+    stop_at_first_call and reported no usage, so the pre-compaction count
+    stayed as the floor and the session was summarized 167 times in a row."""
+    params = SimpleNamespace(cost_tracker=RecordingTracker())
+    state = LoopState(messages=_history())
+
+    _record_completed_call(params, state, Usage(input_tokens=83_000, output_tokens=600), "m")
+    assert (state.last_input_tokens, state.last_output_tokens) == (83_000, 600)
+
+    _record_completed_call(params, state, Usage(), "m")
+    assert (state.last_input_tokens, state.last_output_tokens) == (0, 0)
