@@ -13,7 +13,7 @@ from alancode.backends.base import (
     StreamThinkingDelta,
 )
 from alancode.messages.types import AssistantMessage, ThinkingBlock, UserMessage
-from alancode.query.loop import EMPTY_RESPONSE_NUDGE
+from alancode.query.loop import EMPTY_RESPONSE_NUDGE_REASONING_KEPT
 
 
 class ThinkingOnlyBackend(LLMBackend):
@@ -86,7 +86,7 @@ async def test_nudge_recovers_a_thinking_only_turn(tmp_path):
         e for e in events
         if isinstance(e, UserMessage)
         and isinstance(e.content, str)
-        and EMPTY_RESPONSE_NUDGE in e.content
+        and EMPTY_RESPONSE_NUDGE_REASONING_KEPT in e.content
     ]
     assert len(nudges) == 1
     final = _final_assistant(events)

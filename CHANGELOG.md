@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-12 - Alan Code 1.3.25**
+  - New `carry_reasoning_until_call` setting (default on): the reasoning of replies made since the last tool call is sent back to the model as inline `<think>` text, and is dropped again once a tool call is issued. A reply cut at the output limit while reasoning, or holding reasoning only, used to leave the model nothing: MiMo-V2.6-Pro-RL spent three 16000-token answers in a row re-deriving the same analysis. The empty-reply nudge now says the reasoning is visible instead of asking for a summary of it. Stored messages are unchanged; the reasoning counts toward the context while shown.
+
 - **2026-10-12 - Alan Code 1.3.24**
   - New `run_reasoning_closing_call` setting (default on): under `bash_block` and `auto`, when a reply ends normally with nothing visible and its reasoning ends on a closed bash block, that block runs. Blocks in reasoning stay drafts in every other case. Before, such a reply counted as empty and was retried: on the 2026-10-07 and 2026-10-09 ARC rounds this was 381 of 3310 DeepSeek-V4-Pro replies and 100 of 5141 Kimi-K2.7-Code replies, and the retry ran the drafted command again in only 10 of those 481 cases.
 

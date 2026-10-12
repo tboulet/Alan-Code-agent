@@ -23,6 +23,12 @@ class TextBlock:
 
 
 @dataclass
+class CarriedReasoningBlock(TextBlock):
+    """Reasoning shown again to the model as text; exists only in the
+    per-call view of the loop (``carry_reasoning_until_call``)."""
+
+
+@dataclass
 class ToolUseBlock:
     """A tool call request from the model."""
     id: str

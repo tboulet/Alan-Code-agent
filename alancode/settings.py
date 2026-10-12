@@ -78,6 +78,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "tool_result_max_chars": "auto",  # Per-result cap (auto: min(10k, 10% of T in chars))
     # Thinking returned by the backend
     "persist_thinking": False,  # Re-render past turns' thinking as inline <think> text in API history
+    "carry_reasoning_until_call": True,  # Same, but only for replies made since the last tool call
     # Server-side thinking. Only the LiteLLM ("auto") path can carry it; the
     # native Anthropic backend has no chat template to disable.
     "disable_thinking": False,  # Send chat_template_kwargs={"enable_thinking": false}
@@ -287,6 +288,7 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "run_reasoning_closing_call": _is_bool,
     "tool_result_max_chars": _is_pos_int_or_auto,
     "persist_thinking": _is_bool,
+    "carry_reasoning_until_call": _is_bool,
     "disable_thinking": _is_bool,
     "memory_reminder_threshold": _is_pos_int,
     "max_scratchpad_sessions": _is_pos_int,

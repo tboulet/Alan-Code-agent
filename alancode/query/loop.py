@@ -11,6 +11,7 @@ See docs/architecture/query-loop.md for the phase-by-phase walkthrough.
 """
 
 import asyncio
+import dataclasses
 import logging
 import queue
 import uuid
@@ -20,6 +21,7 @@ from typing import Any, AsyncGenerator
 
 from alancode.messages.types import (
     AssistantContentBlock,
+    CarriedReasoningBlock,
     AssistantMessage,
     Message,
     QueryYield,
@@ -112,6 +114,47 @@ EMPTY_RESPONSE_NUDGE = (
     "current plan and state, so it persists in the conversation, then (2) "
     "the answer or tool call."
 )
+
+EMPTY_RESPONSE_NUDGE_REASONING_KEPT = (
+    "Your previous response contained no visible answer or tool call - the "
+    "output was spent entirely on reasoning. That reasoning is shown above "
+    "and stays visible until your next tool call: do not redo it. Reply now "
+    "with the answer or tool call."
+)
+
+
+def _carry_pending_reasoning(messages: list[Message]) -> list[Message]:
+    """Show the model the reasoning of every reply made since its last tool
+    call. Recomputed on each call, so a later tool call takes it out again;
+    the stored messages are not touched."""
+    last_call = max(
+        (
+            i for i, m in enumerate(messages)
+            if isinstance(m, AssistantMessage) and m.has_tool_use
+        ),
+        default=-1,
+    )
+    view: list[Message] = []
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, AssistantMessage):
+            view.append(msg)
+            continue
+        content: list[AssistantContentBlock] = []
+        for block in msg.content:
+            if isinstance(block, CarriedReasoningBlock):
+                continue
+            if i > last_call and isinstance(block, ThinkingBlock) and block.thinking:
+                content.append(
+                    CarriedReasoningBlock(text=f"<think>{block.thinking}</think>")
+                )
+            content.append(block)
+        if len(content) == len(msg.content) and all(
+            a is b for a, b in zip(content, msg.content)
+        ):
+            view.append(msg)
+        else:
+            view.append(dataclasses.replace(msg, content=content))
+    return view
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +354,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
     iteration = 0
     # Stored reasoning is in the payload only under persist_thinking.
     counts_thinking = bool(params.settings.get("persist_thinking"))
+    carries_reasoning = not counts_thinking and bool(
+        params.settings.get("carry_reasoning_until_call", True)
+    )
 
     while True:
         # -- Phase 1: Check abort ----------------------------------------
@@ -339,6 +385,8 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # -- Phase 2: Message preparation (compaction pipeline) ----------
         messages_for_query = get_messages_after_compact_boundary(state.messages)
+        if carries_reasoning:
+            messages_for_query = _carry_pending_reasoning(messages_for_query)
         fallback_result: HardTruncationResult | None = None
 
         # Layer A: per-result size cap (always on, middle-out truncation)
@@ -1053,7 +1101,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 state._empty_response_retries = empty_retry_count + 1  # type: ignore[attr-defined]
                 yield assistant_msg
                 nudge_msg = create_user_message(
-                    EMPTY_RESPONSE_NUDGE,
+                    EMPTY_RESPONSE_NUDGE_REASONING_KEPT
+                    if carries_reasoning and has_thinking
+                    else EMPTY_RESPONSE_NUDGE,
                     hide_in_ui=False,
                 )
                 yield nudge_msg
