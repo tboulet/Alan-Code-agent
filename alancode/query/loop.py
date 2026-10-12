@@ -115,6 +115,8 @@ EMPTY_RESPONSE_NUDGE = (
     "the answer or tool call."
 )
 
+CARRIED_REASONING_CUT_MARKER = "[earlier reasoning omitted]\n"
+
 EMPTY_RESPONSE_NUDGE_REASONING_KEPT = (
     "Your previous response contained no visible answer or tool call - the "
     "output was spent entirely on reasoning. That reasoning is shown above "
@@ -123,10 +125,12 @@ EMPTY_RESPONSE_NUDGE_REASONING_KEPT = (
 )
 
 
-def _carry_pending_reasoning(messages: list[Message]) -> list[Message]:
+def _carry_pending_reasoning(
+    messages: list[Message], max_chars: int,
+) -> list[Message]:
     """Show the model the reasoning of every reply made since its last tool
-    call. Recomputed on each call, so a later tool call takes it out again;
-    the stored messages are not touched."""
+    call, each cut to its last ``max_chars``. Recomputed on each call, so a
+    later tool call takes it out again; the stored messages are not touched."""
     last_call = max(
         (
             i for i, m in enumerate(messages)
@@ -144,9 +148,10 @@ def _carry_pending_reasoning(messages: list[Message]) -> list[Message]:
             if isinstance(block, CarriedReasoningBlock):
                 continue
             if i > last_call and isinstance(block, ThinkingBlock) and block.thinking:
-                content.append(
-                    CarriedReasoningBlock(text=f"<think>{block.thinking}</think>")
-                )
+                kept = block.thinking
+                if len(kept) > max_chars:
+                    kept = CARRIED_REASONING_CUT_MARKER + kept[-max_chars:]
+                content.append(CarriedReasoningBlock(text=f"<think>{kept}</think>"))
             content.append(block)
         if len(content) == len(msg.content) and all(
             a is b for a, b in zip(content, msg.content)
@@ -355,7 +360,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
     # Stored reasoning is in the payload only under persist_thinking.
     counts_thinking = bool(params.settings.get("persist_thinking"))
     carries_reasoning = not counts_thinking and bool(
-        params.settings.get("carry_reasoning_until_call", True)
+        params.settings.get("carry_reasoning_until_call")
     )
 
     while True:
@@ -386,7 +391,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
         # -- Phase 2: Message preparation (compaction pipeline) ----------
         messages_for_query = get_messages_after_compact_boundary(state.messages)
         if carries_reasoning:
-            messages_for_query = _carry_pending_reasoning(messages_for_query)
+            messages_for_query = _carry_pending_reasoning(
+                messages_for_query, budget.tool_result_cap_chars,
+            )
         fallback_result: HardTruncationResult | None = None
 
         # Layer A: per-result size cap (always on, middle-out truncation)

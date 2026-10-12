@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-12 - Alan Code 1.3.26**
+  - `carry_reasoning_until_call` is now off by default, and each carried reasoning is cut to its last characters at the per-result cap, so several replies cut at the output limit in a row cannot fill the context.
+
 - **2026-10-12 - Alan Code 1.3.25**
   - New `carry_reasoning_until_call` setting (default on): the reasoning of replies made since the last tool call is sent back to the model as inline `<think>` text, and is dropped again once a tool call is issued. A reply cut at the output limit while reasoning, or holding reasoning only, used to leave the model nothing: MiMo-V2.6-Pro-RL spent three 16000-token answers in a row re-deriving the same analysis. The empty-reply nudge now says the reasoning is visible instead of asking for a summary of it. Stored messages are unchanged; the reasoning counts toward the context while shown.
 

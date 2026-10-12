@@ -36,7 +36,7 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `run_reasoning_closing_call` | bool | `true` | Tool execution |
 | `tool_result_max_chars` | int \| `"auto"` | `"auto"` | Tool execution |
 | `persist_thinking` | bool | `false` | Thinking history |
-| `carry_reasoning_until_call` | bool | `true` | Thinking history |
+| `carry_reasoning_until_call` | bool | `false` | Thinking history |
 | `disable_thinking` | bool | `false` | Thinking history |
 | `memory_reminder_threshold` | int | `10` | Memory |
 | `max_scratchpad_sessions` | int | `5` | Sessions |
@@ -196,7 +196,7 @@ Under the `bash_block` format (and `auto`), a fenced block inside reasoning is a
 When `true`, stored `ThinkingBlock`s are rendered as inline `<think>...</think>` text in later main-model and compaction requests. Default `false`, which keeps reasoning in the transcript/events but omits it from later API history. This does not enable or budget provider-side extended thinking; it only controls re-injection of reasoning the backend already returned.
 
 ### `carry_reasoning_until_call`
-When `true`, the reasoning of every reply made since the last tool call is sent back as inline `<think>...</think>` text, and leaves the history again once a tool call is issued. It covers the replies that end without acting: cut at the output limit while still reasoning, empty apart from reasoning, or a finished answer the caller follows with another message. Without it the model starts its analysis over on each of them. The reasoning counts toward the context while it is shown. Has no effect under `persist_thinking`, which keeps all reasoning. Default `true`.
+When `true`, the reasoning of every reply made since the last tool call is sent back as inline `<think>...</think>` text, and leaves the history again once a tool call is issued. It covers the replies that end without acting: cut at the output limit while still reasoning, empty apart from reasoning, or a finished answer the caller follows with another message. Without it the model starts its analysis over on each of them. Each reply's reasoning is cut to its last characters, at the same size as the per-result cap (`tool_result_max_chars`), and counts toward the context while it is shown. It is never read for tool calls. Has no effect under `persist_thinking`, which keeps all reasoning. Default `false`.
 
 ### `disable_thinking`
 When `true`, requests carry `chat_template_kwargs={"enable_thinking": false}`, which asks a server-side chat template to stop emitting reasoning. Default `false`. This only reaches the LiteLLM transport (`backend="auto"`); the native Anthropic backend has no chat template and is left untouched. An explicit `chat_template_kwargs` passed by the caller wins.

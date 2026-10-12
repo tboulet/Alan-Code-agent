@@ -42,10 +42,9 @@ def _assistant_contents(messages):
 
 
 @pytest.mark.asyncio
-async def test_thinking_stripped_from_history_when_not_carried(tmp_path):
+async def test_thinking_stripped_from_history_by_default(tmp_path):
     backend = RecordingBackend()
     agent = AlanCodeAgent(backend=backend, cwd=str(tmp_path))
-    assert agent.update_session_setting("carry_reasoning_until_call", False) is None
 
     async for _ in agent.query_events_async("first"):
         pass
