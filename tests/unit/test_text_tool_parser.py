@@ -297,7 +297,7 @@ class TestBashBlockFormat:
         assert result.error is not None
 
     def test_other_language_fences_ignored(self):
-        text = "```python\nprint('hi')\n```\nand\n```sh\nls\n```"
+        text = "```python\nprint('hi')\n```\nand\n```sh\nls\n```\nBoth are examples."
         result = extract_tool_calls_from_text(text, format="bash_block")
         assert result.tool_calls == []
         assert result.error is None
@@ -903,3 +903,36 @@ def test_k3_turn_of_only_template_structure_is_not_an_answer():
         "<|open|>response<|sep|>All three checkpoints are done.<|close|>response<|sep|>"
     )
     assert not fmt.detect_malformed("Done.")
+
+
+@pytest.mark.parametrize("fence", ["```", "```bash", "```sh"])
+@pytest.mark.parametrize("tool_call_format", ["glm", "hermes", "kimi"])
+def test_reply_ending_on_a_shell_fence_gets_the_format_error(tool_call_format, fence):
+    """GLM-5.2 under glm wrote 'prose + a bare fenced command' 15 times: it
+    counted as an answer, and nothing told the model no call was found."""
+    text = f"Let me look around.\n\n{fence}\nls -la && cat framework/data_api.py\n```\n"
+    result = extract_tool_calls_from_text(text, format=tool_call_format)
+    assert not result.tool_calls
+    assert result.error == get_format(tool_call_format).format_error()
+
+
+@pytest.mark.parametrize("text", [
+    "The fix:\n```python\nprint(1)\n```",
+    "```\nls\n```\nThat listing shows the level is solved.",
+    "All done, nothing left to run.",
+])
+def test_other_fences_and_plain_answers_stay_answers(text):
+    result = extract_tool_calls_from_text(text, format="glm")
+    assert not result.tool_calls and result.error is None
+
+
+def test_reasoning_ending_on_a_fence_is_not_a_format_error():
+    result = extract_tool_calls_from_text(
+        "Draft:\n```\nls\n```", format="glm", source="thinking",
+    )
+    assert result.error is None
+
+
+def test_bash_block_reply_ending_on_a_mistagged_fence_gets_the_format_error():
+    result = extract_tool_calls_from_text("Look:\n```sh\nls\n```", format="bash_block")
+    assert not result.tool_calls and result.error

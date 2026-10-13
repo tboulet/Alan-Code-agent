@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-13 - Alan Code 1.3.29**
+  - Under a text tool-call format, a reply with no call that ends on a fenced block with no language tag, or a shell one (`bash`, `sh`, `shell`, `zsh`, `console`), now gets the format error, like any malformed call. It used to count as a final answer: GLM-5.2 under `glm` wrote prose followed by a bare fenced command 15 times in a row, each time answered only by the caller's generic reminder. A fence in another language, or one followed by more text, is still an answer; at most 3 such corrections are sent per query.
+
 - **2026-10-12 - Alan Code 1.3.28**
   - Under `auto`, a bash block whose closing fence is written but misplaced (glued to the end of the command line) is no longer repaired into a call: the stop-truncation repair only applies when no fence follows the opening one. The reply gets the format error instead. MiniMax-M3 ended one command with its native tag prefix `]<]minimax[>[` and the fence on the same line; the repaired command failed in the shell and the model copied that line eight more times from its history.
 

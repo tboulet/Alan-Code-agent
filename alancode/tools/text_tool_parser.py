@@ -1201,6 +1201,14 @@ def _extract_thinking(text: str) -> tuple[str | None, str]:
     return (None, text.strip())
 
 
+# A reply that ends on a shell-looking fenced block is a command written in
+# no format: taken as an answer, the turn ends and the model repeats it.
+_CLOSING_SHELL_FENCE = re.compile(
+    r"(?:^|\n)```(?:bash|sh|shell|zsh|console)?[ \t]*\r?\n.+?\n```\s*$",
+    re.DOTALL,
+)
+
+
 def extract_tool_calls_from_text(
     text: str,
     format: str = "hermes",
@@ -1235,7 +1243,9 @@ def extract_tool_calls_from_text(
         return ParseResult(tool_calls=tool_calls, cleaned_text=cleaned, thinking=thinking)
 
     # No valid tool calls — check for malformed attempts
-    if fmt.detect_malformed(text):
+    if fmt.detect_malformed(text) or (
+        source == "text" and _CLOSING_SHELL_FENCE.search(text)
+    ):
         thinking, cleaned = _extract_thinking(text)
         return ParseResult(tool_calls=[], cleaned_text=cleaned, thinking=thinking, error=fmt.format_error())
 
