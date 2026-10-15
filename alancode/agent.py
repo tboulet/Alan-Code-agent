@@ -72,6 +72,10 @@ from alancode.session.transcript import (
     record_transcript,
 )
 from alancode.hooks.handlers import on_session_start, on_session_end
+from alancode.query.inserted_example import (
+    EXAMPLE_TOOL_NAME,
+    inserted_example_events,
+)
 from alancode.query.loop import QueryParams, query_loop
 from alancode.settings import (
     BACKEND_SETTINGS,
@@ -791,7 +795,22 @@ class AlanCodeAgent:
                 llm_perspective_callback=self._llm_perspective_callback,
             )
 
-            async for event in query_loop(params):
+            async def _turn_events():
+                if (
+                    self._settings.get("inserted_example_bash_use")
+                    and not any(isinstance(m, AssistantMessage) for m in self._messages)
+                    and any(t.name == EXAMPLE_TOOL_NAME for t in effective_tools)
+                ):
+                    async for example_event in inserted_example_events(
+                        effective_tools, context,
+                        self._settings.get("tool_call_format"),
+                        _permission_callback,
+                    ):
+                        yield example_event
+                async for loop_event in query_loop(params):
+                    yield loop_event
+
+            async for event in _turn_events():
                 # Capture the last final-assistant-message's usage so the
                 # display and next-iteration pre-call estimate can use it.
                 if (

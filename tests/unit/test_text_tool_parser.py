@@ -936,3 +936,12 @@ def test_reasoning_ending_on_a_fence_is_not_a_format_error():
 def test_bash_block_reply_ending_on_a_mistagged_fence_gets_the_format_error():
     result = extract_tool_calls_from_text("Look:\n```sh\nls\n```", format="bash_block")
     assert not result.tool_calls and result.error
+
+
+@pytest.mark.parametrize("name", sorted(FORMATS))
+@pytest.mark.parametrize("command", ["ls -la", "cat > a.py <<'EOF'\nprint(1)\nEOF\npython3 a.py"])
+def test_every_format_reads_back_the_call_it_renders(name, command):
+    fmt = FORMATS[name]
+    raw = fmt.render_call("Bash", {"command": command})
+    calls = fmt.parse(raw)
+    assert [(c.name, c.input, c.raw_match) for c in calls] == [("Bash", {"command": command}, raw)]

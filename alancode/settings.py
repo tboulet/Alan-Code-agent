@@ -73,6 +73,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "max_tool_concurrency": 10,  # Max parallel read-only tool executions
     "bash_timeout_ms": 120_000,  # Bash timeout when the model passes none
     "vision": False,  # The model can see images: ViewImage may return them
+    "inserted_example_bash_use": False,  # Open a new session with a real "ls -la" call in the tool-call format
     "stop_at_first_call": True,  # End a generation once the one call its format runs is written
     "run_reasoning_closing_call": True,  # Run the call a reply's reasoning ends on when nothing visible follows
     "tool_result_max_chars": "auto",  # Per-result cap (auto: min(10k, 10% of T in chars))
@@ -285,6 +286,7 @@ SETTING_VALIDATORS: dict[str, tuple] = {
     "bash_timeout_ms": _is_pos_int,
     "vision": _is_bool,
     "stop_at_first_call": _is_bool,
+    "inserted_example_bash_use": _is_bool,
     "run_reasoning_closing_call": _is_bool,
     "tool_result_max_chars": _is_pos_int_or_auto,
     "persist_thinking": _is_bool,

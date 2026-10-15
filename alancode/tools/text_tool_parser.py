@@ -96,6 +96,11 @@ class ToolCallFormat(ABC):
         return None
 
     @abstractmethod
+    def render_call(self, name: str, arguments: dict) -> str:
+        """The markup of one call, as this format's parser reads it back."""
+        ...
+
+    @abstractmethod
     def parse(self, text: str) -> list[ParsedToolCall]:
         """Extract well-formed tool calls from text."""
         ...
@@ -157,6 +162,10 @@ class HermesFormat(ToolCallFormat):
 
     def repair_stop_truncation(self, text: str) -> str:
         return _close_unbalanced_tag(text, "<tool_call>", "</tool_call>")
+
+    def render_call(self, name: str, arguments: dict) -> str:
+        payload = json.dumps({"name": name, "arguments": arguments})
+        return f"<tool_call>\n{payload}\n</tool_call>"
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -237,6 +246,13 @@ class GLMFormat(ToolCallFormat):
     def repair_stop_truncation(self, text: str) -> str:
         return _close_unbalanced_tag(text, "<tool_call>", "</tool_call>")
 
+    def render_call(self, name: str, arguments: dict) -> str:
+        args = "".join(
+            f"<arg_key>{k}</arg_key><arg_value>{v}</arg_value>"
+            for k, v in arguments.items()
+        )
+        return f"<tool_call>{name}{args}</tool_call>"
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
         for match in _GLM_PATTERN.finditer(text):
@@ -315,6 +331,10 @@ class AlanFormat(ToolCallFormat):
 
     def repair_stop_truncation(self, text: str) -> str:
         return _close_unbalanced_tag(text, "<tool_use>", "</tool_use>")
+
+    def render_call(self, name: str, arguments: dict) -> str:
+        payload = json.dumps({"name": name, "input": arguments})
+        return f"<tool_use>\n{payload}\n</tool_use>"
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -413,6 +433,12 @@ class HermesXMLFormat(ToolCallFormat):
     # The parser already tolerates a missing </tool_call> (stop-stripped
     # or model-omitted), so no repair is needed.
     stop_sequences = ("</tool_call>",)
+
+    def render_call(self, name: str, arguments: dict) -> str:
+        params = "".join(
+            f"<parameter={k}>\n{v}\n</parameter>\n" for k, v in arguments.items()
+        )
+        return f"<tool_call>\n<function={name}>\n{params}</function>\n</tool_call>"
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -559,6 +585,9 @@ class MetaJSONFormat(ToolCallFormat):
     (typical for SGLang served as plain openai/* via LiteLLM).
     """
 
+    def render_call(self, name: str, arguments: dict) -> str:
+        return json.dumps({"type": "function", "name": name, "parameters": arguments})
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
         for raw, obj in _scan_meta_json_objects(text):
@@ -663,6 +692,9 @@ class BashBlockFormat(ToolCallFormat):
             raw_match=last.group(0),
         )
 
+    def render_call(self, name: str, arguments: dict) -> str:
+        return f"```bash\n{arguments['command']}\n```"
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         matches = list(_BASH_BLOCK_PATTERN.finditer(text))
         if not matches:
@@ -753,6 +785,12 @@ class KimiFormat(ToolCallFormat):
             text, "<|tool_call_begin|>", "<|tool_call_end|>",
         )
 
+    def render_call(self, name: str, arguments: dict) -> str:
+        return (
+            f"<|tool_call_begin|>functions.{name}:0"
+            f"<|tool_call_argument_begin|>{json.dumps(arguments)}<|tool_call_end|>"
+        )
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
         for match in _KIMI_CALL_PATTERN.finditer(text):
@@ -839,6 +877,16 @@ class DeepSeekFormat(ToolCallFormat):
 
     stop_sequences = (f"{_DS_CLOSE}tool_calls>",)
 
+    def render_call(self, name: str, arguments: dict) -> str:
+        params = "".join(
+            f'{_DS_OPEN}parameter name="{k}" string="true">{v}{_DS_CLOSE}parameter>\n'
+            for k, v in arguments.items()
+        )
+        return (
+            f"{_DS_OPEN}tool_calls>\n{_DS_OPEN}invoke name=\"{name}\">\n{params}"
+            f"{_DS_CLOSE}invoke>\n{_DS_CLOSE}tool_calls>"
+        )
+
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
         for match in _DEEPSEEK_INVOKE_PATTERN.finditer(text):
@@ -920,6 +968,15 @@ class MiniMaxFormat(ToolCallFormat):
     """MiniMax format: ``<minimax:tool_call>`` envelope around ``invoke``/``parameter`` tags."""
 
     stop_sequences = ("</minimax:tool_call>",)
+
+    def render_call(self, name: str, arguments: dict) -> str:
+        params = "".join(
+            f'<parameter name="{k}">{v}</parameter>\n' for k, v in arguments.items()
+        )
+        return (
+            f'<minimax:tool_call>\n<invoke name="{name}">\n{params}'
+            "</invoke>\n</minimax:tool_call>"
+        )
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -1004,6 +1061,13 @@ class KimiK3Format(ToolCallFormat):
 
     def repair_stop_truncation(self, text: str) -> str:
         return _close_unbalanced_tag(text, "<|open|>call", "<|close|>call")
+
+    def render_call(self, name: str, arguments: dict) -> str:
+        args = "".join(
+            f'<|open|>argument key="{k}" type="string"<|sep|>{v}<|close|>argument<|sep|>'
+            for k, v in arguments.items()
+        )
+        return f'<|open|>call tool="{name}" index="1"<|sep|>{args}<|close|>call'
 
     def parse(self, text: str) -> list[ParsedToolCall]:
         results = []
@@ -1110,6 +1174,10 @@ class AutoFormat(ToolCallFormat):
             for name in _AUTO_ORDER
             if source == "text" or FORMATS[name].parse_thinking
         ]
+
+    def render_call(self, name: str, arguments: dict) -> str:
+        # The format the system prompt teaches.
+        return FORMATS[_AUTO_ORDER[0]].render_call(name, arguments)
 
     def parse(self, text: str, source: str = "text") -> list[ParsedToolCall]:
         for name, fmt in self._formats(source):

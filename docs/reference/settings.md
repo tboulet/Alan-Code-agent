@@ -33,6 +33,7 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | `bash_timeout_ms` | int | `120000` | Tool execution |
 | `vision` | bool | `false` | Tool execution |
 | `stop_at_first_call` | bool | `true` | Tool execution |
+| `inserted_example_bash_use` | bool | `false` | Tool execution |
 | `run_reasoning_closing_call` | bool | `true` | Tool execution |
 | `tool_result_max_chars` | int \| `"auto"` | `"auto"` | Tool execution |
 | `persist_thinking` | bool | `false` | Thinking history |
@@ -184,6 +185,9 @@ Set to `true` when the model can see images. It adds the [`ViewImage`](tools.md#
 
 ### `stop_at_first_call`
 Under the `bash_block` format (and `auto` when a bash block is what parses), only the first closed block of a reply runs. With this setting on, Alan stops reading the reply as soon as that block is complete in the visible text and closes the connection, which ends the server's generation; the reply then counts as finished, not cut. It saves the time a model spends writing on after its call. It only acts once reasoning is known to be over - sent on its own channel, or closed inline with `</think>` - because before that a fenced block may be a draft. It needs streaming, and the server reports no token usage for a reply ended this way. Default `true`.
+
+### `inserted_example_bash_use`
+When `true`, the first turn of a new session starts with an example tool call: after the user's first message, an assistant turn saying "Let me look at the working directory first." calls `Bash` with `ls -la`, written in the session's tool-call format (`tool_call_format`; a structured call when it is unset), and the command really runs, so its result follows. The model then answers with that call already in its history, which shows it the format in use rather than only describing it. The turn is recorded with the model name `<synthetic>`, so harnesses and analyses can tell it from the model's own calls. It is not inserted again on later turns or when a session is resumed, and not at all when the `Bash` tool is unavailable. Default `false`.
 
 ### `run_reasoning_closing_call`
 Under the `bash_block` format (and `auto`), a fenced block inside reasoning is a draft and never runs. One case is not a draft: the reply ends normally, nothing is written in the visible channel, and the reasoning's last element is a closed block. The model has then written its action in the wrong channel, and with this setting on Alan runs that block; the block is removed from the stored reasoning. A reply cut by the output limit never qualifies, nor does reasoning that goes on after the block. Default `true`; `false` treats such a reply as empty (see `empty_response_retries`).

@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-16 - Alan Code 1.3.30**
+  - New `inserted_example_bash_use` setting (default off): a new session opens with an example `Bash` call (`ls -la`) in the session's tool-call format, executed for real, so the model sees the format used once before it writes its first call. Format errors on text formats tend to start on the first turn and then copy themselves through the history (GLM-5.2 repeated a bare fenced command 15 times; MiniMax-M3 copied a broken command 8 times). The turn is recorded with model `<synthetic>`. Every text format now renders a call (`render_call`), and each one is tested to parse back the call it renders.
+
 - **2026-10-13 - Alan Code 1.3.29**
   - Under a text tool-call format, a reply with no call that ends on a fenced block with no language tag, or a shell one (`bash`, `sh`, `shell`, `zsh`, `console`), now gets the format error, like any malformed call. It used to count as a final answer: GLM-5.2 under `glm` wrote prose followed by a bare fenced command 15 times in a row, each time answered only by the caller's generic reminder. A fence in another language, or one followed by more text, is still an answer; at most 3 such corrections are sent per query.
 
