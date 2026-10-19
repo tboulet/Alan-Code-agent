@@ -183,3 +183,42 @@ async def test_pre_stream_503_has_status_and_no_message_start(monkeypatch):
     assert isinstance(events[0], StreamError)
     assert events[0].error_type == "server_error"
     assert events[0].status_code == 503
+
+
+class InternalServerError(Exception):
+    status_code = 500
+
+
+@pytest.mark.asyncio
+async def test_unreachable_host_is_a_connection_error(monkeypatch):
+    """Measured: LiteLLM raises InternalServerError 500 "OpenAIException -
+    Connection error." when the host name does not resolve. Classed as a 5xx,
+    it was taken for a possible hidden context overflow and answered with an
+    emergency compaction."""
+    error = InternalServerError(
+        "litellm.InternalServerError: InternalServerError: OpenAIException - Connection error."
+    )
+    fake = FakeLiteLLM(error=error)
+    monkeypatch.setattr(
+        "alancode.backends.litellm_backend._load_litellm",
+        lambda: fake,
+    )
+    backend = LiteLLMBackend(model="openai/local", api_base="http://no-such-host.invalid/v1")
+
+    events = await _events(backend)
+
+    errors = [e for e in events if isinstance(e, StreamError)]
+    assert [e.error_type for e in errors] == ["connection_error"]
+
+
+@pytest.mark.asyncio
+async def test_a_real_5xx_stays_a_server_error(monkeypatch):
+    fake = FakeLiteLLM(error=InternalServerError("upstream returned 503"))
+    monkeypatch.setattr(
+        "alancode.backends.litellm_backend._load_litellm",
+        lambda: fake,
+    )
+    backend = LiteLLMBackend(model="openai/local", api_base="http://localhost:9876/v1")
+
+    errors = [e for e in await _events(backend) if isinstance(e, StreamError)]
+    assert [e.error_type for e in errors] == ["server_error"]

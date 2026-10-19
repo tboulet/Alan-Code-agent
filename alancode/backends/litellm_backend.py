@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_LOCAL_REQUEST_TIMEOUT_SECONDS = 3_600
+LITELLM_CONNECTION_ERROR_TEXT = "Connection error."
 
 
 def _load_litellm():
@@ -760,7 +761,11 @@ class LiteLLMBackend(LLMBackend):
                 error_type = "prompt_too_long"
             elif "Timeout" in type(e).__name__:
                 error_type = "timeout"
-            elif "Connection" in type(e).__name__:
+            elif (
+                "Connection" in type(e).__name__
+                # LiteLLM reports an unreachable host as InternalServerError 500.
+                or LITELLM_CONNECTION_ERROR_TEXT in error_str
+            ):
                 error_type = "connection_error"
             elif status_code is not None and 500 <= status_code <= 599:
                 error_type = "server_error"

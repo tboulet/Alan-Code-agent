@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-19 - Alan Code 1.3.32**
+  - An unreachable host is now classed as a connection error. LiteLLM reports a host name that does not resolve as `InternalServerError` with status 500 and the text "Connection error.", so alan took it for a server error; after its retries it then assumed a hidden context overflow and attempted an emergency compaction before ending the turn on `server_error`. Seen in a sandbox that could not read `/etc/resolv.conf`. It is still retried; it no longer triggers the compaction.
+
 - **2026-10-19 - Alan Code 1.3.31**
   - A rate-limited call (HTTP 429) without a Retry-After hint now waits about 15, 30 and 60 s between its retries instead of 1, 2 and 4 s, so the retries span a per-minute quota window. Albert (the French public API) enforces per-model quotas such as 128,000 tokens per minute and sends no Retry-After; the short waits all fell inside the exhausted minute and the turn ended on a rate-limit error. Other transient errors keep the short waits.
 
