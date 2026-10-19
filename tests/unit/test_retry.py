@@ -157,3 +157,43 @@ async def test_oversized_sse_line_after_content_is_not_replayed():
             pass
 
     assert backend.calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_waits_span_a_per_minute_quota(monkeypatch):
+    """Albert answers 429 once a model's tokens-per-minute quota is spent and
+    sends no Retry-After; three waits of about 1, 2 and 4 s all fell inside
+    the same minute, so the turn ended on the third 429."""
+    class QuotaBackend(RetryBackend):
+        async def stream(self, messages, system, tools, **kwargs):
+            self.calls += 1
+            if self.calls <= 3:
+                yield StreamError(error="Rate limit exceeded", status_code=429)
+                return
+            yield StreamTextDelta(text="ok")
+
+    backend = QuotaBackend(failures=0)
+    waits = []
+
+    async def record_sleep(delay):
+        waits.append(delay)
+
+    monkeypatch.setattr("alancode.api.retry.asyncio.sleep", record_sleep)
+    events = [e async for e in stream_with_retry(backend, [], [], [], max_retries=3)]
+
+    assert events[-1].text == "ok"
+    assert sum(waits) >= 60
+    assert waits[0] >= 15
+
+
+@pytest.mark.asyncio
+async def test_other_transient_errors_keep_short_waits(monkeypatch):
+    backend = RetryBackend(failures=1)
+    waits = []
+
+    async def record_sleep(delay):
+        waits.append(delay)
+
+    monkeypatch.setattr("alancode.api.retry.asyncio.sleep", record_sleep)
+    _ = [e async for e in stream_with_retry(backend, [], [], [], max_retries=2)]
+    assert waits and waits[0] < 3

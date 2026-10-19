@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-19 - Alan Code 1.3.31**
+  - A rate-limited call (HTTP 429) without a Retry-After hint now waits about 15, 30 and 60 s between its retries instead of 1, 2 and 4 s, so the retries span a per-minute quota window. Albert (the French public API) enforces per-model quotas such as 128,000 tokens per minute and sends no Retry-After; the short waits all fell inside the exhausted minute and the turn ended on a rate-limit error. Other transient errors keep the short waits.
+
 - **2026-10-16 - Alan Code 1.3.30**
   - New `inserted_example_bash_use` setting (default off): a new session opens with an example `Bash` call (`ls -la`) in the session's tool-call format, executed for real, so the model sees the format used once before it writes its first call. Format errors on text formats tend to start on the first turn and then copy themselves through the history (GLM-5.2 repeated a bare fenced command 15 times; MiniMax-M3 copied a broken command 8 times). The turn is recorded with model `<synthetic>`. Every text format now renders a call (`render_call`), and each one is tested to parse back the call it renders.
 

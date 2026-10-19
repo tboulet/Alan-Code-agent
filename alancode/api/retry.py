@@ -28,19 +28,24 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RETRIES = 3
 BASE_DELAY = 1.0  # seconds
+RATE_LIMIT_BASE_DELAY = 15.0  # seconds; 15, 30, 60 spans a per-minute quota window
 MAX_DELAY = 60.0  # seconds
 
 
-def _compute_delay(attempt: int, retry_after: float | None = None) -> float:
+def _compute_delay(
+    attempt: int, retry_after: float | None = None, *, rate_limited: bool = False,
+) -> float:
     """Compute the backoff delay for a given attempt.
 
     Uses exponential backoff with full jitter:
-        delay = min(BASE_DELAY * 2^attempt + random(0, 1), MAX_DELAY)
+        delay = min(base * 2^attempt + random(0, 1), MAX_DELAY)
 
-    If the server provided a Retry-After hint, use the larger of
+    where base is RATE_LIMIT_BASE_DELAY for a rate limit and BASE_DELAY
+    otherwise. If the server provided a Retry-After hint, use the larger of
     the computed delay and that hint.
     """
-    exp_delay = BASE_DELAY * (2 ** attempt) + random.random()
+    base = RATE_LIMIT_BASE_DELAY if rate_limited else BASE_DELAY
+    exp_delay = base * (2 ** attempt) + random.random()
     delay = min(exp_delay, MAX_DELAY)
     if retry_after is not None and retry_after > delay:
         delay = min(retry_after, MAX_DELAY)
@@ -210,7 +215,10 @@ async def stream_with_retry(
         # We have a retryable error.  Log and back off.
         if attempt < max_retries:
             retry_after = _extract_retry_after(last_error)
-            delay = _compute_delay(attempt, retry_after)
+            delay = _compute_delay(
+                attempt, retry_after,
+                rate_limited=isinstance(last_error, RateLimitError),
+            )
             logger.warning(
                 "Retryable error on attempt %d/%d (category=%s): %s  "
                 "Retrying in %.1fs...",
