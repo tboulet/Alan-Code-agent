@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-19 - Alan Code 1.3.33**
+  - Prompt-caching markers (`cache_control`) are now sent only to Anthropic models. LiteLLM forwards them verbatim to OpenAI-compatible servers, and Albert's mistral-small, validated by `mistral_common`, rejected the request with "Extra inputs are not permitted", so the run died on its first call. Other models now receive the system prompt as one plain string; servers such as vLLM and llama.cpp cache prefixes on their own.
+
 - **2026-10-19 - Alan Code 1.3.32**
   - An unreachable host is now classed as a connection error. LiteLLM reports a host name that does not resolve as `InternalServerError` with status 500 and the text "Connection error.", so alan took it for a server error; after its retries it then assumed a hidden context overflow and attempted an emergency compaction before ending the turn on `server_error`. Seen in a sandbox that could not read `/etc/resolv.conf`. It is still retried; it no longer triggers the compaction.
 

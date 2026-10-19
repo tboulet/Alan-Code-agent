@@ -222,3 +222,38 @@ async def test_a_real_5xx_stays_a_server_error(monkeypatch):
 
     errors = [e for e in await _events(backend) if isinstance(e, StreamError)]
     assert [e.error_type for e in errors] == ["server_error"]
+
+
+def _payload(fake):
+    call = fake.calls[0]
+    return call["messages"], call.get("tools") or []
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_servers_get_no_cache_markers(monkeypatch):
+    """Albert serves mistral-small through a strict Mistral validator that
+    answered 400 'Extra inputs are not permitted' to the cache_control key of
+    every system block, so the run died on its first request."""
+    fake = FakeLiteLLM([_chunk(content="ok", finish_reason="stop")])
+    monkeypatch.setattr("alancode.backends.litellm_backend._load_litellm", lambda: fake)
+    backend = LiteLLMBackend(model="openai/mistral-small", api_base="http://localhost:9876/v1")
+
+    history = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yes"}]
+    tool = SimpleNamespace(name="Bash", description="run", input_schema={"type": "object"})
+    _ = [e async for e in backend.stream(history, ["You are an agent.", "\n\n# Tools"], [tool])]
+
+    messages, tools = _payload(fake)
+    assert messages[0] == {"role": "system", "content": "You are an agent.\n\n\n\n# Tools"}
+    assert "cache_control" not in repr(messages) and "cache_control" not in repr(tools)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_models_keep_their_cache_markers(monkeypatch):
+    fake = FakeLiteLLM([_chunk(content="ok", finish_reason="stop")])
+    monkeypatch.setattr("alancode.backends.litellm_backend._load_litellm", lambda: fake)
+    backend = LiteLLMBackend(model="openrouter/anthropic/claude-sonnet-4-6")
+
+    _ = [e async for e in backend.stream([{"role": "user", "content": "hi"}], ["You are an agent."], [])]
+
+    messages, _ = _payload(fake)
+    assert messages[0]["content"][-1]["cache_control"] == {"type": "ephemeral"}

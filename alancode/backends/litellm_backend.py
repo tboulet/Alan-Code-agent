@@ -75,6 +75,13 @@ def _load_litellm():
     return litellm
 
 
+def _uses_cache_markers(model: str) -> bool:
+    """Whether ``model`` is an Anthropic model, the only kind that reads
+    ``cache_control`` prompt-caching markers."""
+    name = model.lower()
+    return "claude" in name or "anthropic" in name
+
+
 def _resolve_request_timeout(
     configured: int | str | None,
     api_base: str | None,
@@ -471,11 +478,15 @@ class LiteLLMBackend(LLMBackend):
 
         # Build system message (litellm uses the messages array, not a separate system param)
         litellm_messages: list[dict[str, Any]] = []
-        if system:
-            # Use structured content blocks so we can place cache_control
-            # markers. LiteLLM passes cache_control through to backends
-            # that support it (Anthropic, OpenRouter/Anthropic) and strips
-            # it for backends that don't.
+        # cache_control only means something to Anthropic models. LiteLLM
+        # forwards it verbatim to OpenAI-compatible servers, and a strict
+        # Mistral validator (Albert) rejects the request for it.
+        cache_markers = _uses_cache_markers(resolved_model)
+        if system and not cache_markers:
+            system_text = "\n\n".join(s for s in system if s)
+            if system_text:
+                litellm_messages.append({"role": "system", "content": system_text})
+        elif system:
             blocks: list[dict[str, Any]] = []
             for i, s in enumerate(system):
                 if not s:
@@ -493,10 +504,11 @@ class LiteLLMBackend(LLMBackend):
 
         # Prompt caching: mark last assistant message so the conversation
         # prefix is cached between consecutive API calls.
-        for msg in reversed(litellm_messages):
-            if msg.get("role") == "assistant":
-                msg["cache_control"] = {"type": "ephemeral"}
-                break
+        if cache_markers:
+            for msg in reversed(litellm_messages):
+                if msg.get("role") == "assistant":
+                    msg["cache_control"] = {"type": "ephemeral"}
+                    break
 
         # Build tools in OpenAI format (litellm uses OpenAI tool format)
         litellm_tools = None
@@ -512,7 +524,8 @@ class LiteLLMBackend(LLMBackend):
                 }
                 for t in tools
             ]
-            litellm_tools[-1]["cache_control"] = {"type": "ephemeral"}
+            if cache_markers:
+                litellm_tools[-1]["cache_control"] = {"type": "ephemeral"}
 
         # Build completion kwargs
         completion_kwargs: dict[str, Any] = {
