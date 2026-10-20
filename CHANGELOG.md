@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-20 - Alan Code 1.3.34**
+  - The litellm requirement now excludes 1.82.7 and 1.82.8, the compromised releases listed by OSV as MAL-2026-2144. The previous floor (`>=1.70`) allowed them, so a fresh install with an older pin elsewhere could resolve to one. The installed fleet venvs were checked and run 1.83.3, 1.83.8 and 1.93.0.
+
 - **2026-10-19 - Alan Code 1.3.33**
   - Prompt-caching markers (`cache_control`) are now sent only to Anthropic models. LiteLLM forwards them verbatim to OpenAI-compatible servers, and Albert's mistral-small, validated by `mistral_common`, rejected the request with "Extra inputs are not permitted", so the run died on its first call. Other models now receive the system prompt as one plain string; servers such as vLLM and llama.cpp cache prefixes on their own.
 

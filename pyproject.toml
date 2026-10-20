@@ -19,7 +19,7 @@ dependencies = [
     "prompt-toolkit>=3.0",
     "pyyaml>=6.0",
     # LiteLLM (any non-Anthropic backend)
-    "litellm>=1.70",
+    "litellm>=1.70,!=1.82.7,!=1.82.8",  # 1.82.7-8: malicious releases (MAL-2026-2144)
     "requests>=2.31",
     # GUI (browser mode via `--gui`)
     "fastapi>=0.110",
