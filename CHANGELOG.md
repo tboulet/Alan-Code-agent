@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-21 - Alan Code 1.3.36**
+  - The `deepseek` format (and `auto`) also reads DeepSeek-V4.1's DSML variant, as written by the Unsloth GGUF chat template: a space between the DSML prefix and each tag name, and `calls` instead of `tool_calls`. Its closing `calls` tag is added to the stop sequences.
+
 - **2026-10-21 - Alan Code 1.3.35**
   - The litellm requirement is capped below 1.107. litellm 1.107.0 ships `cook.pth`, which Python runs at every start, and `cook.py`, which decodes and executes a zlib/base64 payload: the pattern of the March litellm compromise. Not yet in OSV when the cap was added. No fleet environment had it installed (1.83.3 to 1.98.0).
 

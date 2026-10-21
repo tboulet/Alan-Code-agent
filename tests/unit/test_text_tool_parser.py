@@ -571,6 +571,24 @@ class TestDeepSeekFormat:
         assert result.tool_calls[0].input["command"] == command
         assert "Now the controller:" in result.cleaned_text
 
+    @pytest.mark.parametrize("tool_call_format", ["deepseek", "auto"])
+    def test_v4_1_spaced_calls_variant(self, tool_call_format):
+        """DeepSeek-V4.1 (Unsloth GGUF template) puts a space before each tag
+        name and says 'calls' where V4 says 'tool_calls'."""
+        command = "ls -la\ncat framework/data_api.py"
+        text = (
+            "Let me look.\n"
+            f"<{DS}DSML{DS} calls>\n"
+            f'<{DS}DSML{DS} invoke name="Bash">\n'
+            f'<{DS}DSML{DS} parameter name="command" string="true">{command}'
+            f"</{DS}DSML{DS} parameter>\n"
+            f"</{DS}DSML{DS} invoke>\n"
+            f"</{DS}DSML{DS} calls>"
+        )
+        result = extract_tool_calls_from_text(text, format=tool_call_format)
+        assert [(c.name, c.input) for c in result.tool_calls] == [("Bash", {"command": command})]
+        assert "DSML" not in result.cleaned_text
+
     def test_prose_without_markup_clean(self):
         result = extract_tool_calls_from_text("Just reasoning.", format="deepseek")
         assert result.tool_calls == []

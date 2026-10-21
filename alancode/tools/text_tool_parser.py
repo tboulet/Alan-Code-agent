@@ -857,17 +857,20 @@ _DS_BAR = "｜"  # FULLWIDTH VERTICAL LINE, the actual delimiter DeepSeek emits
 _DS_OPEN = f"<{_DS_BAR}DSML{_DS_BAR}"
 _DS_CLOSE = f"</{_DS_BAR}DSML{_DS_BAR}"
 
+# V4.1 (Unsloth template) puts a space between the DSML prefix and each tag
+# name, and writes "calls" for "tool_calls".
+_DS_CALLS = r"\s*(?:tool_)?calls>"
 _DEEPSEEK_INVOKE_PATTERN = re.compile(
-    rf"(?:{re.escape(_DS_OPEN)}tool_calls>\s*)?"
-    rf'{re.escape(_DS_OPEN)}invoke name="([^"]+)"\s*>(.*?)'
-    rf"{re.escape(_DS_CLOSE)}invoke>"
-    rf"(?:\s*{re.escape(_DS_CLOSE)}tool_calls>)?",
+    rf"(?:{re.escape(_DS_OPEN)}{_DS_CALLS}\s*)?"
+    rf'{re.escape(_DS_OPEN)}\s*invoke name="([^"]+)"\s*>(.*?)'
+    rf"{re.escape(_DS_CLOSE)}\s*invoke>"
+    rf"(?:\s*{re.escape(_DS_CLOSE)}{_DS_CALLS})?",
     re.DOTALL,
 )
 
 _DEEPSEEK_PARAM_PATTERN = re.compile(
-    rf'{re.escape(_DS_OPEN)}parameter name="([^"]+)"([^>]*)>(.*?)'
-    rf"{re.escape(_DS_CLOSE)}parameter>",
+    rf'{re.escape(_DS_OPEN)}\s*parameter name="([^"]+)"([^>]*)>(.*?)'
+    rf"{re.escape(_DS_CLOSE)}\s*parameter>",
     re.DOTALL,
 )
 
@@ -875,7 +878,7 @@ _DEEPSEEK_PARAM_PATTERN = re.compile(
 class DeepSeekFormat(ToolCallFormat):
     """DeepSeek DSML format: fullwidth-bar ``invoke``/``parameter`` markup."""
 
-    stop_sequences = (f"{_DS_CLOSE}tool_calls>",)
+    stop_sequences = (f"{_DS_CLOSE}tool_calls>", f"{_DS_CLOSE} calls>")
 
     def render_call(self, name: str, arguments: dict) -> str:
         params = "".join(
@@ -1144,7 +1147,8 @@ class AutoFormat(ToolCallFormat):
     # Formats configured directly keep their own tag stops.
     stop_sequences = (
         "<|tool_call_end|>",
-        f"{_DS_CLOSE}tool_calls>", "</minimax:tool_call>", "<|close|>call",
+        f"{_DS_CLOSE}tool_calls>", f"{_DS_CLOSE} calls>",
+        "</minimax:tool_call>", "<|close|>call",
     )
 
     def repair_stop_truncation(self, text: str) -> str:
