@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-10-21 - Alan Code 1.3.35**
+  - The litellm requirement is capped below 1.107. litellm 1.107.0 ships `cook.pth`, which Python runs at every start, and `cook.py`, which decodes and executes a zlib/base64 payload: the pattern of the March litellm compromise. Not yet in OSV when the cap was added. No fleet environment had it installed (1.83.3 to 1.98.0).
+
 - **2026-10-20 - Alan Code 1.3.34**
   - The litellm requirement now excludes 1.82.7 and 1.82.8, the compromised releases listed by OSV as MAL-2026-2144. The previous floor (`>=1.70`) allowed them, so a fresh install with an older pin elsewhere could resolve to one. The installed fleet venvs were checked and run 1.83.3, 1.83.8 and 1.93.0.
 

@@ -18,3 +18,11 @@ def test_malicious_litellm_releases_cannot_be_installed():
     spec = _requirement("litellm").specifier
     assert not spec.contains("1.82.7") and not spec.contains("1.82.8")
     assert spec.contains("1.82.6") and spec.contains("1.83.8")
+
+
+def test_litellm_1_107_cannot_be_installed():
+    """litellm 1.107.0 ships cook.pth, run at every Python start, which
+    imports a zlib/base64 decode-and-exec payload."""
+    spec = _requirement("litellm").specifier
+    assert not spec.contains("1.107.0")
+    assert spec.contains("1.106.2")
