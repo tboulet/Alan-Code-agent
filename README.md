@@ -212,6 +212,7 @@ See [docs/reference/python-api.md#programmatic-mode](docs/reference/python-api.m
 | Universal backend (`auto`) | LiteLLM transport for OpenAI, OpenRouter, Gemini, Ollama, vLLM, and many other model providers | default for non-Claude models |
 | Native Anthropic backend | Direct Anthropic SDK with `cache_control`, native thinking, native `tool_use` | default for bare `claude-*` names; force with `--backend anthropic-native` |
 | Local models | vLLM / SGLang / Ollama, with text-based tool-call fallback for models without native tool use | [docs](docs/reference/local-models.md) |
+| Vision | Models that can see view image files through the `ViewImage` tool | `--vision` or the `vision` setting |
 | Hooks | Pre/post-tool shell hooks for guardrails or logging | `.alan/settings.json` |
 | Skills | User-defined prompt + tool filter, discoverable at runtime | `/skill list`, `/skill create` |
 
@@ -244,31 +245,18 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 | **Subagents / Task tool** | planned | Spawn isolated sub-conversations with their own context for parallel exploration or delegation. |
 | **MCP (Model Context Protocol)** | planned | Connect external tool servers (databases, APIs, IDEs) through the MCP standard. |
 | **Plan mode** | planned | Force the agent to write and get approval for a plan before touching code. |
-| **Image input** | partial | A model with vision can view image files through the `ViewImage` tool (`vision` setting). Pasting or attaching images to the conversation is not supported yet. |
 | **Stop / PreCompact / PostCompact hooks** | partial | Only Pre/PostToolUse hooks are implemented today. |
 | **WebSearch tool** | planned | The WebFetch tool can fetch and summarize pages, but doesn't do active searching yet. |
 
 # What's new
 
-See [CHANGELOG.md](CHANGELOG.md) for the full history.
+- **2026-10-16 - Alan Code 1.3.30** - New `inserted_example_bash_use` setting (off by default): a new session starts with one real example of a shell command run by the agent, written in the model's tool-call format. Helps weaker models get the format right from their first reply.
+- **2026-10-12 - Alan Code 1.3.24 to 1.3.28** - Better behaviour with reasoning models. When a model writes its shell command at the end of its reasoning instead of in its reply, Alan now runs it. A new `carry_reasoning_until_call` setting keeps a model's reasoning visible to it until its next tool call, so it does not redo its analysis after a reply that ended without acting.
+- **2026-10-07 - Alan Code 1.3.19** - Vision: models that can see can now look at image files through the new `ViewImage` tool. Turn it on with `--vision` or the `vision` setting.
+- **2026-09-02 - Alan Code 1.3.14** - Alan the jellyfish joins the CLI banner, the GUI top bar, and this README. The welcome banner now shows the version, working directory, context window, memory mode and backend.
+- **2026-08-19 - Alan Code 1.3.11** - Better support for local models: new tool-call formats (`bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, and `auto`, which detects the format), and an optional `persist_thinking` setting that shows a model its earlier reasoning again on later turns.
 
-- **2026-10-21 - Alan Code 1.3.31 to 1.3.36** - Hosted OpenAI-compatible endpoints: a rate-limited call waits out a per-minute quota, an unreachable host is reported as a connection error, and prompt-caching markers go only to Anthropic models (a strict server rejected them). The `deepseek` format reads DeepSeek-V4.1's call markup. The litellm requirement excludes the compromised releases 1.82.7, 1.82.8 and 1.107.0.
-- **2026-10-16 - Alan Code 1.3.29 and 1.3.30** - New `inserted_example_bash_use` setting: a new session opens with a real example `Bash` call in the session's tool-call format. A reply that ends on a bare or shell fenced block now gets the format error instead of counting as a final answer.
-- **2026-10-12 - Alan Code 1.3.24 to 1.3.28** - For reasoning models: `run_reasoning_closing_call` runs the bash block a reply's reasoning ends on when nothing visible follows, and `carry_reasoning_until_call` keeps a call-less reply's reasoning visible until the next tool call. Fixed a compaction loop after replies that report no token usage.
-- **2026-10-07 - Alan Code 1.3.19 to 1.3.23** - Vision: new `ViewImage` tool and `vision` setting, with images budgeted by their pixel count. New `stop_at_first_call` (default on): under `bash_block` a generation ends once its one call is written. Reasoning that is not re-sent no longer counts toward the context.
-- **2026-10-03 - Alan Code 1.3.18** - New `bash_timeout_ms` setting. A reply cut at the output limit no longer carries its tool calls, and compaction is more robust with reasoning models.
-- **2026-09-21 - Alan Code 1.3.17** - Breaking: `escalated_max_tokens` is removed; the output budget is one hard ceiling. A text-format tool call is replayed to the model as the markup it wrote, context-window discovery authenticates, and a timed-out command has its whole process group killed.
-- **2026-09-05 - Alan Code 1.3.15 and 1.3.16** - New `alancode.get_provenance()` (version and git SHA of the running source) and `agent.context_window_source`. The hard-truncation fallback now fires whenever a request is still too long after compaction.
-- **2026-09-02 - Alan Code 1.3.14** - Alan the jellyfish joins the CLI banner, the GUI top bar, and this README.
-- **2026-08-25 - Alan Code 1.3.13** - Compaction summarizer calls now show up in cost tracking, `ALANCODE_WIRE_LOG=<path>` dumps the exact provider request as JSONL for wire audits, and a tool relying on an inert v1 compatibility field says so. New [known-limitations reference](docs/reference/limitations.md).
-- **2026-08-24 - Alan Code 1.3.12** - Added two optional controls for local reasoning models: `no_verbalize_warning` (remind a model that acts without narrating) and `disable_thinking` (ask a server-side chat template to stop emitting reasoning). Also a documentation and code cleanup pass, including a CLI that no longer lags settings on tool-call formats.
-- **2026-08-19 - Alan Code 1.3.11** - Added optional cross-turn reasoning re-injection (`persist_thinking`) and bounded recovery for reasoning-only/empty replies. The 1.3.2-1.3.11 series also hardened max-output recovery and added `bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, and auto-detected text tool-call formats for local models.
-- **2026-08-10 - Alan Code 1.3.1** - Fixed multi-turn tool use with Ollama and other strict OpenAI-compatible servers by serializing tool-only assistant messages with empty-string content instead of JSON `null`. Programmatic mode no longer injects the automatic date/time reminder.
-- **2026-08-08 - Alan Code 1.3** - Hardened slow/offline local-model operation, tool calls embedded in reasoning streams, timeout and context-window controls, backend lifecycle cleanup, concurrent shared-state writes, and error reporting. Internal transport terminology is now consistently `backend`, with obsolete GUI, REPL, and session complexity removed.
-- **2026-07-25 - Alan Code 1.2** - Context budgets now adapt to the model and reserve legal output space on every call. Long sessions recover from aggregate tool-output growth, prompt-too-long responses, and failed summarization through context-scaled truncation, retrying compaction, and a deterministic last-resort fallback. Local-model context windows can be resolved from server metadata or a cached probe, and interrupted turns retain valid tool-call history.
-- **2026-05-11 - Backend / model UX redesign** - `--backend` selects `auto`, `anthropic-native`, or `scripted`, and is inferred from `--model` when omitted. Bare Claude names use the native Anthropic SDK; everything else uses LiteLLM.
-- **2026-05-07 — Programmatic mode** — `AlanCodeAgent(programmatic=True, ...)` runs Alan as a library component for benchmark harnesses, parent agents, and unattended pipelines. Skips host-level state (`~/.alan/ALAN.md`, `~/.alan/memory/`, project `ALAN.md`) and the network/git/ask-user tools. New `tools=` and `disabled_tools=` constructor params for fine-grained tool control.
-- **2026-04-28 — Prompt caching** — Alan now places `cache_control` breakpoints on tool definitions, system prompt, and conversation history, for both backends. System prompt was optimized to avoid cache-killing dynamic content. Reduce the cost of Alan Code. (Since 1.3.33 the LiteLLM backend sends these markers only to Anthropic models; local servers cache prefixes on their own.)
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 # Further reading
 
