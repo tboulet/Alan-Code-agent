@@ -22,6 +22,20 @@ ENTRY = {
 }
 
 
+class _EmptyRegistry:
+    """LiteLLM as if its registry did not know the model yet."""
+
+    @staticmethod
+    def get_model_info(model):
+        raise KeyError(model)
+
+
+@pytest.fixture(autouse=True)
+def unknown_to_litellm(monkeypatch):
+    monkeypatch.setattr("alancode.backends.litellm_backend._load_litellm", lambda: _EmptyRegistry)
+    monkeypatch.setattr("alancode.api.cost_tracker._litellm_cost", lambda usage, model: None)
+
+
 @pytest.fixture
 def catalogue(monkeypatch):
     calls = []
@@ -104,3 +118,15 @@ def test_current_families_resolve_outside_openrouter(model, window, monkeypatch)
     monkeypatch.setattr("alancode.backends.litellm_backend.cw_probe.load_cached_context_window", lambda *a: None)
     info = LiteLLMBackend(model=model).get_model_info()
     assert info.context_window == window
+
+
+def test_a_zero_litellm_price_falls_back_to_the_catalogue(catalogue, monkeypatch):
+    """Newer LiteLLM lists openrouter/google/gemini-3.8-flash at $0 per token."""
+    monkeypatch.setattr("alancode.api.cost_tracker._litellm_cost", lambda usage, model: 0.0)
+    cost = CostTracker(session=None).calculate_cost(Usage(input_tokens=1_000, output_tokens=100), NEW_MODEL)
+    assert cost == pytest.approx(1_000 * 1e-6 + 100 * 4e-6)
+
+
+def test_a_real_litellm_price_is_kept(catalogue, monkeypatch):
+    monkeypatch.setattr("alancode.api.cost_tracker._litellm_cost", lambda usage, model: 0.5)
+    assert CostTracker(session=None).calculate_cost(Usage(input_tokens=1, output_tokens=1), NEW_MODEL) == 0.5

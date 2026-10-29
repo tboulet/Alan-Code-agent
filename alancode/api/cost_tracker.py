@@ -202,16 +202,19 @@ class CostTracker:
             return cost
 
         cost = _litellm_cost(usage, model)
-        if cost is not None:
+        # LiteLLM can list a model before it has its price, and then
+        # answers 0 for a call that used tokens.
+        if cost and cost > 0:
             return cost
 
-        return openrouter_models.cost_usd(
+        catalogue_cost = openrouter_models.cost_usd(
             model,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             cache_read_tokens=usage.cache_read_input_tokens,
             cache_write_tokens=usage.cache_creation_input_tokens,
         )
+        return catalogue_cost if catalogue_cost is not None else cost
 
     def add_usage(
         self, usage: Usage, model: str, duration_ms: float = 0.0
