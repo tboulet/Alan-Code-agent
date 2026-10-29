@@ -1,5 +1,9 @@
 # Changelog
 
+- **2026-10-29 - Alan Code 1.4.1**
+  - A model that LiteLLM lists but prices at $0 now gets its cost from OpenRouter's catalogue. Newer LiteLLM releases (seen with 1.106) list `openrouter/google/gemini-3.8-flash` at $0 per token, so the 1.4.0 fallback, which only ran when LiteLLM did not know the model, never ran for it.
+  - The test suite runs on GitHub Actions (Python 3.11 and 3.12), and the README badges now show live state: tests, the latest version tag, the Python requirement from `pyproject.toml`, and the licence.
+
 - **2026-10-29 - Alan Code 1.4.0**
   - **Default model is now `claude-haiku-5-5`** (was `claude-sonnet-4-6`): the cheapest current Claude model, $0.10 / $0.50 per million input / output tokens. Pass `--model claude-sonnet-5-5` (or any other model) for a stronger one. The native Anthropic backend now knows the context window, output limit and prices of `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1`. These figures come from OpenRouter's catalogue, and the native model IDs were not checked against Anthropic's API.
   - **A missing API key is reported at startup.** `alancode` without the key its model needs used to print the provider SDK's traceback ("Could not resolve authentication method...") on the first message. It now exits at once with one line naming the variable to set (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, ...), in CLI, GUI and `--print` modes. A custom `--base-url` and local providers such as Ollama are not checked.
