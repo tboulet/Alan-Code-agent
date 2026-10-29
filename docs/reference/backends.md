@@ -48,7 +48,7 @@ Uses the official `anthropic` SDK. Gets Alan the best of what Anthropic offers:
 
 ### Models
 
-`claude-sonnet-4-6` (default), `claude-opus-4-7`, `claude-haiku-4-5`, older Sonnet/Opus/Haiku versions. Use the exact model string from Anthropic's API docs.
+`claude-haiku-5-5` (default), `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-4-6`, `claude-opus-4-7`, `claude-haiku-4-5`, older Sonnet/Opus/Haiku versions. Use the exact model string from Anthropic's API docs.
 
 ### Configuration
 

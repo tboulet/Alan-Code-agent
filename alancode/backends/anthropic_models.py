@@ -10,6 +10,26 @@ from alancode.backends.base import ModelInfo
 
 ANTHROPIC_MODELS: dict[str, ModelInfo] = {
     # ── Active models ──────────────────────────────────────────────────────
+    "claude-haiku-5-5": ModelInfo(
+        context_window=1_000_000,
+        max_output_tokens=128_000,
+        supports_thinking=True,
+    ),
+    "claude-sonnet-5-5": ModelInfo(
+        context_window=1_000_000,
+        max_output_tokens=128_000,
+        supports_thinking=True,
+    ),
+    "claude-opus-5-5": ModelInfo(
+        context_window=1_000_000,
+        max_output_tokens=128_000,
+        supports_thinking=True,
+    ),
+    "claude-fable-5-1": ModelInfo(
+        context_window=1_000_000,
+        max_output_tokens=128_000,
+        supports_thinking=True,
+    ),
     "claude-opus-4-7": ModelInfo(
         context_window=1_000_000,
         max_output_tokens=128_000,

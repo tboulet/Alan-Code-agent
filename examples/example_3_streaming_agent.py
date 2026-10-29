@@ -12,7 +12,7 @@ from alancode.messages.types import AssistantMessage, TextBlock, ToolUseBlock
 
 
 async def main() -> None:
-    agent = AlanCodeAgent(permission_mode="yolo", backend="auto", model="openrouter/google/gemini-2.5-flash")
+    agent = AlanCodeAgent(permission_mode="yolo", backend="auto", model="openrouter/anthropic/claude-haiku-5.5")
 
     try:
         async for event in agent.query_events_async(

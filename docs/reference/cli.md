@@ -12,7 +12,7 @@ Run `alancode --help` for a quick version of this table.
 
 | Flag | Description | Default |
 |---|---|---|
-| `--model` | Model name. Bare names (`claude-sonnet-4-6`, `gpt-4o`) or LiteLLM-style `provider/model` prefixes (`ollama/llama3.1`, `openrouter/google/gemini-2.5-pro`, `gemini/gemini-2.5-flash`, `anthropic/claude-sonnet-4-6`). | `claude-sonnet-4-6` |
+| `--model` | Model name. Bare names (`claude-sonnet-4-6`, `gpt-4o`) or LiteLLM-style `provider/model` prefixes (`ollama/llama3.1`, `openrouter/google/gemini-2.5-pro`, `gemini/gemini-2.5-flash`, `anthropic/claude-sonnet-4-6`). | `claude-haiku-5-5` |
 | `--backend` | Transport (advanced — inferred from `--model` when not set). One of `auto` (universal LiteLLM transport), `anthropic-native` (direct Anthropic SDK with `cache_control`, native thinking, native `tool_use`), or `scripted` (tests). | inferred |
 | `--api-key` | API key. If omitted, read from the backend's usual environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, …). | (env) |
 | `--base-url` | Override the API base URL. Set this for local OpenAI-compatible servers, e.g. `http://localhost:8000/v1`. See [`local-models.md`](local-models.md). | *(backend default)* |
@@ -81,7 +81,7 @@ Example:
 ```json
 {
   "backend": "anthropic-native",
-  "model": "claude-sonnet-4-6",
+  "model": "claude-haiku-5-5",
   "permission_mode": "edit",
   "memory": "off"
 }

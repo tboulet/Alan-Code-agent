@@ -14,7 +14,7 @@ Usage:
     python examples/example_2_auto_fix_loop/run_alan.py
 
     # With a specific model:
-    python examples/example_2_auto_fix_loop/run_alan.py --model openrouter/google/gemini-2.5-flash
+    python examples/example_2_auto_fix_loop/run_alan.py --model openrouter/anthropic/claude-haiku-5.5
 
     # With scripted backend (no API, for demonstration):
     python examples/example_2_auto_fix_loop/run_alan.py --scripted
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     if "--scripted" in sys.argv:
         run_scripted()
     else:
-        model = "openrouter/google/gemini-2.5-flash"
+        model = "openrouter/anthropic/claude-haiku-5.5"
         for i, arg in enumerate(sys.argv):
             if arg == "--model" and i + 1 < len(sys.argv):
                 model = sys.argv[i + 1]

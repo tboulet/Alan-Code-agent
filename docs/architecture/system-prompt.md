@@ -100,7 +100,7 @@ You have been invoked in the following environment:
  - Shell: bash
  - OS Version: Linux 6.17.0-14-generic
  - Session started: 2026-04-15 18:42
- - Model: openrouter/google/gemini-2.5-flash
+ - Model: openrouter/anthropic/claude-haiku-5.5
 
 ```
 

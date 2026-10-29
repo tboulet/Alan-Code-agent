@@ -225,6 +225,14 @@ def main() -> None:
             ask_callback=ask_cb,
             **settings_cli,
         )
+        _exit_if_no_api_key(agent)
+        if ask_cb is None and agent._settings.get("permission_mode") != "yolo":
+            print(
+                "Note: --print without a terminal cannot ask for permission, so "
+                "tools that need approval (such as Bash) are refused. Add "
+                "--permission-mode yolo to allow them.",
+                file=sys.stderr,
+            )
         asyncio.run(_run_print_mode(agent, prompt=print_instructions))
     elif do_gui:
         # GUI mode — browser-based UI
@@ -243,6 +251,7 @@ async def _run_cli_mode(session_id, settings_cli):
         ask_callback=ui.ask_user,
         **settings_cli,
     )
+    _exit_if_no_api_key(agent)
     await run_session(agent, ui, resumed_session_id=session_id)
 
 
@@ -254,6 +263,7 @@ async def _run_gui_mode(session_id, settings_cli, cwd):
         ask_callback=None,  # Will be set to ui.ask_user below
         **settings_cli,
     )
+    _exit_if_no_api_key(agent)
     ui = GUIUI(agent, cwd)
     agent._ask_callback = ui.ask_user
     agent._llm_perspective_callback = ui.set_llm_perspective
@@ -266,6 +276,49 @@ async def _run_gui_mode(session_id, settings_cli, cwd):
         await run_session(agent, ui, resumed_session_id=session_id)
     finally:
         await ui.stop()
+
+
+# ── API key check ────────────────────────────────────────────────────────────
+
+
+def missing_api_key_message(settings: dict) -> str | None:
+    """Why the configured model cannot authenticate, or None if it can.
+
+    Without this, a missing key surfaced on the first message as a provider
+    SDK traceback.
+    """
+    if settings.get("api_key"):
+        return None
+    model = settings.get("model") or ""
+    backend = settings.get("backend")
+    if backend == "anthropic-native":
+        missing = [] if os.environ.get("ANTHROPIC_API_KEY") else ["ANTHROPIC_API_KEY"]
+    elif backend == "auto" and not settings.get("base_url"):
+        try:
+            import litellm
+            check = litellm.validate_environment(model=model)
+        except Exception:
+            return None
+        if check.get("keys_in_environment"):
+            return None
+        # A missing *_API_BASE (Ollama) has a local default; only keys block.
+        missing = [k for k in check.get("missing_keys", []) if k.endswith("_API_KEY")]
+    else:
+        return None
+    if not missing:
+        return None
+    keys = " or ".join(missing)
+    return (
+        f"No API key for model '{model}'. Set {keys} in your environment, "
+        f"pass --api-key, or choose another model with --model."
+    )
+
+
+def _exit_if_no_api_key(agent: AlanCodeAgent) -> None:
+    message = missing_api_key_message(agent._settings)
+    if message:
+        print(f"Error: {message}", file=sys.stderr)
+        sys.exit(1)
 
 
 # ── Session listing ──────────────────────────────────────────────────────────
@@ -389,7 +442,7 @@ def _first_run_setup(cwd: str) -> None:
     print("=" * 60)
     print()
     print("  Default backend and model of current project:")
-    print("    anthropic-native / claude-sonnet-4-6")
+    print("    anthropic-native / claude-haiku-5-5")
     print()
 
     # Detect API keys
@@ -426,7 +479,7 @@ def _detect_api_keys() -> list[dict]:
     if os.environ.get("ANTHROPIC_API_KEY"):
         detections.append({
             "label": "ANTHROPIC_API_KEY detected",
-            "model": "claude-sonnet-4-6",
+            "model": "claude-haiku-5-5",
             "note": "Native Anthropic backend used automatically.",
         })
 

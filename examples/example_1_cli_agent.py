@@ -4,7 +4,7 @@ import asyncio
 
 from alancode import AlanCodeAgent
 
-agent = AlanCodeAgent(backend="auto", model="openrouter/google/gemini-2.5-flash")
+agent = AlanCodeAgent(backend="auto", model="openrouter/anthropic/claude-haiku-5.5")
 
 try:
     while True:

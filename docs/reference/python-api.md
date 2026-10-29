@@ -327,7 +327,7 @@ Ctrl+C from within the callback should raise `KeyboardInterrupt` → Alan conver
 from alancode import AlanCodeAgent
 
 agent = AlanCodeAgent(
-    model="openrouter/google/gemini-2.5-flash",
+    model="openrouter/anthropic/claude-haiku-5.5",
     permission_mode="yolo",  # auto-approve for automation
 )
 

@@ -13,6 +13,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from alancode.backends import openrouter_models
 from alancode.messages.types import Usage
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,30 @@ if TYPE_CHECKING:
 # These are used by AnthropicBackend. LiteLLMBackend uses litellm's registry.
 ANTHROPIC_PRICING: dict[str, dict[str, float]] = {
     # Current generation
+    "claude-haiku-5-5": {
+        "input": 0.10,
+        "output": 0.50,
+        "cache_read": 0.01,
+        "cache_write": 0.125,
+    },
+    "claude-sonnet-5-5": {
+        "input": 2.0,
+        "output": 10.0,
+        "cache_read": 0.10,
+        "cache_write": 2.5,
+    },
+    "claude-opus-5-5": {
+        "input": 4.0,
+        "output": 20.0,
+        "cache_read": 0.20,
+        "cache_write": 5.0,
+    },
+    "claude-fable-5-1": {
+        "input": 10.0,
+        "output": 50.0,
+        "cache_read": 0.25,
+        "cache_write": 12.5,
+    },
     "claude-sonnet-4-6": {
         "input": 3.0,
         "output": 15.0,
@@ -168,15 +193,25 @@ class CostTracker:
         Resolution order:
         1. Anthropic hardcoded pricing (accurate, includes cache pricing)
         2. litellm registry (covers hundreds of models)
-        3. None (unknown model, self-hosted, etc.)
+        3. OpenRouter's catalogue, for ``openrouter/`` models litellm lacks
+        4. None (unknown model, self-hosted, etc.)
         """
         # Try Anthropic pricing first (most accurate for Anthropic models)
         cost = _anthropic_cost(usage, model)
         if cost is not None:
             return cost
 
-        # Try litellm registry
-        return _litellm_cost(usage, model)
+        cost = _litellm_cost(usage, model)
+        if cost is not None:
+            return cost
+
+        return openrouter_models.cost_usd(
+            model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cache_read_input_tokens,
+            cache_write_tokens=usage.cache_creation_input_tokens,
+        )
 
     def add_usage(
         self, usage: Usage, model: str, duration_ms: float = 0.0

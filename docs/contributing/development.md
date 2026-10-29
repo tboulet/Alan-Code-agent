@@ -147,7 +147,7 @@ Edits to `alancode/gui/server.py` or `gui_ui.py` require restarting `alancode` (
 2. Make the change. Keep commits small and focused.
 3. Run tests: `pytest -x -q`. Fix regressions.
 4. Run lint: `ruff check .`.
-5. If you changed the agent behaviour: run a real-model smoke test with `alancode --model openrouter/google/gemini-2.5-flash --permission-mode yolo` in a scratch directory.
+5. If you changed the agent behaviour: run a real-model smoke test with `alancode --model openrouter/anthropic/claude-haiku-5.5 --permission-mode yolo` in a scratch directory.
 6. If you changed prompt behaviour: use `--gui` and inspect the LLM Perspective panel to verify Alan's normalized pre-backend prompt/messages are what you expect.
 7. Push and open a PR.
 

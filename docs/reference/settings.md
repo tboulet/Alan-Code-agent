@@ -7,7 +7,7 @@ Every key in `.alan/settings.json` with its default, type, and effect. See [guid
 | Key | Type | Default | Area |
 |---|---|---|---|
 | `backend` | string | `anthropic-native` | Backend |
-| `model` | string | `claude-sonnet-4-6` | Backend |
+| `model` | string | `claude-haiku-5-5` | Backend |
 | `api_key` | string \| null | `null` (from env) | Backend — ephemeral, not persisted |
 | `base_url` | string \| null | `null` | Backend |
 | `request_timeout` | int \| `"auto"` | `"auto"` | Backend request timeout |

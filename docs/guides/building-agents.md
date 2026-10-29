@@ -93,7 +93,7 @@ Pass the explicitly declared constructor options directly:
 
 ```python
 agent = AlanCodeAgent(
-    model="openrouter/google/gemini-2.5-flash",
+    model="openrouter/anthropic/claude-haiku-5.5",
     permission_mode="yolo",
     max_iterations_per_turn=15,
     max_output_tokens=16_000,

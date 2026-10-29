@@ -49,7 +49,7 @@ from alancode.backends.base import (
     ThinkingConfig,
     ToolSchema,
 )
-from alancode.backends import cw_probe
+from alancode.backends import cw_probe, openrouter_models
 from alancode.backends.wire import log_wire_request
 
 logger = logging.getLogger(__name__)
@@ -137,6 +137,15 @@ def _exception_status_code(exc: Exception) -> int | None:
 
 # Known context windows for common models (litellm handles most, this is fallback)
 _KNOWN_CONTEXT_WINDOWS: dict[str, int] = {
+    "claude-haiku-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    "claude-opus-5": 1_000_000,
+    "claude-fable-5": 1_000_000,
+    "gpt-5.6": 1_050_000,
+    "gemini-3.5-flash": 1_048_576,
+    "gemini-3.6-flash": 1_048_576,
+    "gemini-3.7-flash": 1_048_576,
+    "gemini-3.8-flash": 1_048_576,
     "claude-sonnet-4": 200_000,
     "claude-opus-4": 200_000,
     "gpt-4o": 128_000,
@@ -215,7 +224,8 @@ class LiteLLMBackend(LLMBackend):
         Context-window resolution chain (first hit wins):
         1. Constructor override        -> cw_source "override"
         2. litellm model registry      -> "registry"
-        3. Server metadata endpoints   -> "server"   (vLLM/SGLang, Ollama)
+        3. Server metadata endpoints   -> "server"   (vLLM/SGLang, Ollama,
+                                                     OpenRouter's catalogue)
         4. Known-models table          -> "known_table"
         5. Probe cache                 -> "cache"    (a past probe's result)
         6. Conservative 32k + warning  -> "fallback" (untrusted; the agent
@@ -250,6 +260,13 @@ class LiteLLMBackend(LLMBackend):
         if ctx is None and self._api_base:
             ctx = self._query_server_context_window(m)
             source = "server" if ctx is not None else None
+
+        # Rung 3b: OpenRouter's catalogue, for models newer than the registry.
+        if ctx is None:
+            ctx = openrouter_models.context_window(m)
+            source = "server" if ctx is not None else None
+            if ctx is not None and max_out is None:
+                max_out = openrouter_models.max_output_tokens(m)
 
         # Rung 4: known-models table.
         if ctx is None:

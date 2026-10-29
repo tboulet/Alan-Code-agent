@@ -20,7 +20,7 @@ A setting set at level 1 overrides everything below. A setting absent at level 1
 ```json
 {
   "backend": "anthropic-native",
-  "model": "claude-sonnet-4-6",
+  "model": "claude-haiku-5-5",
   "permission_mode": "edit",
   "memory": "off",
   "compaction_threshold_percent": 75
@@ -85,7 +85,7 @@ Highlights:
 | Key | Default | What it does |
 |---|---|---|
 | `backend` | `anthropic-native` | `auto`, `anthropic-native`, or `scripted` |
-| `model` | `claude-sonnet-4-6` | Model identifier; non-Claude routes use LiteLLM provider prefixes |
+| `model` | `claude-haiku-5-5` | Model identifier; non-Claude routes use LiteLLM provider prefixes |
 | `request_timeout` | `"auto"` | SDK default, or 3,600 seconds for a custom endpoint |
 | `permission_mode` | `edit` | `yolo`, `edit`, `safe` |
 | `memory` | `off` | `off`, `on`, `intensive` |

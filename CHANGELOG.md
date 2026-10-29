@@ -1,5 +1,13 @@
 # Changelog
 
+- **2026-10-29 - Alan Code 1.4.0**
+  - **Default model is now `claude-haiku-5-5`** (was `claude-sonnet-4-6`): the cheapest current Claude model, $0.10 / $0.50 per million input / output tokens. Pass `--model claude-sonnet-5-5` (or any other model) for a stronger one. The native Anthropic backend now knows the context window, output limit and prices of `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` and `claude-fable-5-1`. These figures come from OpenRouter's catalogue, and the native model IDs were not checked against Anthropic's API.
+  - **A missing API key is reported at startup.** `alancode` without the key its model needs used to print the provider SDK's traceback ("Could not resolve authentication method...") on the first message. It now exits at once with one line naming the variable to set (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, ...), in CLI, GUI and `--print` modes. A custom `--base-url` and local providers such as Ollama are not checked.
+  - **`--print` without a terminal says why commands are refused.** With no terminal there is nobody to answer a permission prompt, so tools that need approval (Bash in the default `edit` mode) were refused silently and the model answered that it could not act. A note on stderr now says to add `--permission-mode yolo`.
+  - **New OpenRouter models work without configuration.** When LiteLLM's registry does not know an `openrouter/` model, Alan reads its context window, output limit and per-token prices from OpenRouter's public catalogue, fetched once per process. Before, `openrouter/google/gemini-3.8-flash` refused to start unless `--cw` was passed, and `openrouter/anthropic/claude-haiku-5.5` first spent about a minute probing the server and then reported a cost of $0. The known-models table also gains current families for direct provider routes (Claude 5.x, GPT-5.6, Gemini 3.5 to 3.8 Flash).
+  - **Examples use `openrouter/anthropic/claude-haiku-5.5`** instead of `gemini-2.5-flash`, which is no longer listed by OpenRouter. All three examples were run end to end; the auto-fix loop costs about $0.006.
+  - **README:** HTTPS clone URL, the key the examples need, an offline first run (`run_alan.py --scripted`), the `--print` mode, the hooks that exist, vision listed as a core feature, a refreshed CLI screenshot, and a "What's new" section kept to five entries.
+
 - **2026-10-21 - Alan Code 1.3.36**
   - The `deepseek` format (and `auto`) also reads DeepSeek-V4.1's DSML variant, as written by the Unsloth GGUF chat template: a space between the DSML prefix and each tag name, and `calls` instead of `tool_calls`. Its closing `calls` tag is added to the stop sequences.
 

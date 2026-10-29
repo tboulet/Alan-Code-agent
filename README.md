@@ -4,6 +4,13 @@
   <img src="assets/images/alan_mascot_pixelart_with_text.png" alt="Alan Code" width="260"/>
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.4.0-2a6cb0" alt="version 1.4.0"/>
+  <img src="https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white" alt="Python 3.11+"/>
+  <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="Apache 2.0"/>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey" alt="Linux | macOS"/>
+</p>
+
 An open-source python coding agent, inspired by Claude Code. Usable in CLI, GUI, or as a Python library to build upon.
 
 Alan Code implements many features of modern CLI agents, such as tool use, hooks, skills, context compaction and more, and adds cross-session memory, live cost tracking, and a GUI with Chat and an LLM perspective.
@@ -13,6 +20,8 @@ Works with LiteLLM-compatible model providers and local OpenAI-compatible server
 <p align="center">
   <img src="assets/images/alan_code.png" alt="Alan Code CLI" width="90%"/>
 </p>
+
+[Installation](#installation) | [Quickstart](#quickstart) | [Usage](#usage) | [Python library](#as-a-python-library) | [Features](#features) | [What's new](#whats-new)
 
 ## Highlights
 
@@ -28,7 +37,7 @@ Works with LiteLLM-compatible model providers and local OpenAI-compatible server
 Clone the repo and install in editable mode. Requires **Python 3.11+**.
 
 ```bash
-git clone git@github.com:tboulet/Alan-Code-agent.git
+git clone https://github.com/tboulet/Alan-Code-agent.git
 cd Alan-Code-agent
 pip install -e .
 ```
@@ -40,15 +49,22 @@ Linux and macOS are supported. On Windows, use WSL; native Windows is not curren
 Set your model provider's API key in the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, …).
 
 ```bash
-alancode                                              # default: claude-sonnet-4-6
+alancode                                              # default: claude-haiku-5-5
 alancode --model openrouter/google/gemini-2.5-pro     # provider/model routing
 alancode --model ollama/llama3.1                      # local Ollama
 alancode --model openai/my-model --base-url http://localhost:8000/v1   # vLLM / SGLang
 alancode --gui                                        # browser GUI
 alancode --resume                                     # last session
+alancode --print "Summarize this repo" --permission-mode yolo   # one-shot, non-interactive
 ```
 
 For LiteLLM routes, the model provider goes inside the model string (`ollama/...`, `openrouter/...`, `gemini/...`). A bare Claude name (`claude-sonnet-4-6`) automatically uses the native Anthropic SDK; everything else routes through LiteLLM. See [CLI flags](docs/reference/cli.md) for the full list.
+
+No API key yet? This runs a complete fix-the-tests loop offline, with a scripted stand-in for the model:
+
+```bash
+python examples/example_2_auto_fix_loop/run_alan.py --scripted
+```
 
 # Usage
 
@@ -100,6 +116,17 @@ Other parameters in [`docs/reference/cli.md`](docs/reference/cli.md).
 
 Parameters can also be set in `.alan/settings.json` (auto-generated on first run) or modified at runtime with the `/settings <key> <value>` command.
 
+### Supported models
+
+| Provider | `--model` example | Key |
+|---|---|---|
+| Anthropic (native) | `claude-haiku-5-5`, `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
+| OpenRouter (any model it serves) | `openrouter/anthropic/claude-haiku-5.5`, `openrouter/google/gemini-3.8-flash` | `OPENROUTER_API_KEY` |
+| OpenAI | `gpt-5.6-terra` | `OPENAI_API_KEY` |
+| Gemini | `gemini/gemini-3.8-flash` | `GEMINI_API_KEY` |
+| Ollama (local) | `ollama/llama3.1` | none |
+| vLLM / SGLang / llama.cpp (local) | `openai/<name> --base-url http://localhost:8000/v1` | none |
+
 ## GUI mode
 
 Argument `--gui` launches a local GUI interface, with a <b>Chat panel</b>.
@@ -110,13 +137,15 @@ It can also show an <b>LLM Perspective</b> panel containing the normalized conve
 
 Alan Code can also be used as a Python library using the `AlanCodeAgent` class, allowing you to build agents or orchestrator systems on top of it.
 
+The examples below use `openrouter/anthropic/claude-haiku-5.5`, so they need `OPENROUTER_API_KEY`; pass any other `model=` to use another provider.
+
 ### Example 1 : Build a minimal CLI agent:
 
 ```python
 import asyncio
 from alancode import AlanCodeAgent
 
-agent = AlanCodeAgent()
+agent = AlanCodeAgent(model="openrouter/anthropic/claude-haiku-5.5")
 
 while True:
     try:
@@ -137,14 +166,15 @@ Run your tests, feed the failures back to the agent, repeat until green. This is
 
 ```python
 import subprocess
+import sys
 from alancode import AlanCodeAgent
 
-agent = AlanCodeAgent(permission_mode="yolo")
+agent = AlanCodeAgent(model="openrouter/anthropic/claude-haiku-5.5", permission_mode="yolo")
 agent.query("Read code_bugged.py and write a fixed version to code_fixed.py.")
 
 for attempt in range(5):
     result = subprocess.run(
-        ["pytest", "-q", "test_inventory.py"], capture_output=True, text=True,
+        [sys.executable, "test_inventory.py"], capture_output=True, text=True,
     )
     if result.returncode == 0:
         print(f"All green after {attempt + 1} attempt(s).")
@@ -152,7 +182,7 @@ for attempt in range(5):
     agent.query(f"Tests still fail:\n{result.stdout}\nFix the remaining bugs.")
 ```
 
-Full example (with a buggy module and a test suite): [`examples/example_2_auto_fix_loop/run_alan.py`](examples/example_2_auto_fix_loop/run_alan.py).
+Full example (with a buggy module and a test suite): [`examples/example_2_auto_fix_loop/run_alan.py`](examples/example_2_auto_fix_loop/run_alan.py). Add `--scripted` to run it without an API key.
 
 ### Example 3 : Stream assistant text and tool calls live
 
@@ -164,7 +194,7 @@ from alancode import AlanCodeAgent
 from alancode.messages.types import AssistantMessage, TextBlock, ToolUseBlock
 
 async def main():
-    agent = AlanCodeAgent(permission_mode="yolo")
+    agent = AlanCodeAgent(model="openrouter/anthropic/claude-haiku-5.5", permission_mode="yolo")
     try:
         async for event in agent.query_events_async("List files, then summarize."):
             if not isinstance(event, AssistantMessage):
@@ -245,16 +275,16 @@ Features of modern CLI coding agents that Alan Code does **not** ship with yet. 
 | **Subagents / Task tool** | planned | Spawn isolated sub-conversations with their own context for parallel exploration or delegation. |
 | **MCP (Model Context Protocol)** | planned | Connect external tool servers (databases, APIs, IDEs) through the MCP standard. |
 | **Plan mode** | planned | Force the agent to write and get approval for a plan before touching code. |
-| **Stop / PreCompact / PostCompact hooks** | partial | Only Pre/PostToolUse hooks are implemented today. |
+| **Stop / PreCompact / PostCompact hooks** | partial | PreToolUse, PostToolUse, PostToolUseFailure, SessionStart and SessionEnd hooks exist; Stop and compaction hooks do not. |
 | **WebSearch tool** | planned | The WebFetch tool can fetch and summarize pages, but doesn't do active searching yet. |
 
 # What's new
 
+- **2026-10-29 - Alan Code 1.4.0** - Easier first run: the default model is now `claude-haiku-5-5`, the cheapest current Claude, a missing API key is reported in one clear line at startup, and new OpenRouter models work out of the box (Alan reads their context window and prices from OpenRouter's catalogue). The quickstart and examples were checked end to end.
 - **2026-10-16 - Alan Code 1.3.30** - New `inserted_example_bash_use` setting (off by default): a new session starts with one real example of a shell command run by the agent, written in the model's tool-call format. Helps weaker models get the format right from their first reply.
 - **2026-10-12 - Alan Code 1.3.24 to 1.3.28** - Better behaviour with reasoning models. When a model writes its shell command at the end of its reasoning instead of in its reply, Alan now runs it. A new `carry_reasoning_until_call` setting keeps a model's reasoning visible to it until its next tool call, so it does not redo its analysis after a reply that ended without acting.
 - **2026-10-07 - Alan Code 1.3.19** - Vision: models that can see can now look at image files through the new `ViewImage` tool. Turn it on with `--vision` or the `vision` setting.
 - **2026-09-02 - Alan Code 1.3.14** - Alan the jellyfish joins the CLI banner, the GUI top bar, and this README. The welcome banner now shows the version, working directory, context window, memory mode and backend.
-- **2026-08-19 - Alan Code 1.3.11** - Better support for local models: new tool-call formats (`bash_block`, `kimi`, `kimi_k3`, `deepseek`, `minimax`, and `auto`, which detects the format), and an optional `persist_thinking` setting that shows a model its earlier reasoning again on later turns.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
@@ -267,6 +297,22 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 - [Examples](examples/) — CLI agent, auto-fix loop, streaming
 - [LICENSE](LICENSE) — Apache 2.0
 
+
+# Contributing
+
+Issues and pull requests are welcome. Run the test suite with `pytest tests/ -q` before submitting; see [docs/contributing/development.md](docs/contributing/development.md).
+
+If you use Alan Code in research, please cite:
+
+```bibtex
+@software{boulet_alancode_2026,
+  author  = {Boulet, Timothe},
+  title   = {Alan Code: an open-source Python coding agent},
+  year    = {2026},
+  version = {1.4.0},
+  url     = {https://github.com/tboulet/Alan-Code-agent}
+}
+```
 
 # Notes
 

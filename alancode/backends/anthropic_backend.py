@@ -94,7 +94,7 @@ class AnthropicBackend(LLMBackend):
         self,
         api_key: str | None = None,
         base_url: str | None = None,
-        model: str = "claude-sonnet-4-6",
+        model: str = "claude-haiku-5-5",
         request_timeout: int | str | None = None,
         **client_kwargs: Any,
     ) -> None:

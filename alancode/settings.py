@@ -38,7 +38,7 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     # When the user sets ``model`` without an explicit ``backend``, the
     # backend is inferred from the model string (see ``infer_backend``).
     "backend": "anthropic-native",
-    "model": "claude-sonnet-4-6",
+    "model": "claude-haiku-5-5",
     "api_key": None,  # None = read from env var
     "base_url": None,  # None = use backend default. Set for local servers (e.g., http://localhost:8000/v1)
     "request_timeout": "auto",  # seconds; auto = 1h for custom endpoints, otherwise SDK default

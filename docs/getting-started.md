@@ -40,12 +40,13 @@ alancode
 You'll see:
 
 ```
-╭──────────────────────────────────────────────────╮
-│ Alan Code -- Open-source coding agent            │
-│ Session: a1b2c3d4... | Model: claude-sonnet-4-6  │
-│ Type /help for commands, Ctrl+C to interrupt     │
-│ Tip: create ALAN.md (or use /init) to give Alan project context │
-╰──────────────────────────────────────────────────╯
+Alan Code 1.4.0 -- Open-source coding agent
+Session: a1b2c3d4... | Model: claude-haiku-5-5
+Dir: ~/my-project (main)
+Context: 1.0M window, compacts at ~79%
+Memory: off | no ALAN.md, /init to add one
+Backend: anthropic-native
+/help for commands, /exit to quit, Ctrl+C interrupts a turn
 
 >
 ```

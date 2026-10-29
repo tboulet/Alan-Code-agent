@@ -24,7 +24,7 @@ class TestDefaults:
         assert SETTINGS_DEFAULTS["backend"] == "anthropic-native"
 
     def test_default_model_is_claude_sonnet(self):
-        assert SETTINGS_DEFAULTS["model"] == "claude-sonnet-4-6"
+        assert SETTINGS_DEFAULTS["model"] == "claude-haiku-5-5"
 
     def test_default_permission_mode_is_edit(self):
         assert SETTINGS_DEFAULTS["permission_mode"] == "edit"
@@ -268,7 +268,7 @@ class TestFirstRunDetection:
         with tempfile.TemporaryDirectory() as tmpdir:
             settings = load_projects_settings_and_maybe_init(tmpdir)
             assert settings["backend"] == "anthropic-native"
-            assert settings["model"] == "claude-sonnet-4-6"
+            assert settings["model"] == "claude-haiku-5-5"
             assert settings["permission_mode"] == "edit"
 
     def test_second_run_does_not_overwrite(self):
@@ -296,7 +296,7 @@ class TestAPIKeyDetection:
         try:
             os.environ["ANTHROPIC_API_KEY"] = "sk-test-key"
             detections = _detect_api_keys()
-            anthropic_found = any(d["model"] == "claude-sonnet-4-6" for d in detections)
+            anthropic_found = any(d["model"] == "claude-haiku-5-5" for d in detections)
             assert anthropic_found
         finally:
             if old:
