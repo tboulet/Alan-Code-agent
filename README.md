@@ -5,9 +5,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.4.0-2a6cb0" alt="version 1.4.0"/>
-  <img src="https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white" alt="Python 3.11+"/>
-  <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="Apache 2.0"/>
+  <a href="https://github.com/tboulet/Alan-Code-agent/actions/workflows/tests.yml"><img src="https://github.com/tboulet/Alan-Code-agent/actions/workflows/tests.yml/badge.svg" alt="tests"/></a>
+  <a href="https://github.com/tboulet/Alan-Code-agent/tags"><img src="https://img.shields.io/github/v/tag/tboulet/Alan-Code-agent?label=version&sort=semver" alt="version"/></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/python/required-version-toml?tomlFilePath=https://raw.githubusercontent.com/tboulet/Alan-Code-agent/main/pyproject.toml" alt="python"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/tboulet/Alan-Code-agent" alt="license"/></a>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey" alt="Linux | macOS"/>
 </p>
 
