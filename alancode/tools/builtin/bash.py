@@ -12,6 +12,10 @@ from alancode.tools.base import Tool, ToolResult, ToolUseContext
 # A killed shell's children inherit its stdout pipe, so reaping can block on
 # them for as long as they live. Cleanup is bounded rather than trusted.
 KILL_REAP_TIMEOUT_S = 5.0
+# Kept from one command's output, half from each end. Far above any model-facing
+# cap (compaction Layer A), which only limits the view, not what is stored.
+OUTPUT_MAX_BYTES = 8 * 1024 * 1024
+OUTPUT_READ_CHUNK_BYTES = 64 * 1024
 
 
 class BashTool(Tool):
@@ -92,7 +96,7 @@ class BashTool(Tool):
             return ToolResult(data=f"Failed to start process: {exc}", is_error=True)
 
         try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
+            output = await asyncio.wait_for(_collect_output(process), timeout=timeout_s)
         except asyncio.TimeoutError:
             await _kill_process_tree(process)
             return ToolResult(
@@ -102,7 +106,6 @@ class BashTool(Tool):
         except Exception as exc:
             return ToolResult(data=f"Error during execution: {exc}", is_error=True)
 
-        output = stdout.decode("utf-8", errors="replace") if stdout else ""
         exit_code = process.returncode
 
         # Trim trailing whitespace but keep structure
@@ -113,6 +116,30 @@ class BashTool(Tool):
         else:
             text = output + (f"\n\nExit code: {exit_code}" if output else f"Exit code: {exit_code}")
             return ToolResult(data=text, is_error=(exit_code != 0))
+
+
+async def _collect_output(process: asyncio.subprocess.Process) -> str:
+    """Drain stdout to EOF, keeping only its two ends once it passes the limit."""
+    head = bytearray()
+    tail = bytearray()
+    half = OUTPUT_MAX_BYTES // 2
+    total = 0
+    while chunk := await process.stdout.read(OUTPUT_READ_CHUNK_BYTES):
+        total += len(chunk)
+        room = half - len(head)
+        head += chunk[:room]
+        tail += chunk[room:]
+        del tail[:-half]
+    await process.wait()
+
+    text = head.decode("utf-8", errors="replace")
+    omitted = total - len(head) - len(tail)
+    if omitted:
+        text += (
+            f"\n[{omitted} bytes of output omitted here. Redirect the command's "
+            "output to a file to keep all of it.]\n"
+        )
+    return text + tail.decode("utf-8", errors="replace")
 
 
 async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:

@@ -113,7 +113,7 @@ def test_server_error_keeps_http_status():
 
 
 class OversizedLineBackend(LLMBackend):
-    """Raises aiohttp's oversized-SSE-line ValueError until asked not to stream."""
+    """Raises the oversized-line ValueError until asked not to stream."""
 
     def __init__(self, *, partial_content: bool = False):
         self.calls: list[bool] = []

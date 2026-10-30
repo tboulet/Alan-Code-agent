@@ -1,5 +1,9 @@
 # Changelog
 
+- **2026-10-30 - Alan Code 1.4.2**
+  - One Bash command's output is now kept up to 8 MiB: its first and last 4 MiB, with a note in the middle saying how many bytes were dropped and to redirect to a file to keep them all. It was unbounded in memory and in the session transcript; the model-facing cap only shortens what the model sees. A MiMo-V2.6-Flash run printed 147 MB on one line, and the event carrying it exceeded regact's 64 MiB line reader, crashing the turn.
+  - Corrected a wrong diagnosis: `Separator is not found, and chunk exceed the limit` was attributed to aiohttp and long SSE lines, but the text comes from asyncio's `StreamReader`, and a 300 KB SSE line streams fine through LiteLLM. The unstreamed retry from that diagnosis stays, as it is harmless.
+
 - **2026-10-29 - Alan Code 1.4.1**
   - A model that LiteLLM lists but prices at $0 now gets its cost from OpenRouter's catalogue. Newer LiteLLM releases (seen with 1.106) list `openrouter/google/gemini-3.8-flash` at $0 per token, so the 1.4.0 fallback, which only ran when LiteLLM did not know the model, never ran for it.
   - The test suite runs on GitHub Actions (Python 3.11 and 3.12), and the README badges now show live state: tests, the latest version tag, the Python requirement from `pyproject.toml`, and the licence.
