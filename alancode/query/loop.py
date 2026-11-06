@@ -1178,11 +1178,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                 return
             state.max_output_tokens_recovery_count += 1
 
-            state.messages = (
-                list(messages_for_query)
-                + [assistant_msg]
-                + [create_user_message(TRUNCATION_NOTICE, hide_in_ui=True)]
-            )
+            truncation_notice = create_user_message(TRUNCATION_NOTICE, hide_in_ui=True)
+            yield truncation_notice
+            state.messages = list(messages_for_query) + [assistant_msg, truncation_notice]
             state.transition = "max_output_tokens_recovery"
             continue
 
