@@ -20,6 +20,7 @@ from alancode.backends.base import (
     ToolSchema,
 )
 from alancode.messages.types import AssistantMessage, UserMessage
+from tests.summary_request import is_summary_request
 
 
 class MalformedThenValidBackend(LLMBackend):
@@ -105,7 +106,7 @@ class OpaqueServerFailureBackend(LLMBackend):
         stop_sequences: list[str] | None = None,
         **kwargs: Any,
     ) -> AsyncGenerator[BackendStreamEvent, None]:
-        if system and "summariz" in system[0].lower():
+        if is_summary_request(messages):
             self.summary_calls += 1
             yield StreamTextDelta(text="<summary>Keep the current task.</summary>")
             yield StreamMessageStop()
@@ -132,7 +133,7 @@ class PartialServerFailureBackend(OpaqueServerFailureBackend):
         tools: list[ToolSchema],
         **kwargs: Any,
     ) -> AsyncGenerator[BackendStreamEvent, None]:
-        if system and "summariz" in system[0].lower():
+        if is_summary_request(messages):
             self.summary_calls += 1
             yield StreamTextDelta(text="<summary>must not run</summary>")
             return

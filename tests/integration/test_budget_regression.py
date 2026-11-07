@@ -39,6 +39,7 @@ from alancode.backends.scripted_backend import (
     tool_call,
 )
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
+from tests.summary_request import is_summary_request
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ class AuditedBackend(LLMBackend):
         **kwargs: Any,
     ) -> AsyncGenerator[BackendStreamEvent, None]:
         est = self._estimate(messages, system)
-        is_summarizer = bool(system) and "summariz" in system[0].lower()
+        is_summarizer = is_summary_request(messages)
         kind = "summarizer" if is_summarizer else "main"
         self.calls.append(
             {"est": est, "max_tokens": max_tokens, "kind": kind,

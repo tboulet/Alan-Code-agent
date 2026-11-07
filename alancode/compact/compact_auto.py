@@ -1,6 +1,6 @@
 """Auto-compaction — summarize conversation when context grows too large.
 
-Layer C of the compaction hierarchy. Forks a tool-less LLM call that
+Layer C of the compaction hierarchy. Forks an LLM call that
 produces an ``<analysis>`` + ``<summary>`` response; the summary
 replaces the pre-boundary history.
 """
@@ -22,6 +22,7 @@ from alancode.messages.types import (
     usage_from_stream,
 )
 from alancode.backends.base import (
+    ToolSchema,
     StreamError,
     StreamMessageDelta,
     StreamMessageStart,
@@ -43,6 +44,7 @@ from alancode.budget import DEFAULT_SUMMARY_MAX_TOKENS, MIN_SUMMARY_OUTPUT_TOKEN
 from alancode.budget import clamp_output_budget
 from alancode.compact.compact_truncate import compaction_truncate_tool_results
 from alancode.api.errors import is_prompt_too_long
+from alancode.tools.registry import tools_to_schemas
 from alancode.tools.text_tool_parser import get_format
 from alancode.utils.tokens import (
     estimate_message_tokens,
@@ -114,10 +116,15 @@ async def compaction_auto(
     budget: Any = None,  # ContextBudget | None - sizes the summarizer call
     cost_tracker: Any = None,  # CostTracker | None - records the summarizer's own calls
     current_tokens: int | None = None,  # the loop's measure of the call being compacted
+    system_prompt: list[str] | None = None,  # the loop's, so the request extends its last one
+    tools: list | None = None,
+    system_static_boundary: int = 0,
 ) -> CompactionResult | None:
     """Compact the conversation by summarizing it via LLM (Layer C).
 
-    1. Build compact system prompt (replacement, not the main prompt)
+    1. Reuse the loop's system prompt and tools when given, so a server with
+       a prompt cache reads only the summary request; otherwise a
+       replacement system prompt and no tools
     2. Build compact user message with 9-section template
     3. Normalize messages for API
     4. PTL retry loop: call backend, retry with truncation if prompt too long
@@ -155,8 +162,20 @@ async def compaction_auto(
 
     truncated_messages = _without_format_feedback(truncated_messages, settings or {})
 
-    # 2. Build compact system prompt (REPLACEMENT, not appended)
-    compact_system = ["You are a helpful AI assistant tasked with summarizing conversations."]
+    # 2. System prompt and tools
+    s = settings or {}
+    shares_prefix = system_prompt is not None
+    if shares_prefix:
+        compact_system = system_prompt
+        tool_schemas = (
+            [] if s.get("tool_call_format")
+            else [ToolSchema(**schema) for schema in tools_to_schemas(tools or [])]
+        )
+    else:
+        compact_system = ["You are a helpful AI assistant tasked with summarizing conversations."]
+        tool_schemas = []
+
+    prompt_overhead = rough_token_count("\n".join(compact_system) + str(tool_schemas))
 
     # 3. Build compact user message
     compact_prompt = get_compact_prompt(custom_instructions)
@@ -164,12 +183,12 @@ async def compaction_auto(
     # 4. Normalize messages for API.  When persist_thinking is enabled, the
     # summarizer must see the same reasoning-bearing history as the main loop;
     # otherwise compaction silently breaks the promised cross-turn continuity.
-    s = settings or {}
     include_thinking = bool(s.get("persist_thinking"))
     api_messages = normalize_messages_for_api(truncated_messages)
     api_messages_dicts = messages_to_openai_dicts(
         api_messages, include_thinking=include_thinking,
-        include_images=False,
+        text_dialect=bool(s.get("tool_call_format")),
+        include_images=shares_prefix,
     )
 
     # Add compact prompt as the final user message
@@ -198,7 +217,7 @@ async def compaction_auto(
     for attempt in range(max_ptl_retries + 1):
         # Size the summarizer's output so input + output + margin fits the window.
         if budget is not None:
-            est_input = _estimate_api_dict_tokens(api_messages_dicts)
+            est_input = _estimate_api_dict_tokens(api_messages_dicts) + prompt_overhead
             call_max_tokens = clamp_output_budget(
                 budget, est_input, budget.max_tokens_for_summary,
             )
@@ -218,8 +237,9 @@ async def compaction_auto(
             async for event in backend.stream(
                 api_messages_dicts,
                 compact_system,
-                tools=[],
+                tools=tool_schemas,
                 max_tokens=call_max_tokens,
+                system_static_boundary=system_static_boundary,
                 **kwargs,
             ):
                 if isinstance(event, StreamTextDelta):

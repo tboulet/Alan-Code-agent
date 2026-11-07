@@ -201,6 +201,12 @@ def _first_call_is_written(
     return call_format.first_call_is_complete(text)
 
 
+def _effective_tools(params: "QueryParams") -> list[Tool]:
+    if params.context.active_skill_filter:
+        return filter_tools_for_skill(params.tools, params.context.active_skill_filter)
+    return params.tools
+
+
 def _drain_message_queue(msg_queue) -> list[UserMessage]:
     """Drain queued messages from inject_message() into user messages.
 
@@ -494,6 +500,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         budget=budget,
                         cost_tracker=params.cost_tracker,
                         current_tokens=current_tokens,
+                        system_prompt=params.system_prompt,
+                        tools=_effective_tools(params),
+                        system_static_boundary=params.system_static_boundary,
                     )
                     if result:
                         # Yield compaction artefacts so the caller can display/store them
@@ -610,11 +619,7 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
 
         # Model-invoked skills may restrict the tool set for the rest of
         # the turn (see ToolUseContext.active_skill_filter).
-        effective_tools = params.tools
-        if params.context.active_skill_filter:
-            effective_tools = filter_tools_for_skill(
-                params.tools, params.context.active_skill_filter
-            )
+        effective_tools = _effective_tools(params)
 
         # Don't pass tool schemas to the backend when using text-based
         # tool calling — tools are communicated via the system prompt instead.
@@ -804,6 +809,9 @@ async def query_loop(params: QueryParams) -> AsyncGenerator[QueryYield, None]:
                         budget=budget,
                         cost_tracker=params.cost_tracker,
                         current_tokens=current_tokens,
+                        system_prompt=params.system_prompt,
+                        tools=_effective_tools(params),
+                        system_static_boundary=params.system_static_boundary,
                     )
                     if emergency_result:
                         yield emergency_result.boundary_message

@@ -19,6 +19,7 @@ from .harness import (
     user_notices,
     word_soup,
 )
+from tests.summary_request import is_summary_request
 
 
 class TestF01EmergencyCompactionDead:
@@ -87,7 +88,7 @@ class TestF07PtlMatcherMissesBackendPhrasings:
 
         class VllmPtlOnce(AuditedBackend):
             async def stream(self, messages, system, tools, **kw: Any):
-                is_summ = bool(system) and "summariz" in system[0].lower()
+                is_summ = is_summary_request(messages)
                 if is_summ and self.summarizer_calls == 0:
                     self.summarizer_calls += 1
                     self.journal.append({

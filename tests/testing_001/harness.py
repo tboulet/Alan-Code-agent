@@ -18,6 +18,7 @@ from alancode.backends.base import (
 from alancode.backends.scripted_backend import ScriptedBackend
 from alancode.messages.types import AssistantMessage, UserMessage
 from alancode.tools.base import Tool, ToolResult, ToolUseContext
+from tests.summary_request import is_summary_request
 
 
 SUMMARY_TEXT = "<summary>SUMMARY-MARKER: compact prior work.</summary>"
@@ -97,7 +98,7 @@ class AuditedBackend(LLMBackend):
         **kwargs: Any,
     ) -> AsyncGenerator[BackendStreamEvent, None]:
         estimate = self._estimate(messages, system)
-        is_summarizer = bool(system) and "summariz" in system[0].lower()
+        is_summarizer = is_summary_request(messages)
         illegal = max_tokens is not None and estimate + max_tokens > self.cw
         entry = {
             "kind": "summarizer" if is_summarizer else "main",

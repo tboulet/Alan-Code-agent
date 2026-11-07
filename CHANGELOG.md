@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-11-07 - Alan Code 1.4.4**
+  - Compaction no longer makes a local server re-read the whole conversation. The summary request had its own system prompt and no tools, so it shared no prefix with the conversation the server had cached. It now reuses the main system prompt, tools and message rendering and adds the summary instruction as the last message, so a server with a prompt cache (llama.cpp, vLLM, SGLang, Anthropic) reads only that instruction. Measured by Magos on MiMo with llama.cpp on CPU: each compaction re-read 186-190k tokens, about 65 minutes. `/compact` typed in the CLI still uses the separate summarizer prompt. With a text tool-call format, the parser's format feedback is still replaced in the summary request, which breaks the shared prefix at the first feedback message.
+
 - **2026-11-06 - Alan Code 1.4.3**
   - A reply cut off by the output token limit, and the reminder that follows it, are now kept in the session as the model saw them. The reminder was shown within the turn but never recorded, so the next turn rebuilt the conversation without it and merged the cut reply with the one after: the request no longer started with the previous one, and a local server had to reprocess everything after the first cut reply. In a MiMo run on llama.cpp, the first new turn after 137 calls rewrote the history about 27k tokens in; llama.cpp reprocessed 145k tokens (38 min on CPU) and then answered with a broken tool call.
 

@@ -14,6 +14,7 @@ from alancode.backends.base import (
     ToolSchema,
 )
 from alancode.backends.scripted_backend import ScriptedBackend
+from tests.summary_request import is_summary_request
 
 
 class AuditedBackend(LLMBackend):
@@ -54,7 +55,7 @@ class AuditedBackend(LLMBackend):
         assert max_tokens is not None
         assert input_tokens + max_tokens <= self.cw, entry
 
-        if system and "summariz" in system[0].lower():
+        if is_summary_request(messages):
             yield StreamTextDelta(text="<summary>summary</summary>")
             yield StreamMessageStop()
             return
