@@ -1,5 +1,8 @@
 # Changelog
 
+- **2026-11-07 - Alan Code 1.4.5**
+  - With `carry_reasoning_until_call`, a reply cut off by the output token limit now carries its whole reasoning to the next call, instead of its last 10,000 characters (the tool-result cap, which was reused as the carry length). The output limit already bounds it. Other replies without a tool call are still cut to the cap. Measured by Magos on MiMo-V2.6-Flash-RL with a 16k limit: about 80 % of each cut reply was dropped, the next reply was a median 5.4k tokens against 1.2k overall, and samples restarted the plan from scratch. Decided by Timothe.
+
 - **2026-11-07 - Alan Code 1.4.4**
   - Compaction no longer makes a local server re-read the whole conversation. The summary request had its own system prompt and no tools, so it shared no prefix with the conversation the server had cached. It now reuses the main system prompt, tools and message rendering and adds the summary instruction as the last message, so a server with a prompt cache (llama.cpp, vLLM, SGLang, Anthropic) reads only that instruction. Measured by Magos on MiMo with llama.cpp on CPU: each compaction re-read 186-190k tokens, about 65 minutes. `/compact` typed in the CLI still uses the separate summarizer prompt. With a text tool-call format, the parser's format feedback is still replaced in the summary request, which breaks the shared prefix at the first feedback message.
 

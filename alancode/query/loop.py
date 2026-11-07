@@ -129,8 +129,10 @@ def _carry_pending_reasoning(
     messages: list[Message], max_chars: int,
 ) -> list[Message]:
     """Show the model the reasoning of every reply made since its last tool
-    call, each cut to its last ``max_chars``. Recomputed on each call, so a
-    later tool call takes it out again; the stored messages are not touched."""
+    call, each cut to its last ``max_chars`` unless the reply was cut at the
+    output limit (the model is mid-plan, and the output limit already bounds
+    it). Recomputed on each call, so a later tool call takes it out again;
+    the stored messages are not touched."""
     last_call = max(
         (
             i for i, m in enumerate(messages)
@@ -143,13 +145,14 @@ def _carry_pending_reasoning(
         if not isinstance(msg, AssistantMessage):
             view.append(msg)
             continue
+        length_cut = msg.stop_reason == "max_tokens" or msg.api_error == "max_output_tokens"
         content: list[AssistantContentBlock] = []
         for block in msg.content:
             if isinstance(block, CarriedReasoningBlock):
                 continue
             if i > last_call and isinstance(block, ThinkingBlock) and block.thinking:
                 kept = block.thinking
-                if len(kept) > max_chars:
+                if len(kept) > max_chars and not length_cut:
                     kept = CARRIED_REASONING_CUT_MARKER + kept[-max_chars:]
                 content.append(CarriedReasoningBlock(text=f"<think>{kept}</think>"))
             content.append(block)

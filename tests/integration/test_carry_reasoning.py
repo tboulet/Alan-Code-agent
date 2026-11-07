@@ -82,6 +82,24 @@ async def test_reasoning_cut_at_the_cap_is_shown_until_the_next_call(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_reply_cut_at_the_cap_is_carried_whole(tmp_path):
+    """MiMo-V2.6-Flash-RL got back the last 10,000 chars of a 16k-token
+    plan and often restarted it from scratch."""
+    plan = "".join(f"step {i}. " for i in range(4_000))
+    backend = ScriptedBackend([
+        (plan, "", "max_tokens"),
+        (plan, "", "end_turn"),
+        ("", "Done.", "end_turn"),
+    ])
+    await _run(tmp_path, backend, **CARRY)
+
+    assert len(plan) > 20_000
+    assert f"<think>{plan}</think>" in backend.seen[1]
+    assert backend.seen[2].count("step 0. ") == 1
+    assert "[earlier reasoning omitted]" in backend.seen[2]
+
+
+@pytest.mark.asyncio
 async def test_reasoning_of_an_empty_reply_is_shown_to_its_retry(tmp_path):
     backend = ScriptedBackend([
         ("The door is locked.", "", "end_turn"),
@@ -155,7 +173,7 @@ async def test_a_block_in_carried_reasoning_never_runs(tmp_path):
 @pytest.mark.asyncio
 async def test_long_reasoning_is_cut_to_its_end(tmp_path):
     backend = ScriptedBackend([
-        ("START " + "x" * 50_000 + " END", "", "max_tokens"),
+        ("START " + "x" * 50_000 + " END", "", "end_turn"),
         ("", "Done.", "end_turn"),
     ])
     await _run(tmp_path, backend, **CARRY)
